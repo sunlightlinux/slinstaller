@@ -1,0 +1,8 @@
+# Build binaries
+/slinstaller
+/slinstaller-static
+
+# Go
+*.test
+*.out
+/dist/
