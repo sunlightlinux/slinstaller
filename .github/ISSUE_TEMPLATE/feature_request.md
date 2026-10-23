@@ -26,7 +26,7 @@ model?
 
 ## Alternatives Considered
 
-Any alternative solutions, or how void-installer / clr-installer handle it.
+Any alternative solutions, or how clr-installer handles it.
 
 ## Additional Context
 

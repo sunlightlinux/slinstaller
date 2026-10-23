@@ -2,11 +2,11 @@
 
 The system installer for **Sunlight Linux**, a UEFI-only Linux distribution.
 
-> **Status: early bootstrap.** This repository is being seeded. The first
-> iteration is a fork of **void-installer** — the installer shipped in
-> [void-mklive](https://github.com/void-linux/void-mklive) — as a beta stopgap;
-> the long-term target is a ground-up rewrite in **Go**, modeled on
-> [clr-installer](https://github.com/clearlinux/clr-installer).
+> **Status: early bootstrap.** This repository is being seeded. slinstaller is
+> a new installer, written in **Go** as a port and adaptation of
+> [clr-installer](https://github.com/clearlinux/clr-installer): its core
+> subsystems are ported from clr-installer and reduced to what Sunlight Linux
+> installs, while the front-ends and the install descriptor are its own.
 
 ## What it does
 
@@ -22,17 +22,15 @@ system, installs the bootloader, and configures the first boot — including
 
 ## Building / Running
 
-Implementation is in progress; the commands below describe the intended flow.
+Implementation is in progress; the parts that exist build and run today.
 
-- **Go target:**
-  ```bash
-  go build ./...      # produces the slinstaller binary
-  go test ./...
-  ```
-- **Stopgap (void-installer fork):** shell-based; runs as root from the live
-  medium. The live medium / ISO is built with
-  [void-mklive](https://github.com/void-linux/void-mklive), which is also where
-  upstream `void-installer` lives.
+```bash
+go build ./...                      # produces the slinstaller binary
+go test ./...
+go run ./cmd/slinstaller demo/uefi-basic.yaml   # print a partitioning plan (dry run)
+```
+
+Without `--apply`, slinstaller only prints the plan and touches nothing.
 
 > ⚠️ The installer performs **destructive, irreversible** operations
 > (partitioning, formatting, bootloader install). Always exercise changes in a

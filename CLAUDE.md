@@ -8,12 +8,11 @@ installer for Sunlight Linux (a UEFI-only distribution).
 > on LLM coding pitfalls. Adapted for slinstaller: Go idioms, installer
 > correctness, and the fact that an installer **destroys data by design**.
 
-> **Status:** the first iteration is a fork of **void-installer** (the
-> installer shipped in [void-mklive](https://github.com/void-linux/void-mklive))
-> as a beta stopgap; the long-term target is a Go rewrite modeled on
-> [clr-installer](https://github.com/clearlinux/clr-installer). Guidelines below
-> lean toward the Go target; honor the shell idioms of the stopgap while it
-> exists.
+> **Status:** a new installer, written in **Go** as a port and adaptation of
+> [clr-installer](https://github.com/clearlinux/clr-installer). The core
+> subsystems are ported from clr-installer package by package and reduced to
+> what Sunlight Linux installs; the front-ends and the install descriptor are
+> slinstaller's own.
 
 **Tradeoff:** These guidelines bias toward caution over speed. An installer
 runs as root and performs **irreversible** operations (partitioning, `mkfs`,
@@ -40,9 +39,9 @@ Before implementing:
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
 - **Check upstream parity first.** For anything that looks like a feature
-  request, check how the references already do it: `void-installer` (current
-  fork base) for behavior, `clr-installer` (Go) for structure. Match their
-  semantics unless there's a documented reason to diverge.
+  request, check how `clr-installer` already does it — it is the source the
+  core is ported from. Match its semantics unless there's a documented reason
+  to diverge.
 
 ## 2. Simplicity First
 
@@ -75,8 +74,7 @@ If yes, simplify.
 When editing existing code:
 - Don't "improve" adjacent code, comments, or formatting.
 - Don't refactor things that aren't broken.
-- Match existing style (`gofmt` + `go vet` for Go; void-installer's shell style
-  for the stopgap).
+- Match existing style (`gofmt` + `go vet`).
 - Don't rename identifiers in passing. Renames are their own commit.
 
 **Installer-specific — the safety rule that overrides convenience:**
@@ -127,8 +125,7 @@ Strong success criteria let you loop independently. Weak criteria
 - The Sunlight Linux system installer. Partitions the disk, installs the base
   system, sets up the bootloader, and configures first boot (including slinit
   as PID 1).
-- **Stopgap:** void-installer fork (shell). **Target:** Go rewrite modeled on
-  clr-installer.
+- A new installer, written in Go as a port and adaptation of clr-installer.
 
 ### Invariants
 - **UEFI-only.** GPT + an EFI System Partition; boot entry via `efibootmgr`.
@@ -140,14 +137,12 @@ Strong success criteria let you loop independently. Weak criteria
   tooling, inherited from the Void lineage).
 
 ### Reference sources
-- **void-mklive** (home of `void-installer`):
-  <https://github.com/void-linux/void-mklive> — current fork base; check it
-  first for installer *behavior*. It also builds the live medium / ISO the
-  installer ships on.
-- **clr-installer** (Go): <https://github.com/clearlinux/clr-installer> — model
-  for the Go *structure*.
+- **clr-installer** (Go): <https://github.com/clearlinux/clr-installer> — the
+  source the core is ported from; check it first for both *behavior* and
+  *structure*, and match its semantics unless there is a reason to diverge.
 - **slinit**: <https://github.com/sunlightlinux/slinit> — the init system the
-  installer configures on the target.
+  installer configures on the target, and the repository whose layout
+  slinstaller follows.
 
 ### Commit style
 - **Bundle, don't over-split.** One commit per session of work. Commit

@@ -2,12 +2,11 @@
 
 Thank you for your interest in contributing to slinstaller, the Sunlight Linux system installer!
 
-> **Status: early bootstrap.** The first iteration is a fork of
-> **void-installer** — the installer shipped in
-> [void-mklive](https://github.com/void-linux/void-mklive) — as a beta stopgap;
-> the long-term target is a ground-up rewrite in **Go**, modeled on
-> [clr-installer](https://github.com/clearlinux/clr-installer). Match whichever
-> codebase the change you are making touches.
+> **Status: early bootstrap.** slinstaller is a new installer, written in
+> **Go** as a port and adaptation of
+> [clr-installer](https://github.com/clearlinux/clr-installer). When a change
+> has a counterpart there, match clr-installer's semantics unless there is a
+> documented reason to diverge.
 
 ## Reporting Issues
 
@@ -32,8 +31,7 @@ Thank you for your interest in contributing to slinstaller, the Sunlight Linux s
 
 ## Code Style
 
-- **Go target:** standard Go conventions (`gofmt`, `go vet`); keep changes focused; add tests for new logic.
-- **Stopgap (void-installer fork):** match void-installer's shell style; keep POSIX `sh` where it already is.
+- Standard Go conventions (`gofmt`, `go vet`); keep changes focused; add tests for new logic.
 
 ## License
 
