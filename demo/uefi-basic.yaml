@@ -1,51 +1,41 @@
-# A minimal, valid UEFI descriptor: an EFI System Partition, swap, and a
-# root filesystem that takes the rest of the disk. Print its plan with:
+#clear-linux-config
+# A minimal UEFI install in clr-installer's config format, which
+# slinstaller reads directly. Print its plan with:
 #
 #     slinstaller demo/uefi-basic.yaml
 #
-# Nothing here runs until you pass --apply, and even then slinstaller
-# makes you retype the disk path before it touches it.
+# Nothing runs until you pass --apply, and even then slinstaller makes
+# you retype the disk path first.
 
-version: 1
-
-# The whole device, not a partition. Everything on it is destroyed.
-targetDisk: /dev/sda
-
-# wipe must be true to declare a layout: repartitioning is destructive,
-# so the authorisation lives in the document, not only in a prompt.
-wipe: true
-
-partitions:
-  # The ESP. vfat mounted at /boot makes slinstaller treat it as the
-  # EFI System Partition and give it the right GPT type.
-  - mountpoint: /boot
+targetMedia:
+- name: sda
+  type: disk
+  children:
+  # The ESP. vfat at /boot marks it the EFI System Partition.
+  - name: sda1
+    type: part
+    fstype: vfat
+    mountpoint: /boot
     size: 512M
-    filesystem: vfat
-    label: EFI
+  # Swap, created but not mounted.
+  - name: sda2
+    type: part
+    fstype: swap
+    size: 2G
+  # Root.
+  - name: sda3
+    type: part
+    fstype: ext4
+    mountpoint: /
+    size: 20G
 
-  # Swap has no mountpoint; it is created but not mounted.
-  - size: 2G
-    filesystem: swap
-
-  # Root takes whatever space remains. Exactly one partition may say
-  # "rest", and it must be the last one.
-  - mountpoint: /
-    size: rest
-    filesystem: ext4
-    label: root
-
+keyboard: us
+language: en_US.UTF-8
 hostname: sunlight
 timezone: UTC
-locale: en_US.UTF-8
-keymap: us
 
-# A crypt(3) hash, never a cleartext password. Generate one with, e.g.,
-# `openssl passwd -6`. The value below is a throwaway example.
-rootPasswordHash: "$6$exampleexample$0000000000000000000000000000000000000000000000000000000000000000000000000000000000"
-
-# rootfs copies the live image and needs no network. Use "network" with
-# a mirror to fetch packages instead.
-source: rootfs
-
-bootloader:
-  target: /dev/sda
+# Clear Linux specifics a clr-installer config carries. slinstaller loads
+# them without error; they do not yet drive a Sunlight install.
+bundles: [os-core]
+telemetry: false
+kernel: kernel-native

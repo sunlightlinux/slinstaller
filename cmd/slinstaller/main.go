@@ -1,10 +1,10 @@
-// slinstaller installs Sunlight Linux onto a disk from a descriptor.
+// slinstaller installs Sunlight Linux onto a disk from a config file.
 //
-// This is the file front-end: it reads a descriptor from a path,
-// validates it, and either prints the partitioning plan (the default,
-// which touches nothing) or, with --apply, carries it out. It is the
-// thin edge of the installer — it produces a descriptor and hands it to
-// the core, and does no installation work of its own.
+// This is the file front-end: it reads a config in clr-installer's
+// format, validates it, and either prints the partitioning plan (the
+// default, which touches nothing) or, with --apply, carries it out. It
+// produces a config and hands it to the core, and does no installation
+// work of its own.
 package main
 
 import (
@@ -14,9 +14,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sunlightlinux/slinstaller/pkg/descriptor"
+	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
-	"gopkg.in/yaml.v3"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
@@ -39,9 +38,9 @@ func run(args []string) error {
 		"carry out the plan (destructive); without it, the plan is only printed")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] <descriptor.yaml>\n\n")
-		fmt.Fprintf(os.Stderr, "Prints the partitioning plan for the descriptor. With --apply,\n")
-		fmt.Fprintf(os.Stderr, "partitions and formats the target disk, which destroys its contents.\n\n")
+		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] <config.yaml>\n\n")
+		fmt.Fprintf(os.Stderr, "Reads a clr-installer-format config and prints its partitioning plan.\n")
+		fmt.Fprintf(os.Stderr, "With --apply, partitions and formats the target disk, destroying its contents.\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -56,26 +55,21 @@ func run(args []string) error {
 	rest := fs.Args()
 	if len(rest) != 1 {
 		fs.Usage()
-		return fmt.Errorf("expected exactly one descriptor file")
+		return fmt.Errorf("expected exactly one config file")
 	}
 
-	data, err := os.ReadFile(rest[0])
+	cfg, err := config.Load(rest[0])
 	if err != nil {
 		return err
 	}
 
-	var d descriptor.Descriptor
-	if err := yaml.Unmarshal(data, &d); err != nil {
-		return fmt.Errorf("parsing %s: %w", rest[0], err)
-	}
-
 	// Validate before anything else: this is the last point at which
-	// nothing has been touched, and it reports every problem at once.
-	if err := d.Validate(); err != nil {
+	// nothing has been touched.
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 
-	plan, err := storage.BuildPlan(&d)
+	plan, err := cfg.Plan()
 	if err != nil {
 		return err
 	}
