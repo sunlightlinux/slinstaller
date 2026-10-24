@@ -47,6 +47,9 @@ for what will and will not be allowed to change once releases begin.
   and prints the partitioning plan. With `--apply` it runs the install
   through the controller, gated on running as root and on the operator
   retyping the target disk path; `--through` and `--root` steer a staged
-  VM run.
+  VM run, and `--repo`/`--keys`/`--arch`/`--packages` set the base-system
+  install. With no repository given it defaults to the config's
+  `swupdMirror`, then to Void's official repo — a stopgap until Sunlight
+  has its own.
 - `demo/uefi-basic.yaml` — a minimal UEFI install in clr-installer's
   config format.

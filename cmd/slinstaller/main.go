@@ -22,6 +22,17 @@ import (
 // version is overridden at build time with -ldflags "-X main.version=...".
 var version = "0.0.0-dev"
 
+// Base-system defaults. Sunlight has no package repository of its own
+// yet, so until it does slinstaller installs from Void's official repo
+// with the live medium's keys — swap these for sunlightlinux's when the
+// repo exists. base-system is what void-installer lays down (it still
+// pulls runit; slinit replaces it once it is in a repo we control).
+const (
+	defaultRepo     = "https://repo-default.voidlinux.org/current"
+	defaultKeysDir  = "/var/db/xbps/keys"
+	defaultPackages = "base-system"
+)
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "slinstaller:", err)
@@ -35,13 +46,22 @@ func run(args []string) error {
 		apply       bool
 		through     string
 		root        string
+		repo        string
+		keys        string
+		arch        string
+		pkgs        string
 		showVersion bool
 	)
 	fs.BoolVar(&apply, "apply", false,
 		"carry out the plan (destructive); without it, the plan is only printed")
 	fs.StringVar(&through, "through", "",
-		"with --apply, run only up to this install stage (partition, mount, meta-fs) — for VM testing")
+		"with --apply, run only up to this install stage (partition, mount, meta-fs, base-install, fstab) — for VM testing")
 	fs.StringVar(&root, "root", "/mnt", "with --apply, the target mount tree")
+	fs.StringVar(&repo, "repo", "",
+		"xbps repository for the base system (default: the config's swupdMirror, else Void's official repo)")
+	fs.StringVar(&keys, "keys", defaultKeysDir, "directory of xbps signing keys to seed into the target")
+	fs.StringVar(&arch, "arch", "", "XBPS_TARGET_ARCH for the base system (default: host architecture)")
+	fs.StringVar(&pkgs, "packages", defaultPackages, "comma-separated base packages to install")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] <config.yaml>\n\n")
@@ -95,11 +115,36 @@ func run(args []string) error {
 		return nil
 	}
 
+	// Resolve the base-system install: an explicit --repo wins, then the
+	// config's swupdMirror, then Void's default repo.
+	if repo == "" {
+		if cfg.SwupdMirror != "" {
+			repo = cfg.SwupdMirror
+		} else {
+			repo = defaultRepo
+		}
+	}
+	var packages []string
+	for _, p := range strings.Split(pkgs, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			packages = append(packages, p)
+		}
+	}
+
+	opts := controller.Options{
+		Root:     root,
+		Through:  through,
+		Repo:     repo,
+		KeysDir:  keys,
+		Arch:     arch,
+		Packages: packages,
+	}
+
 	// With no stage limit the controller refuses — a full install is not
 	// possible yet — so let it say so without a root check or a prompt,
 	// since nothing will be touched.
 	if through == "" {
-		return controller.Install(cfg, controller.Options{Root: root})
+		return controller.Install(cfg, opts)
 	}
 
 	if os.Geteuid() != 0 {
@@ -108,7 +153,7 @@ func run(args []string) error {
 	if !confirm(plan.Disk) {
 		return fmt.Errorf("aborted")
 	}
-	return controller.Install(cfg, controller.Options{Root: root, Through: through})
+	return controller.Install(cfg, opts)
 }
 
 // confirm requires the operator to retype the target disk. A yes/no
