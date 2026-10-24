@@ -158,7 +158,9 @@ COMMON=(
 
 if [ "${INSTALLED}" -eq 1 ]; then
     echo "Booting the installed target disk (exit: ${EXIT_HINT})"
-    exec qemu-system-x86_64 "${COMMON[@]}" -nic none
+    # Give the installed system a NIC too (it had none), so dhcpcd has
+    # something to configure. e1000 is the most broadly supported model.
+    exec qemu-system-x86_64 "${COMMON[@]}" -nic "user,model=e1000"
 fi
 
 if [ ! -f "${ISO}" ]; then
@@ -176,5 +178,4 @@ exec qemu-system-x86_64 "${COMMON[@]}" \
     -cdrom "${ISO}" \
     -boot d \
     -virtfs "local,path=${OUTPUT_DIR},mount_tag=slshare,security_model=none" \
-    -nic "user,model=virtio-net-pci" \
-    -nic "user,model=e1000"
+    -nic "user,model=virtio-net-pci"
