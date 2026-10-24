@@ -20,6 +20,7 @@ import (
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
+	"github.com/sunlightlinux/slinstaller/pkg/xbps"
 )
 
 // Options controls an install run.
@@ -27,9 +28,15 @@ type Options struct {
 	// Root is the target mount tree (e.g. /mnt). Defaults to /mnt.
 	Root string
 
-	// Runner runs the partitioning commands. Defaults to
+	// Runner runs the partitioning and package commands. Defaults to
 	// storage.DefaultRunner; tests substitute their own.
 	Runner storage.Runner
+
+	// Repo, Arch and Packages are the base-system install: the xbps
+	// repository, the architecture (empty = host), and the package set.
+	Repo     string
+	Arch     string
+	Packages []string
 
 	// Through names the last stage to run, inclusive. It is required
 	// until a full install is possible, so a run cannot begin a
@@ -66,15 +73,16 @@ type stage struct {
 	run  func() error
 }
 
-// stages are the install steps implemented today, in order. Writing
-// fstab, installing the bootloader and configuring first boot come after
-// base-system install, which is not implemented yet, so they are not
-// sequenced here — they join as base-system install lands.
+// stages are the install steps implemented today, in order. The
+// bootloader and first-boot config come after these and are not
+// sequenced yet — they join as they land.
 func (in *installer) stages() []stage {
 	return []stage{
 		{"partition", in.partition},
 		{"mount", in.mount},
 		{"meta-fs", in.mountMeta},
+		{"base-install", in.baseInstall},
+		{"fstab", in.fstab},
 	}
 }
 
@@ -82,9 +90,9 @@ func (in *installer) run() error {
 	stages := in.stages()
 
 	if in.opts.Through == "" {
-		return fmt.Errorf("controller: a full install also needs base-system install, "+
-			"bootloader and first-boot config, which are not implemented yet; "+
-			"pass Through to run the disk steps (%s) in a VM", stageNames(stages))
+		return fmt.Errorf("controller: a full install also needs bootloader and "+
+			"first-boot config, which are not implemented yet; "+
+			"pass Through to run the available stages (%s) in a VM", stageNames(stages))
 	}
 
 	limit := -1
@@ -119,6 +127,30 @@ func (in *installer) partition() error {
 
 func (in *installer) mount() error     { return in.mnt.MountAll(in.plan) }
 func (in *installer) mountMeta() error { return in.mnt.MountMeta() }
+
+func (in *installer) baseInstall() error {
+	cmds, err := xbps.Options{
+		Root:     in.opts.Root,
+		Repo:     in.opts.Repo,
+		Arch:     in.opts.Arch,
+		Packages: in.opts.Packages,
+	}.Commands()
+	if err != nil {
+		return err
+	}
+	return storage.RunCommands(cmds, in.opts.Runner)
+}
+
+// fstab writes the target's /etc/fstab after the base system is in
+// place, so the base does not overwrite it. UUIDs are read back from the
+// freshly made filesystems.
+func (in *installer) fstab() error {
+	uuids, err := storage.ProbeUUIDs(in.plan)
+	if err != nil {
+		return err
+	}
+	return storage.WriteFstab(in.opts.Root, in.plan.Fstab(uuids))
+}
 
 func stageNames(stages []stage) string {
 	names := make([]string, len(stages))
