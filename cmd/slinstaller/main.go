@@ -140,6 +140,10 @@ func run(args []string) error {
 		KeysDir:  keys,
 		Arch:     arch,
 		Packages: packages,
+		// Stream progress and command output so the operator sees the
+		// install work rather than a silent pause.
+		Runner: storage.VerboseRunner,
+		Log:    os.Stderr,
 	}
 
 	if os.Geteuid() != 0 {
@@ -148,7 +152,14 @@ func run(args []string) error {
 	if !confirm(plan.Disk) {
 		return fmt.Errorf("aborted")
 	}
-	return controller.Install(cfg, opts)
+	if err := controller.Install(cfg, opts); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "\nInstall complete.")
+	if through != "" {
+		fmt.Fprintf(os.Stderr, "(stopped after stage %q; target left mounted at %s)\n", through, root)
+	}
+	return nil
 }
 
 // confirm requires the operator to retype the target disk. A yes/no

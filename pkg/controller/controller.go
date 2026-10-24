@@ -17,6 +17,7 @@ package controller
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,10 @@ type Options struct {
 	// Through names the last stage to run, inclusive. Empty runs the
 	// whole install; a stage name stops after it, for a staged VM run.
 	Through string
+
+	// Log, if set, receives a line announcing each stage as it starts, so
+	// an operator can see progress. nil is silent.
+	Log io.Writer
 }
 
 // Install carries out the config, to the end or as far as
@@ -116,6 +121,9 @@ func (in *installer) run() error {
 	}
 
 	for _, s := range stages[:limit] {
+		if in.opts.Log != nil {
+			fmt.Fprintf(in.opts.Log, "==> %s\n", s.name)
+		}
 		if err := s.run(); err != nil {
 			// Best-effort cleanup: release whatever got mounted so a
 			// failed run does not leave the target half-assembled.

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -118,7 +119,10 @@ func RunCommands(cmds [][]string, run Runner) error {
 }
 
 // DefaultRunner runs a command and, on failure, returns its error with
-// whatever it printed, which is usually the part worth reading.
+// whatever it printed, which is usually the part worth reading. It
+// captures output, so nothing is shown on success — fine for tests and
+// library callers, quiet for an operator. VerboseRunner is the one to
+// use for an interactive install.
 func DefaultRunner(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("empty command")
@@ -131,6 +135,21 @@ func DefaultRunner(args []string) error {
 		return err
 	}
 	return nil
+}
+
+// VerboseRunner echoes each command and streams its output to stderr, so
+// an operator watching an install sees parted, xbps and grub work rather
+// than a silent pause — the base-system download in particular takes
+// minutes and would otherwise look like a hang.
+func VerboseRunner(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("empty command")
+	}
+	fmt.Fprintf(os.Stderr, "    + %s\n", strings.Join(args, " "))
+	c := exec.Command(args[0], args[1:]...)
+	c.Stdout = os.Stderr
+	c.Stderr = os.Stderr
+	return c.Run()
 }
 
 // FormatCommands renders a command list one per line, for showing a dry
