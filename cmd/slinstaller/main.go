@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
@@ -66,6 +67,8 @@ func run(args []string) error {
 	fs.StringVar(&arch, "arch", "", "XBPS_TARGET_ARCH for the base system (default: host architecture)")
 	fs.StringVar(&pkgs, "packages", defaultPackages, "comma-separated base packages to install")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
+	var listDisks bool
+	fs.BoolVar(&listDisks, "list-disks", false, "list the machine's disks and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] <config.yaml>\n\n")
 		fmt.Fprintf(os.Stderr, "Reads a clr-installer-format config and prints its partitioning plan.\n")
@@ -79,6 +82,10 @@ func run(args []string) error {
 	if showVersion {
 		fmt.Println("slinstaller", version)
 		return nil
+	}
+
+	if listDisks {
+		return printDisks()
 	}
 
 	rest := fs.Args()
@@ -161,6 +168,20 @@ func run(args []string) error {
 			return fmt.Errorf("missing tools on the live system: %s — install them and retry",
 				strings.Join(missing, ", "))
 		}
+
+		// Confirm the target disk exists and is a whole disk before we
+		// wipe it — a config written for another machine must not
+		// silently repartition the wrong thing (or a partition).
+		devs, err := blockdev.List()
+		if err != nil {
+			return err
+		}
+		switch d := blockdev.FindByPath(devs, plan.Disk); {
+		case d == nil:
+			return fmt.Errorf("target disk %s is not among the machine's block devices", plan.Disk)
+		case d.Type != "disk" && d.Type != "loop":
+			return fmt.Errorf("target %s is a %s, not a whole disk", plan.Disk, d.Type)
+		}
 	}
 
 	if !confirm(plan.Disk) {
@@ -174,6 +195,41 @@ func run(args []string) error {
 		fmt.Fprintf(os.Stderr, "(stopped after stage %q; target left mounted at %s)\n", through, root)
 	}
 	return nil
+}
+
+// printDisks lists the machine's whole disks and their partitions.
+func printDisks() error {
+	devs, err := blockdev.List()
+	if err != nil {
+		return err
+	}
+	disks := blockdev.Disks(devs)
+	if len(disks) == 0 {
+		fmt.Println("no disks found")
+		return nil
+	}
+	for _, d := range disks {
+		fmt.Printf("%-14s %9s  %s\n", d.Path, humanSize(d.Size), d.Model)
+		for _, p := range d.Children {
+			fmt.Printf("  %-12s %9s  %s\n", p.Path, humanSize(p.Size), p.Type)
+		}
+	}
+	return nil
+}
+
+// humanSize formats a byte count in binary units.
+func humanSize(b uint64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%dB", b)
+	}
+	units := []string{"K", "M", "G", "T", "P"}
+	v, i := float64(b), -1
+	for v >= unit && i < len(units)-1 {
+		v /= unit
+		i++
+	}
+	return fmt.Sprintf("%.1f%s", v, units[i])
 }
 
 // confirm requires the operator to retype the target disk. A yes/no

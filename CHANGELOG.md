@@ -23,6 +23,12 @@ for what will and will not be allowed to change once releases begin.
   decimal+unit), and a missing size / 0 / "rest" on the last partition to
   mean "fill the disk" (as clr-installer uses size 0). Tested against
   clr-installer's own fixtures.
+- `pkg/blockdev` — discovers the machine's block devices with `lsblk -J`
+  (size parsed whether lsblk emits a number or a string). Lean next to
+  clr-installer's full BlockDevice tree: enough to confirm the target disk
+  exists and is a whole disk before anything is wiped, and to list what is
+  available. `cmd/slinstaller --list-disks` prints them, and a full
+  `--apply` now refuses a target that is missing or is a partition.
 - `pkg/storage` — the first core subsystem ported from
   [clr-installer](https://github.com/clearlinux/clr-installer), reduced
   to a single UEFI target: GPT labelling and partitioning with `parted`
