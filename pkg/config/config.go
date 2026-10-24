@@ -175,9 +175,17 @@ func (c *Config) Plan() (*storage.Plan, error) {
 				disk.Name, ch.Name, ch.Type)
 		}
 
-		bytes, err := parseSize(ch.Size)
-		if err != nil {
-			return nil, fmt.Errorf("config: %s/%s: %w", disk.Name, ch.Name, err)
+		// A missing size, 0, or "rest" means "fill the remaining space",
+		// the way clr-installer uses size 0. Otherwise parse to bytes.
+		var size string
+		if s := strings.TrimSpace(ch.Size); s == "" || s == "0" || strings.EqualFold(s, "rest") {
+			size = storage.SizeRest
+		} else {
+			bytes, err := parseSize(s)
+			if err != nil {
+				return nil, fmt.Errorf("config: %s/%s: %w", disk.Name, ch.Name, err)
+			}
+			size = strconv.FormatUint(bytes, 10)
 		}
 
 		dev, num := device, i+1
@@ -193,12 +201,20 @@ func (c *Config) Plan() (*storage.Plan, error) {
 			Device:     dev,
 			Mountpoint: ch.Mountpoint,
 			Filesystem: ch.FsType,
-			Size:       strconv.FormatUint(bytes, 10),
+			Size:       size,
 		})
 	}
 
 	if len(pl.Parts) == 0 {
 		return nil, fmt.Errorf("config: target disk %s declares no partitions", disk.Name)
+	}
+
+	// A fill partition must be the last one, or the partitions after it
+	// would have nowhere to go.
+	for i, p := range pl.Parts {
+		if p.Size == storage.SizeRest && i != len(pl.Parts)-1 {
+			return nil, fmt.Errorf("config: %s fills the disk but is not the last partition", p.Device)
+		}
 	}
 	return pl, nil
 }

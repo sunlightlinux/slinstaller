@@ -3,9 +3,9 @@
 # /dev/vda — the virtio disk run.sh attaches — so it is safe to --apply
 # inside the VM and nowhere else.
 #
-# clr-installer configs give every partition an explicit size, and so
-# does this one: the root is sized for the demo's 10G disk, not "the
-# rest". Grow both here and DISK_SIZE in build.sh together.
+# The ESP and swap have explicit sizes; root omits its size, which means
+# "fill the remaining space" (clr-installer uses size 0 for this), so the
+# layout fits whatever DISK_SIZE build.sh made.
 
 targetMedia:
 - name: vda
@@ -24,7 +24,6 @@ targetMedia:
     type: part
     fstype: ext4
     mountpoint: /
-    size: 8G
 
 hostname: sunlight-demo
 timezone: UTC

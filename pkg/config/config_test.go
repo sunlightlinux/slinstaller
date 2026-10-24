@@ -182,3 +182,39 @@ func TestBasicFourPartitions(t *testing.T) {
 		t.Errorf("part 2 fs = %q, want swap", plan.Parts[1].Filesystem)
 	}
 }
+
+func TestPlanFillLastPartition(t *testing.T) {
+	// Root with no size fills the disk → SizeRest → parted end 100%.
+	c := &Config{TargetMedia: []*Media{{
+		Name: "sda", Type: "disk",
+		Children: []*Media{
+			{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/"}, // no size = fill
+		},
+	}}}
+	plan, err := c.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	cmds, _ := plan.Commands()
+	out := ""
+	for _, cmd := range cmds {
+		out += strings.Join(cmd, " ") + "\n"
+	}
+	if !strings.Contains(out, "mkpart / 512MiB 100%") {
+		t.Errorf("fill partition did not run to 100%%:\n%s", out)
+	}
+}
+
+func TestPlanFillMustBeLast(t *testing.T) {
+	c := &Config{TargetMedia: []*Media{{
+		Name: "sda", Type: "disk",
+		Children: []*Media{
+			{Name: "sda1", Type: "part", FsType: "ext4", Mountpoint: "/", Size: "0"}, // fill, not last
+			{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/home", Size: "5G"},
+		},
+	}}}
+	if _, err := c.Plan(); err == nil {
+		t.Fatal("fill partition not last should error")
+	}
+}

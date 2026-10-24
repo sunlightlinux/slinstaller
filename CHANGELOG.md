@@ -20,7 +20,9 @@ for what will and will not be allowed to change once releases begin.
   and produces a correct partition plan. Parsing tolerates the lsblk
   probe fields and Clear Linux specifics real configs carry, and the
   three size forms clr-installer writes (byte count, integer+unit,
-  decimal+unit). Tested against clr-installer's own fixtures.
+  decimal+unit), and a missing size / 0 / "rest" on the last partition to
+  mean "fill the disk" (as clr-installer uses size 0). Tested against
+  clr-installer's own fixtures.
 - `pkg/storage` — the first core subsystem ported from
   [clr-installer](https://github.com/clearlinux/clr-installer), reduced
   to a single UEFI target: GPT labelling and partitioning with `parted`

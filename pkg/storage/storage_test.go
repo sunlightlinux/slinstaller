@@ -61,7 +61,7 @@ func uefiPlan() *Plan {
 		Parts: []Partition{
 			{Number: 1, Device: "/dev/sda1", Mountpoint: "/boot", Filesystem: "vfat", Label: "EFI", Size: "512M"},
 			{Number: 2, Device: "/dev/sda2", Filesystem: "swap", Size: "2G"},
-			{Number: 3, Device: "/dev/sda3", Mountpoint: "/", Filesystem: "ext4", Label: "root", Size: restSize},
+			{Number: 3, Device: "/dev/sda3", Mountpoint: "/", Filesystem: "ext4", Label: "root", Size: SizeRest},
 		},
 	}
 }

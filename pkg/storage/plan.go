@@ -15,7 +15,7 @@ type Partition struct {
 	Filesystem string
 	Label      string
 
-	// Size is a byte count, a human size such as "512M", or restSize for
+	// Size is a byte count, a human size such as "512M", or SizeRest for
 	// the partition that takes whatever space is left.
 	Size string
 }

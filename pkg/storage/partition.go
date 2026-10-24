@@ -34,7 +34,7 @@ func (pl *Plan) Commands() ([][]string, error) {
 		}
 
 		end := "100%"
-		if p.Size != "" && p.Size != restSize {
+		if p.Size != "" && p.Size != SizeRest {
 			bytes, err := ParseSize(p.Size)
 			if err != nil {
 				return nil, fmt.Errorf("storage: partition %d: %w", i, err)
@@ -76,10 +76,10 @@ func (pl *Plan) Commands() ([][]string, error) {
 	return cmds, nil
 }
 
-// restSize is the Partition.Size value meaning "all remaining space".
+// SizeRest is the Partition.Size value meaning "all remaining space".
 // A caller that knows a partition's exact size gives it as bytes or a
 // human size; one that wants a partition to fill the disk uses this.
-const restSize = "rest"
+const SizeRest = "rest"
 
 // partedMkpart builds one mkpart command. The ESP is named EFI with an
 // fat32 type, swap is named linux-swap, and anything else carries its
