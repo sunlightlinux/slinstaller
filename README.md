@@ -111,7 +111,8 @@ repo sync -j4
 ## Documentation
 
 - [doc/architecture.md](doc/architecture.md) — the config, the boundary, the port
-- [CHANGELOG.md](CHANGELOG.md) · [STABILITY.md](STABILITY.md) — what changed, what's stable
+- [doc/port-status.md](doc/port-status.md) — what is ported from clr-installer, what is left
+- [CHANGELOG.md](CHANGELOG.md) &middot; [STABILITY.md](STABILITY.md) — what changed, what is stable
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - [CLAUDE.md](CLAUDE.md) / [EXAMPLES.md](EXAMPLES.md) — guidelines for LLM-assisted work
 
