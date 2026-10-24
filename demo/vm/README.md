@@ -33,6 +33,11 @@ Log in at the live prompt as `root` (Void live password: `voidlinux`),
 then:
 
 ```sh
+# The base live ISO ships mkfs.*, mkswap, grub and efibootmgr, but not
+# parted — install it (and refresh xbps itself) first.
+xbps-install -Su xbps
+xbps-install -Sy parted
+
 mkdir -p /mnt/share
 mount -t 9p -o trans=virtio slshare /mnt/share
 /mnt/share/slinstaller /mnt/share/config.yaml           # dry run: print the plan
