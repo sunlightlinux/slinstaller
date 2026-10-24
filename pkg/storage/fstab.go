@@ -23,11 +23,11 @@ func ProbeUUID(device string) (string, error) {
 func ProbeUUIDs(pl *Plan) (map[string]string, error) {
 	uuids := make(map[string]string, len(pl.Parts))
 	for _, p := range pl.Parts {
-		id, err := ProbeUUID(p.Device)
+		id, err := ProbeUUID(p.EffectiveDevice())
 		if err != nil {
 			return nil, err
 		}
-		uuids[p.Device] = id
+		uuids[p.EffectiveDevice()] = id
 	}
 	return uuids, nil
 }
@@ -68,10 +68,10 @@ func (pl *Plan) Fstab(uuid map[string]string) string {
 // fstabSource is how a partition is named in fstab: by UUID when known,
 // otherwise by device path.
 func fstabSource(p Partition, uuid map[string]string) string {
-	if id := uuid[p.Device]; id != "" {
+	if id := uuid[p.EffectiveDevice()]; id != "" {
 		return "UUID=" + id
 	}
-	return p.Device
+	return p.EffectiveDevice()
 }
 
 // WriteFstab writes fstab content to <root>/etc/fstab, creating /etc if

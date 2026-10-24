@@ -18,6 +18,21 @@ type Partition struct {
 	// Size is a byte count, a human size such as "512M", or SizeRest for
 	// the partition that takes whatever space is left.
 	Size string
+
+	// Encrypted marks a LUKS partition. Its filesystem is made and
+	// mounted on the mapper device, not the raw partition; MapName is the
+	// mapper name (/dev/mapper/<MapName>).
+	Encrypted bool
+	MapName   string
+}
+
+// EffectiveDevice is where the filesystem lives: the LUKS mapper device
+// for an encrypted partition, the raw partition otherwise.
+func (p Partition) EffectiveDevice() string {
+	if p.Encrypted {
+		return "/dev/mapper/" + p.MapName
+	}
+	return p.Device
 }
 
 // Plan is a disk laid out: the target, whether it is being wiped, and

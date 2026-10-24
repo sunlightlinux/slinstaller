@@ -174,8 +174,19 @@ func run(args []string) error {
 	// before confirming, so a missing tool fails here rather than partway
 	// through partitioning. (Staged --through runs skip this — the
 	// operator steering them knows the environment.)
+	encrypted := false
+	for _, p := range plan.Parts {
+		if p.Encrypted {
+			encrypted = true
+			break
+		}
+	}
+
 	if through == "" {
 		required := append(plan.RequiredTools(), "xbps-install", "chroot")
+		if encrypted {
+			required = append(required, "cryptsetup")
+		}
 		if missing := storage.MissingTools(required); len(missing) > 0 {
 			return fmt.Errorf("missing tools on the live system: %s — install them and retry",
 				strings.Join(missing, ", "))
@@ -196,7 +207,24 @@ func run(args []string) error {
 		}
 	}
 
-	if !confirm(plan.Disk) {
+	stdin := bufio.NewReader(os.Stdin)
+
+	// LUKS passphrase, when the layout is encrypted: from the environment
+	// for an unattended install, otherwise prompted.
+	if encrypted {
+		pass := os.Getenv("SLINSTALLER_LUKS_PASSPHRASE")
+		if pass == "" {
+			fmt.Fprint(os.Stderr, "LUKS passphrase: ")
+			line, _ := stdin.ReadString('\n')
+			pass = strings.TrimSpace(line)
+		}
+		if pass == "" {
+			return fmt.Errorf("the layout is encrypted but no passphrase was given")
+		}
+		opts.Passphrase = pass
+	}
+
+	if !confirm(stdin, plan.Disk) {
 		return fmt.Errorf("aborted")
 	}
 	if err := controller.Install(cfg, opts); err != nil {
@@ -247,11 +275,11 @@ func humanSize(b uint64) string {
 // confirm requires the operator to retype the target disk. A yes/no
 // prompt is too easy to answer on the wrong machine; retyping the path
 // makes the operator look at which disk they are about to erase.
-func confirm(disk string) bool {
+func confirm(in *bufio.Reader, disk string) bool {
 	fmt.Fprintf(os.Stderr, "\nAbout to PARTITION and ERASE %s.\nType the disk path to confirm: ", disk)
-	sc := bufio.NewScanner(os.Stdin)
-	if !sc.Scan() {
+	line, err := in.ReadString('\n')
+	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(sc.Text()) == disk
+	return strings.TrimSpace(line) == disk
 }

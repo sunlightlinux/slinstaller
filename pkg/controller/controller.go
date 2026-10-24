@@ -24,6 +24,7 @@ import (
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/grub"
+	"github.com/sunlightlinux/slinstaller/pkg/luks"
 	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
@@ -47,6 +48,10 @@ type Options struct {
 	KeysDir  string
 	Arch     string
 	Packages []string
+
+	// Passphrase unlocks the LUKS partitions. Required when the config
+	// has any encrypted partition; ignored otherwise.
+	Passphrase string
 
 	// Through names the last stage to run, inclusive. Empty runs the
 	// whole install; a stage name stops after it, for a staged VM run.
@@ -144,11 +149,33 @@ func (in *installer) run() error {
 }
 
 func (in *installer) partition() error {
-	cmds, err := in.plan.Commands()
+	// The partition table first; then, on an encrypted disk, LUKS on each
+	// crypt partition before any filesystem is made — mkfs targets the
+	// mapper, not the raw partition.
+	if err := storage.RunCommands(in.plan.TableCommands(), in.opts.Runner); err != nil {
+		return err
+	}
+
+	for _, p := range in.plan.Parts {
+		if !p.Encrypted {
+			continue
+		}
+		if in.opts.Passphrase == "" {
+			return fmt.Errorf("%s is encrypted but no passphrase was given", p.Device)
+		}
+		if err := luks.Format(p.Device, in.opts.Passphrase); err != nil {
+			return err
+		}
+		if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase); err != nil {
+			return err
+		}
+	}
+
+	mkfs, err := in.plan.MkfsCommands()
 	if err != nil {
 		return err
 	}
-	return storage.RunCommands(cmds, in.opts.Runner)
+	return storage.RunCommands(mkfs, in.opts.Runner)
 }
 
 func (in *installer) mount() error     { return in.mnt.MountAll(in.plan) }
@@ -176,7 +203,34 @@ func (in *installer) fstab() error {
 	if err != nil {
 		return err
 	}
-	return storage.WriteFstab(in.opts.Root, in.plan.Fstab(uuids))
+	if err := storage.WriteFstab(in.opts.Root, in.plan.Fstab(uuids)); err != nil {
+		return err
+	}
+	return in.crypttab()
+}
+
+// crypttab writes /etc/crypttab for the encrypted partitions, so the
+// installed system unlocks them at boot by their LUKS UUID.
+func (in *installer) crypttab() error {
+	var tab strings.Builder
+	for _, p := range in.plan.Parts {
+		if !p.Encrypted {
+			continue
+		}
+		uuid, err := luks.UUID(p.Device)
+		if err != nil {
+			return err
+		}
+		tab.WriteString(luks.CrypttabLine(p.MapName, uuid))
+	}
+	if tab.Len() == 0 {
+		return nil
+	}
+	path := filepath.Join(in.opts.Root, "etc", "crypttab")
+	if err := os.WriteFile(path, []byte(tab.String()), 0o600); err != nil {
+		return fmt.Errorf("write crypttab: %w", err)
+	}
+	return nil
 }
 
 // swapfile creates a swap file on root and adds it to fstab, when the
@@ -217,6 +271,25 @@ func (in *installer) bootloader() error {
 	if in.cfg.KernelArguments != nil {
 		kargs = in.cfg.KernelArguments.Add
 	}
+
+	// An encrypted root must be unlocked by the initramfs before the
+	// kernel can mount it, so the root's LUKS UUID goes on the command
+	// line for dracut's rd.luks to pick up.
+	encrypted := false
+	for _, p := range in.plan.Parts {
+		if !p.Encrypted {
+			continue
+		}
+		encrypted = true
+		if p.Mountpoint == "/" {
+			uuid, err := luks.UUID(p.Device)
+			if err != nil {
+				return err
+			}
+			kargs = append(kargs, "rd.luks.uuid="+uuid)
+		}
+	}
+
 	g := grub.Options{Root: in.opts.Root, ESPDir: esp, KernelArgs: kargs}
 
 	if line := g.CmdlineConfig(); line != "" {
@@ -239,7 +312,20 @@ func (in *installer) bootloader() error {
 	if err != nil {
 		return err
 	}
-	return storage.RunCommands(cmds, in.opts.Runner)
+	if err := storage.RunCommands(cmds, in.opts.Runner); err != nil {
+		return err
+	}
+
+	// Rebuild the initramfs now that /etc/crypttab and the rd.luks
+	// command line exist, so dracut includes the crypt module and the
+	// system can unlock the root at boot. The one built during
+	// base-install predates them.
+	if encrypted {
+		return storage.RunCommands(
+			[][]string{{"chroot", in.opts.Root, "xbps-reconfigure", "-fa"}},
+			in.opts.Runner)
+	}
+	return nil
 }
 
 // firstBoot sets the installed system's hostname, timezone, console

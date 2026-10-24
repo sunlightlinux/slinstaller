@@ -175,8 +175,15 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		if ch == nil {
 			continue
 		}
-		if ch.Type != "" && ch.Type != "part" {
-			return nil, fmt.Errorf("config: %s child %q has type %q; only partitions are supported",
+		// A child is a partition ("part" or unset) or an encrypted
+		// partition ("crypt"), the way clr-installer marks LUKS.
+		var encrypted bool
+		switch ch.Type {
+		case "", "part":
+		case "crypt":
+			encrypted = true
+		default:
+			return nil, fmt.Errorf("config: %s child %q has type %q; expected part or crypt",
 				disk.Name, ch.Name, ch.Type)
 		}
 
@@ -201,13 +208,18 @@ func (c *Config) Plan() (*storage.Plan, error) {
 			dev = storage.PartitionName(device, num)
 		}
 
-		pl.Parts = append(pl.Parts, storage.Partition{
+		p := storage.Partition{
 			Number:     num,
 			Device:     dev,
 			Mountpoint: ch.Mountpoint,
 			Filesystem: ch.FsType,
 			Size:       size,
-		})
+			Encrypted:  encrypted,
+		}
+		if encrypted {
+			p.MapName = cryptMapName(ch)
+		}
+		pl.Parts = append(pl.Parts, p)
 	}
 
 	if len(pl.Parts) == 0 {
@@ -222,6 +234,21 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		}
 	}
 	return pl, nil
+}
+
+// cryptMapName is the LUKS mapper name for an encrypted partition,
+// derived from its role so it reads clearly in /dev/mapper and crypttab.
+func cryptMapName(ch *Media) string {
+	switch {
+	case ch.Mountpoint == "/":
+		return "cryptroot"
+	case ch.FsType == "swap":
+		return "cryptswap"
+	case ch.Mountpoint != "":
+		return "crypt" + strings.ReplaceAll(strings.Trim(ch.Mountpoint, "/"), "/", "-")
+	default:
+		return "crypt" + ch.Name
+	}
 }
 
 // installDisk finds the disk to install to: the one disk-type media that

@@ -43,6 +43,14 @@ for what will and will not be allowed to change once releases begin.
   standard mounts to. A config `swapFileSize` creates a swap file on root
   (`SwapFileCommands`) instead of a swap partition — clr-installer's
   swapFileSize, run as a controller stage after fstab.
+- `pkg/luks` — LUKS encryption with cryptsetup. A partition typed `crypt`
+  in the config (clr-installer's marker) is luksFormat'd and opened to a
+  mapper, and its filesystem is made and mounted there
+  (`storage.Partition.EffectiveDevice`). The controller writes
+  `/etc/crypttab` by LUKS UUID, adds `rd.luks.uuid=` to the kernel command
+  line for an encrypted root, and rebuilds the initramfs so the system
+  unlocks at boot. The passphrase comes from `SLINSTALLER_LUKS_PASSPHRASE`
+  or a prompt — never from the config, and never in a process's argv.
 - `pkg/xbps` — the base-system install, the counterpart to clr-installer's
   swupd step, following how Void bootstraps a rootfs: seed the repository
   signing keys into the target, `xbps-install` from the repository, then a

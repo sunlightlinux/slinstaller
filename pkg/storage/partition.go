@@ -7,14 +7,24 @@ import (
 	"strings"
 )
 
-// Commands returns the ordered list of commands that partition the disk
-// and create its filesystems, and runs nothing: this is the dry run.
-//
-// The order is the order of destruction: label the disk (only when
-// wiping), cut the partitions, set their GPT type codes, re-read the
-// table, then make each filesystem. RunCommands runs exactly this list,
-// so what an operator is shown is what executes.
+// Commands returns the full partition-then-format command list — the
+// table commands followed by the mkfs commands. It is the dry run for a
+// plain install; an encrypted install runs the two halves with
+// cryptsetup in between, so the controller uses TableCommands and
+// MkfsCommands directly.
 func (pl *Plan) Commands() ([][]string, error) {
+	mkfs, err := pl.MkfsCommands()
+	if err != nil {
+		return nil, err
+	}
+	return append(pl.TableCommands(), mkfs...), nil
+}
+
+// TableCommands returns the commands that lay down the partition table:
+// label the disk (only when wiping), cut the partitions, mark the ESP,
+// and re-read the table. No filesystem is made here — on an encrypted
+// disk, cryptsetup runs between this and the mkfs.
+func (pl *Plan) TableCommands() [][]string {
 	var cmds [][]string
 
 	// mklabel destroys the existing partition table, so it is gated on
@@ -36,15 +46,14 @@ func (pl *Plan) Commands() ([][]string, error) {
 		end := "100%"
 		if p.Size != "" && p.Size != SizeRest {
 			bytes, err := ParseSize(p.Size)
-			if err != nil {
-				return nil, fmt.Errorf("storage: partition %d: %w", i, err)
+			if err == nil {
+				sizeMiB := bytes >> 20
+				if sizeMiB == 0 {
+					sizeMiB = 1 // a partition parted will not reject
+				}
+				cursorMiB += sizeMiB
+				end = fmt.Sprintf("%dMiB", cursorMiB)
 			}
-			sizeMiB := bytes >> 20
-			if sizeMiB == 0 {
-				sizeMiB = 1 // a partition parted will not reject
-			}
-			cursorMiB += sizeMiB
-			end = fmt.Sprintf("%dMiB", cursorMiB)
 		}
 
 		cmds = append(cmds, partedMkpart(pl.Disk, p, start, end))
@@ -63,8 +72,14 @@ func (pl *Plan) Commands() ([][]string, error) {
 		}
 	}
 
-	cmds = append(cmds, []string{"partprobe", pl.Disk})
+	return append(cmds, []string{"partprobe", pl.Disk})
+}
 
+// MkfsCommands returns the mkfs command for each partition, on its
+// effective device — the LUKS mapper for an encrypted partition, the raw
+// partition otherwise.
+func (pl *Plan) MkfsCommands() ([][]string, error) {
+	var cmds [][]string
 	for _, p := range pl.Parts {
 		mkfs, err := mkfsCommand(p)
 		if err != nil {
@@ -72,7 +87,6 @@ func (pl *Plan) Commands() ([][]string, error) {
 		}
 		cmds = append(cmds, mkfs)
 	}
-
 	return cmds, nil
 }
 

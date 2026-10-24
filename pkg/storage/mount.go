@@ -61,8 +61,8 @@ func (m *Mounter) MountAll(pl *Plan) error {
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return fmt.Errorf("storage: mkdir %s: %w", target, err)
 		}
-		if err := syscall.Mount(p.Device, target, p.Filesystem, syscall.MS_RELATIME, ""); err != nil {
-			return fmt.Errorf("storage: mount %s on %s: %w", p.Device, target, err)
+		if err := syscall.Mount(p.EffectiveDevice(), target, p.Filesystem, syscall.MS_RELATIME, ""); err != nil {
+			return fmt.Errorf("storage: mount %s on %s: %w", p.EffectiveDevice(), target, err)
 		}
 		m.mounted = append(m.mounted, target)
 	}

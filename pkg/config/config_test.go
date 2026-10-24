@@ -218,3 +218,39 @@ func TestPlanFillMustBeLast(t *testing.T) {
 		t.Fatal("fill partition not last should error")
 	}
 }
+
+func TestPlanEncrypted(t *testing.T) {
+	c := &Config{TargetMedia: []*Media{{
+		Name: "sda", Type: "disk",
+		Children: []*Media{
+			{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			{Name: "sda2", Type: "crypt", FsType: "ext4", Mountpoint: "/"}, // encrypted root
+		},
+	}}}
+	plan, err := c.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	root := plan.Parts[1]
+	if !root.Encrypted || root.MapName != "cryptroot" {
+		t.Fatalf("root = %+v, want encrypted cryptroot", root)
+	}
+	if root.EffectiveDevice() != "/dev/mapper/cryptroot" {
+		t.Errorf("EffectiveDevice = %q", root.EffectiveDevice())
+	}
+	// mkfs targets the mapper, not the raw partition.
+	mkfs, _ := plan.MkfsCommands()
+	flat := ""
+	for _, c := range mkfs {
+		for _, a := range c {
+			flat += a + " "
+		}
+		flat += "\n"
+	}
+	if !strings.Contains(flat, "mkfs.ext4") || !strings.Contains(flat, "/dev/mapper/cryptroot") {
+		t.Errorf("mkfs does not target the mapper:\n%s", flat)
+	}
+	if strings.Contains(flat, "/dev/sda2 ") {
+		t.Errorf("mkfs targets the raw partition:\n%s", flat)
+	}
+}
