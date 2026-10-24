@@ -42,12 +42,17 @@ for what will and will not be allowed to change once releases begin.
   `grub-mkconfig`. Kernel arguments from the config are rendered into
   `/etc/default/grub`. clr-installer uses clr-boot-manager, which is
   Clear-specific; GRUB is Sunlight's choice, as it is Void's.
-- `pkg/controller` — sequences the install from a config: partition →
-  mount → bind meta filesystems → base-system install → fstab → bootloader
-  (first-boot config to follow). It refuses a full install while the
-  remaining step is unimplemented rather than wipe a disk it cannot
-  finish; a run names how far to go (`Options.Through`) to exercise the
-  available stages in a VM, and cleans up mounts on failure.
+- `pkg/system` — the universal part of first-boot config: hostname
+  (`/etc/hostname`), timezone (the `/etc/localtime` symlink), and user
+  accounts (`useradd` with the crypt-hash password via `-p`, `wheel` for
+  admins, and `authorized_keys` for any SSH keys). Keymap, locale and
+  network wait on slinit's conventions.
+- `pkg/controller` — sequences the whole install from a config:
+  pre-install hooks → partition → mount → bind meta filesystems →
+  base-system install → fstab → bootloader → first-boot → post-install
+  hooks. A full install runs end to end (gated by the front-end on root
+  and disk confirmation); `Options.Through` stops after a named stage for
+  a staged VM run, and a failure unmounts what it mounted.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,
   and prints the partitioning plan. With `--apply` it runs the install
   through the controller, gated on running as root and on the operator

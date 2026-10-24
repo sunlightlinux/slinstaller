@@ -133,26 +133,13 @@ func run(args []string) error {
 		}
 	}
 
-	var kernelArgs []string
-	if cfg.KernelArguments != nil {
-		kernelArgs = cfg.KernelArguments.Add
-	}
-
 	opts := controller.Options{
-		Root:       root,
-		Through:    through,
-		Repo:       repo,
-		KeysDir:    keys,
-		Arch:       arch,
-		Packages:   packages,
-		KernelArgs: kernelArgs,
-	}
-
-	// With no stage limit the controller refuses — a full install is not
-	// possible yet — so let it say so without a root check or a prompt,
-	// since nothing will be touched.
-	if through == "" {
-		return controller.Install(cfg, opts)
+		Root:     root,
+		Through:  through,
+		Repo:     repo,
+		KeysDir:  keys,
+		Arch:     arch,
+		Packages: packages,
 	}
 
 	if os.Geteuid() != 0 {

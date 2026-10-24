@@ -1,17 +1,18 @@
 // Package controller sequences an installation from a config.
 //
-// It is the one place that knows the order of the install: partition the
-// disk, make its filesystems, mount the target, bind the meta
-// filesystems, lay down the base system, write fstab, install the
-// bootloader, configure first boot. Each step is a subsystem under
-// pkg/; the controller holds the order and the error handling, nothing
-// more.
+// It is the one place that knows the order of the install: run any
+// pre-install hooks, partition the disk, make its filesystems, mount the
+// target, bind the meta filesystems, lay down the base system, write
+// fstab, install the bootloader, configure first boot, run any
+// post-install hooks. Each step is a subsystem under pkg/; the
+// controller holds the order and the error handling, nothing more.
 //
-// The order is also a safety boundary. A full install needs steps that
-// are not implemented yet (base-system install, bootloader, first-boot
-// config). Rather than wipe a disk and stop halfway, a run must say how
-// far to go — Options.Through — and the controller refuses a full
-// install until it can actually finish one.
+// A run touches the disk. By default it runs every stage — a full
+// install — gated by the front-end (root, and the operator confirming
+// the target). Options.Through stops after a named stage instead, to
+// exercise part of the sequence in a VM. A stage that fails after the
+// target is mounted triggers a best-effort unmount, so a failed run does
+// not leave the target half-assembled.
 package controller
 
 import (
@@ -23,6 +24,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/grub"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
+	"github.com/sunlightlinux/slinstaller/pkg/system"
 	"github.com/sunlightlinux/slinstaller/pkg/xbps"
 )
 
@@ -31,7 +33,7 @@ type Options struct {
 	// Root is the target mount tree (e.g. /mnt). Defaults to /mnt.
 	Root string
 
-	// Runner runs the partitioning and package commands. Defaults to
+	// Runner runs the installation commands. Defaults to
 	// storage.DefaultRunner; tests substitute their own.
 	Runner storage.Runner
 
@@ -44,16 +46,13 @@ type Options struct {
 	Arch     string
 	Packages []string
 
-	// KernelArgs are added to the kernel command line via the bootloader.
-	KernelArgs []string
-
-	// Through names the last stage to run, inclusive. It is required
-	// until a full install is possible, so a run cannot begin a
-	// destructive install it has no way to complete.
+	// Through names the last stage to run, inclusive. Empty runs the
+	// whole install; a stage name stops after it, for a staged VM run.
 	Through string
 }
 
-// Install carries out the config as far as Options.Through allows.
+// Install carries out the config, to the end or as far as
+// Options.Through allows.
 func Install(cfg *config.Config, opts Options) error {
 	if opts.Root == "" {
 		opts.Root = "/mnt"
@@ -67,11 +66,12 @@ func Install(cfg *config.Config, opts Options) error {
 		return err
 	}
 
-	in := &installer{plan: plan, opts: opts, mnt: storage.NewMounter(opts.Root)}
+	in := &installer{cfg: cfg, plan: plan, opts: opts, mnt: storage.NewMounter(opts.Root)}
 	return in.run()
 }
 
 type installer struct {
+	cfg  *config.Config
 	plan *storage.Plan
 	opts Options
 	mnt  *storage.Mounter
@@ -82,47 +82,52 @@ type stage struct {
 	run  func() error
 }
 
-// stages are the install steps implemented today, in order. First-boot
-// config comes after these and is not sequenced yet — it joins as it
-// lands.
+// stages is the whole install, in order.
 func (in *installer) stages() []stage {
 	return []stage{
+		{"pre-install", in.preHooks},
 		{"partition", in.partition},
 		{"mount", in.mount},
 		{"meta-fs", in.mountMeta},
 		{"base-install", in.baseInstall},
 		{"fstab", in.fstab},
 		{"bootloader", in.bootloader},
+		{"first-boot", in.firstBoot},
+		{"post-install", in.postHooks},
 	}
 }
 
 func (in *installer) run() error {
 	stages := in.stages()
 
-	if in.opts.Through == "" {
-		return fmt.Errorf("controller: a full install also needs first-boot config, "+
-			"which is not implemented yet; "+
-			"pass Through to run the available stages (%s) in a VM", stageNames(stages))
-	}
-
-	limit := -1
-	for i, s := range stages {
-		if s.name == in.opts.Through {
-			limit = i
-			break
+	// Where to stop: the whole list by default, or through a named stage.
+	limit := len(stages)
+	if in.opts.Through != "" {
+		limit = -1
+		for i, s := range stages {
+			if s.name == in.opts.Through {
+				limit = i + 1
+				break
+			}
+		}
+		if limit < 0 {
+			return fmt.Errorf("controller: unknown stage %q; known: %s", in.opts.Through, stageNames(stages))
 		}
 	}
-	if limit < 0 {
-		return fmt.Errorf("controller: unknown stage %q; known: %s", in.opts.Through, stageNames(stages))
-	}
 
-	for _, s := range stages[:limit+1] {
+	for _, s := range stages[:limit] {
 		if err := s.run(); err != nil {
 			// Best-effort cleanup: release whatever got mounted so a
 			// failed run does not leave the target half-assembled.
 			_ = in.mnt.UnmountAll()
 			return fmt.Errorf("controller: %s: %w", s.name, err)
 		}
+	}
+
+	// A full run unmounts the finished target; a staged run leaves it
+	// mounted so the result can be inspected.
+	if in.opts.Through == "" {
+		return in.mnt.UnmountAll()
 	}
 	return nil
 }
@@ -164,15 +169,19 @@ func (in *installer) fstab() error {
 }
 
 // bootloader installs GRUB onto the ESP and registers the firmware boot
-// entry. Any kernel arguments are written to /etc/default/grub before
-// grub-mkconfig reads it.
+// entry. Any kernel arguments from the config are written to
+// /etc/default/grub before grub-mkconfig reads it.
 func (in *installer) bootloader() error {
 	esp := in.plan.ESPMountpoint()
 	if esp == "" {
 		return fmt.Errorf("no EFI System Partition in the plan")
 	}
 
-	g := grub.Options{Root: in.opts.Root, ESPDir: esp, KernelArgs: in.opts.KernelArgs}
+	var kargs []string
+	if in.cfg.KernelArguments != nil {
+		kargs = in.cfg.KernelArguments.Add
+	}
+	g := grub.Options{Root: in.opts.Root, ESPDir: esp, KernelArgs: kargs}
 
 	if line := g.CmdlineConfig(); line != "" {
 		path := filepath.Join(in.opts.Root, "etc", "default", "grub")
@@ -195,6 +204,67 @@ func (in *installer) bootloader() error {
 		return err
 	}
 	return storage.RunCommands(cmds, in.opts.Runner)
+}
+
+// firstBoot sets the installed system's hostname, timezone and user
+// accounts. Keymap, locale and network are not configured yet — they
+// wait on the slinit conventions for them.
+func (in *installer) firstBoot() error {
+	root := in.opts.Root
+	if err := system.Hostname(root, in.cfg.Hostname); err != nil {
+		return err
+	}
+	if err := system.Timezone(root, in.cfg.Timezone); err != nil {
+		return err
+	}
+
+	for _, cu := range in.cfg.Users {
+		if cu == nil || cu.Login == "" {
+			continue
+		}
+		u := system.User{
+			Login:        cu.Login,
+			PasswordHash: cu.Password,
+			Admin:        cu.Admin,
+			SSHKeys:      cu.SSHKeys,
+		}
+		if err := storage.RunCommands([][]string{u.AddCommand(root)}, in.opts.Runner); err != nil {
+			return err
+		}
+		chown, err := u.WriteSSHKeys(root)
+		if err != nil {
+			return err
+		}
+		if chown != nil {
+			if err := storage.RunCommands([][]string{chown}, in.opts.Runner); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (in *installer) preHooks() error  { return in.runHooks(in.cfg.PreInstall) }
+func (in *installer) postHooks() error { return in.runHooks(in.cfg.PostInstall) }
+
+// runHooks runs each hook command, chrooted into the target when the
+// hook asks for it, on the live system otherwise.
+func (in *installer) runHooks(hooks []*config.Hook) error {
+	for _, h := range hooks {
+		if h == nil || h.Cmd == "" {
+			continue
+		}
+		var cmd []string
+		if h.Chroot {
+			cmd = []string{"chroot", in.opts.Root, "sh", "-c", h.Cmd}
+		} else {
+			cmd = []string{"sh", "-c", h.Cmd}
+		}
+		if err := storage.RunCommands([][]string{cmd}, in.opts.Runner); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func stageNames(stages []stage) string {

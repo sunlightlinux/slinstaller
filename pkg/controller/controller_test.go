@@ -30,19 +30,12 @@ func (r *recorder) run(args []string) error {
 	return nil
 }
 
-func TestInstallRefusesFullInstall(t *testing.T) {
-	var r recorder
-	err := Install(twoPartConfig(), Options{Runner: r.run})
-	if err == nil {
-		t.Fatal("full install (Through unset) = nil error, want refusal")
+func (r *recorder) flat() string {
+	var b strings.Builder
+	for _, c := range r.cmds {
+		b.WriteString(strings.Join(c, " ") + "\n")
 	}
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("error = %q, want it to explain the missing steps", err)
-	}
-	// Crucially, nothing ran: the disk was not touched.
-	if len(r.cmds) != 0 {
-		t.Errorf("refused install still ran %d commands", len(r.cmds))
-	}
+	return b.String()
 }
 
 func TestInstallUnknownStage(t *testing.T) {
@@ -58,18 +51,12 @@ func TestInstallUnknownStage(t *testing.T) {
 
 func TestInstallThroughPartition(t *testing.T) {
 	var r recorder
-	// Through "partition" runs the partition stage and stops before
-	// mount, which would make real syscalls.
+	// Through "partition" runs pre-install (no hooks here) and partition,
+	// then stops before mount, which would make real syscalls.
 	if err := Install(twoPartConfig(), Options{Through: "partition", Runner: r.run}); err != nil {
 		t.Fatalf("Install through partition: %v", err)
 	}
-	if len(r.cmds) == 0 {
-		t.Fatal("partition stage ran no commands")
-	}
-	flat := ""
-	for _, c := range r.cmds {
-		flat += strings.Join(c, " ") + "\n"
-	}
+	flat := r.flat()
 	for _, want := range []string{
 		"parted -s /dev/sda mklabel gpt",
 		"mkfs.vfat", "mkfs.ext4", "partprobe /dev/sda",
@@ -77,5 +64,22 @@ func TestInstallThroughPartition(t *testing.T) {
 		if !strings.Contains(flat, want) {
 			t.Errorf("partition commands missing %q\n%s", want, flat)
 		}
+	}
+}
+
+func TestInstallThroughPreInstallRunsHooks(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.PreInstall = []*config.Hook{{Cmd: "echo hello"}}
+
+	var r recorder
+	// Stopping at pre-install runs the hook and nothing destructive.
+	if err := Install(cfg, Options{Through: "pre-install", Runner: r.run}); err != nil {
+		t.Fatalf("Install through pre-install: %v", err)
+	}
+	if got := r.flat(); !strings.Contains(got, "sh -c echo hello") {
+		t.Errorf("pre-install hook not run: %q", got)
+	}
+	if strings.Contains(r.flat(), "parted") {
+		t.Error("pre-install stage reached partition")
 	}
 }
