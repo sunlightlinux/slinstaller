@@ -15,8 +15,20 @@
 #
 # Options:
 #   --fresh        # recreate the target disk blank before booting
-#   --mem N        # guest memory in MB (default 2048)
+#   --mem=N        # guest memory in MB (default 2048)
+#   --vnc          # show the guest over VNC on :0 (connect with a VNC
+#                  #   viewer to localhost:5900); works headless
+#   --serial       # serial console only (-nographic). The Void live ISO
+#                  #   prints to the graphical console, so you will see
+#                  #   firmware output and then nothing — at the GRUB menu
+#                  #   press 'e' and add console=ttyS0,115200 to use serial
+#   --display=gtk  # force a specific QEMU UI (gtk, sdl, ...)
 #   --help
+#
+# Display: with no flag, run.sh opens a QEMU window when a desktop is
+# present ($DISPLAY/$WAYLAND_DISPLAY) and falls back to VNC otherwise. The
+# live ISO boots to a graphical console, so a window or VNC is what shows
+# the installer session; interact there, not on the serial terminal.
 #
 # UEFI firmware: run.sh looks for OVMF_CODE in the usual places. If yours
 # is elsewhere, set OVMF_CODE=/path/to/OVMF_CODE.fd.
@@ -33,14 +45,18 @@ MEMORY="${MEMORY:-2048}"
 
 INSTALLED=0
 FRESH=0
+DISPLAY_MODE="${DISPLAY_MODE:-auto}"
 for arg in "$@"; do
     case "$arg" in
-        --installed) INSTALLED=1 ;;
-        --fresh)     FRESH=1 ;;
-        --mem)       echo "use --mem=N" >&2; exit 1 ;;
-        --mem=*)     MEMORY="${arg#--mem=}" ;;
-        --help|-h)   grep -E '^# ' "$0" | sed 's/^# //'; exit 0 ;;
-        *)           echo "Unknown option: $arg (see --help)" >&2; exit 1 ;;
+        --installed)  INSTALLED=1 ;;
+        --fresh)      FRESH=1 ;;
+        --mem)        echo "use --mem=N" >&2; exit 1 ;;
+        --mem=*)      MEMORY="${arg#--mem=}" ;;
+        --vnc)        DISPLAY_MODE=vnc ;;
+        --serial)     DISPLAY_MODE=serial ;;
+        --display=*)  DISPLAY_MODE="${arg#--display=}" ;;
+        --help|-h)    grep -E '^# ' "$0" | sed 's/^# //'; exit 0 ;;
+        *)            echo "Unknown option: $arg (see --help)" >&2; exit 1 ;;
     esac
 done
 
@@ -105,6 +121,31 @@ else
     KVM_ARGS=(-cpu qemu64)
 fi
 
+# Resolve how the guest is shown. The live ISO uses a graphical console,
+# so serial-only shows nothing past the firmware; default to a window
+# when a desktop is present, VNC otherwise.
+if [ "${DISPLAY_MODE}" = "auto" ]; then
+    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        DISPLAY_MODE=window
+    else
+        DISPLAY_MODE=vnc
+    fi
+fi
+case "${DISPLAY_MODE}" in
+    window)  DISPLAY_ARGS=(-serial mon:stdio)
+             EXIT_HINT="close the QEMU window, or 'quit' in the monitor (Ctrl+A C) on this terminal"
+             echo "→ display: QEMU window (interact there)" ;;
+    vnc)     DISPLAY_ARGS=(-vnc :0 -serial mon:stdio)
+             EXIT_HINT="close QEMU with 'quit' in the monitor (Ctrl+A C), or kill qemu"
+             echo "→ display: VNC on :0 — connect a viewer to localhost:5900" ;;
+    serial)  DISPLAY_ARGS=(-nographic -serial mon:stdio)
+             EXIT_HINT="Ctrl+A, X"
+             echo "→ display: serial only — at the Void GRUB menu press 'e' and add console=ttyS0,115200" ;;
+    *)       DISPLAY_ARGS=(-display "${DISPLAY_MODE}" -serial mon:stdio)
+             EXIT_HINT="close the QEMU window, or 'quit' in the monitor (Ctrl+A C)"
+             echo "→ display: ${DISPLAY_MODE}" ;;
+esac
+
 COMMON=(
     "${KVM_ARGS[@]}"
     -machine q35
@@ -112,12 +153,11 @@ COMMON=(
     -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}"
     -drive "if=pflash,format=raw,file=${VARS}"
     -drive "file=${TARGET},format=qcow2,if=virtio"
-    -nographic
-    -serial mon:stdio
+    "${DISPLAY_ARGS[@]}"
 )
 
 if [ "${INSTALLED}" -eq 1 ]; then
-    echo "Booting the installed target disk (Ctrl+A, X to exit)"
+    echo "Booting the installed target disk (exit: ${EXIT_HINT})"
     exec qemu-system-x86_64 "${COMMON[@]}" -nic none
 fi
 
@@ -126,7 +166,7 @@ if [ ! -f "${ISO}" ]; then
     exit 1
 fi
 
-echo "Booting the Void live ISO with a blank /dev/vda (Ctrl+A, X to exit)"
+echo "Booting the Void live ISO with a blank /dev/vda (exit: ${EXIT_HINT})"
 echo "Inside the guest, install with:"
 echo "    mkdir -p /mnt/share && mount -t 9p -o trans=virtio slshare /mnt/share"
 echo "    /mnt/share/slinstaller --apply /mnt/share/config.yaml"

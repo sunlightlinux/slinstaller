@@ -65,6 +65,13 @@ Then `./run.sh --installed` boots the freshly installed disk.
 | run.sh | `--fresh` | wipe the target disk back to blank first |
 | run.sh | `--mem=N` | guest memory in MB (default 2048) |
 | run.sh | `--installed` | boot the installed disk instead of the ISO |
+| run.sh | `--vnc` | show the guest over VNC on :0 (headless) |
+| run.sh | `--serial` | serial-only (`-nographic`); needs `console=ttyS0` added at the ISO's GRUB menu to show anything past the firmware |
+| run.sh | `--display=gtk` | force a QEMU UI backend |
 | run.sh | `OVMF_CODE=/path` | point at your OVMF firmware |
+
+The live ISO uses a graphical console, so run.sh opens a QEMU window when
+a desktop is present and falls back to VNC otherwise — serial-only shows
+only the firmware and then goes quiet. Interact in the window or VNC.
 
 Artifacts live in `_output/` and `_cache/`, both gitignored.
