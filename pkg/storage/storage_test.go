@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/sunlightlinux/slinstaller/pkg/descriptor"
 )
 
 func TestPartitionName(t *testing.T) {
@@ -53,71 +51,23 @@ func TestParseSize(t *testing.T) {
 	}
 }
 
-// uefiDescriptor is a minimal, valid UEFI layout: an ESP, swap, and a
-// root that takes the rest. It drives most of the tests below.
-func uefiDescriptor() *descriptor.Descriptor {
-	return &descriptor.Descriptor{
-		TargetDisk: "/dev/sda",
-		Wipe:       true,
-		Partitions: []descriptor.Partition{
-			{Mountpoint: "/boot", Size: "512M", Filesystem: "vfat", Label: "EFI"},
-			{Size: "2G", Filesystem: "swap"},
-			{Mountpoint: "/", Size: descriptor.SizeRest, Filesystem: "ext4", Label: "root"},
+// uefiPlan is a minimal UEFI layout: an ESP, swap, and a root that takes
+// the rest. pkg/config builds such a plan from a config; the tests build
+// it directly to exercise the storage layer on its own.
+func uefiPlan() *Plan {
+	return &Plan{
+		Disk: "/dev/sda",
+		Wipe: true,
+		Parts: []Partition{
+			{Number: 1, Device: "/dev/sda1", Mountpoint: "/boot", Filesystem: "vfat", Label: "EFI", Size: "512M"},
+			{Number: 2, Device: "/dev/sda2", Filesystem: "swap", Size: "2G"},
+			{Number: 3, Device: "/dev/sda3", Mountpoint: "/", Filesystem: "ext4", Label: "root", Size: restSize},
 		},
-	}
-}
-
-func TestBuildPlan(t *testing.T) {
-	pl, err := BuildPlan(uefiDescriptor())
-	if err != nil {
-		t.Fatalf("BuildPlan: %v", err)
-	}
-	if pl.Disk != "/dev/sda" || !pl.Wipe {
-		t.Fatalf("plan disk/wipe = %q/%v", pl.Disk, pl.Wipe)
-	}
-	if len(pl.Parts) != 3 {
-		t.Fatalf("got %d partitions, want 3", len(pl.Parts))
-	}
-	wantDev := []string{"/dev/sda1", "/dev/sda2", "/dev/sda3"}
-	for i, p := range pl.Parts {
-		if p.Number != i+1 {
-			t.Errorf("part %d number = %d", i, p.Number)
-		}
-		if p.Device != wantDev[i] {
-			t.Errorf("part %d device = %q, want %q", i, p.Device, wantDev[i])
-		}
-	}
-}
-
-func TestBuildPlanRestNotLast(t *testing.T) {
-	d := &descriptor.Descriptor{
-		TargetDisk: "/dev/sda",
-		Wipe:       true,
-		Partitions: []descriptor.Partition{
-			{Mountpoint: "/", Size: descriptor.SizeRest, Filesystem: "ext4"},
-			{Mountpoint: "/home", Size: "10G", Filesystem: "ext4"},
-		},
-	}
-	if _, err := BuildPlan(d); err == nil {
-		t.Fatal("BuildPlan with non-final rest partition = nil error, want failure")
-	}
-}
-
-func TestBuildPlanBoundaries(t *testing.T) {
-	if _, err := BuildPlan(&descriptor.Descriptor{Partitions: []descriptor.Partition{{}}}); err == nil {
-		t.Error("BuildPlan with no disk = nil error, want failure")
-	}
-	if _, err := BuildPlan(&descriptor.Descriptor{TargetDisk: "/dev/sda"}); err == nil {
-		t.Error("BuildPlan with no partitions = nil error, want failure")
 	}
 }
 
 func TestCommandsDryRun(t *testing.T) {
-	pl, err := BuildPlan(uefiDescriptor())
-	if err != nil {
-		t.Fatalf("BuildPlan: %v", err)
-	}
-	cmds, err := pl.Commands()
+	cmds, err := uefiPlan().Commands()
 	if err != nil {
 		t.Fatalf("Commands: %v", err)
 	}
@@ -127,18 +77,15 @@ func TestCommandsDryRun(t *testing.T) {
 		"parted -s /dev/sda mklabel gpt",
 		"parted -a optimal --script /dev/sda mkpart EFI fat32 0% 512MiB",
 		"parted -a optimal --script /dev/sda mkpart linux-swap 512MiB 2560MiB",
-		"parted -a optimal --script /dev/sda mkpart / 2560MiB 100%",
+		"parted -a optimal --script /dev/sda mkpart / 2560MiB 100%", // the "rest" partition
 		"sgdisk /dev/sda --typecode=1:C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
 		"sgdisk /dev/sda --typecode=2:0657FD6D-A4AB-43C4-84E5-0933C84B4F4F",
 		"sgdisk /dev/sda --typecode=3:4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709",
 		"partprobe /dev/sda",
 		"mkfs.vfat -n EFI -F32 /dev/sda1",
-		"mkswap -L root /dev/sda2", // swap has no label here; see below
+		"mkswap /dev/sda2", // swap carries no label here
 		"mkfs.ext4 -L root -v -F -b 4096 /dev/sda3",
 	}
-	// The swap partition carries no label, so correct the expectation.
-	want[9] = "mkswap /dev/sda2"
-
 	for _, line := range want {
 		if !strings.Contains(got, line) {
 			t.Errorf("dry run missing line:\n  %s\nfull output:\n%s", line, got)
@@ -147,12 +94,8 @@ func TestCommandsDryRun(t *testing.T) {
 }
 
 func TestCommandsNoWipeSkipsMklabel(t *testing.T) {
-	d := uefiDescriptor()
-	d.Wipe = false
-	pl, err := BuildPlan(d)
-	if err != nil {
-		t.Fatalf("BuildPlan: %v", err)
-	}
+	pl := uefiPlan()
+	pl.Wipe = false
 	cmds, err := pl.Commands()
 	if err != nil {
 		t.Fatalf("Commands: %v", err)

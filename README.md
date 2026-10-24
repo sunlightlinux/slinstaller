@@ -6,7 +6,8 @@ The system installer for **Sunlight Linux**, a UEFI-only Linux distribution.
 > a new installer, written in **Go** as a port and adaptation of
 > [clr-installer](https://github.com/clearlinux/clr-installer): its core
 > subsystems are ported from clr-installer and reduced to what Sunlight Linux
-> installs, while the front-ends and the install descriptor are its own.
+> installs, and reads clr-installer's config format so an existing
+> clr-installer `config.yaml` runs here.
 
 ## What it does
 

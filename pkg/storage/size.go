@@ -5,12 +5,13 @@ import (
 	"strconv"
 )
 
-// ParseSize converts a descriptor size such as "512M" or "8G" to bytes.
+// ParseSize converts a Plan partition size such as "512M" or "8G" to
+// bytes.
 //
 // It accepts an integer followed by an optional K, M, G or T, which are
-// powers of 1024 — the same grammar the descriptor validates. The value
-// "rest" is not a size and is rejected here; the caller handles it as
-// "whatever remains on the disk".
+// powers of 1024, or a bare byte count. The value "rest" is not a size
+// and is rejected here; the caller handles it as "whatever remains on
+// the disk".
 func ParseSize(s string) (uint64, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty size")

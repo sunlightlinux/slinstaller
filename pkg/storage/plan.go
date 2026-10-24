@@ -1,16 +1,12 @@
 package storage
 
-import (
-	"fmt"
-
-	"github.com/sunlightlinux/slinstaller/pkg/descriptor"
-)
+import "fmt"
 
 // Partition is one partition to create on the target disk.
 //
-// Number and Device are what the descriptor does not carry: the on-disk
-// position, in declaration order, and the device path the kernel will
-// give it. Everything else is copied from the descriptor's partition.
+// Number and Device are the on-disk position and the device path the
+// kernel gives it; the rest describes the filesystem to make there. The
+// caller — pkg/config — fills these in from the install config.
 type Partition struct {
 	Number int
 	Device string // e.g. /dev/sda1
@@ -19,7 +15,7 @@ type Partition struct {
 	Filesystem string
 	Label      string
 
-	// Size is a human size such as "512M", or descriptor.SizeRest for
+	// Size is a byte count, a human size such as "512M", or restSize for
 	// the partition that takes whatever space is left.
 	Size string
 }
@@ -30,39 +26,6 @@ type Plan struct {
 	Disk  string
 	Wipe  bool
 	Parts []Partition
-}
-
-// BuildPlan derives the on-disk layout from a descriptor.
-//
-// It assumes the descriptor has already passed Validate — this is not a
-// second validator — but it rechecks the few things that would make the
-// layout meaningless rather than merely invalid: a target disk must be
-// named, there must be partitions, and the "rest" partition, if any,
-// must be last, because a partition after it would have nowhere to go.
-func BuildPlan(d *descriptor.Descriptor) (*Plan, error) {
-	if d.TargetDisk == "" {
-		return nil, fmt.Errorf("storage: no target disk")
-	}
-	if len(d.Partitions) == 0 {
-		return nil, fmt.Errorf("storage: no partitions declared")
-	}
-
-	pl := &Plan{Disk: d.TargetDisk, Wipe: d.Wipe}
-	for i, p := range d.Partitions {
-		if p.Size == descriptor.SizeRest && i != len(d.Partitions)-1 {
-			return nil, fmt.Errorf("storage: partition %d has size %q but is not the last; %q must be the final partition",
-				i, descriptor.SizeRest, descriptor.SizeRest)
-		}
-		pl.Parts = append(pl.Parts, Partition{
-			Number:     i + 1,
-			Device:     PartitionName(d.TargetDisk, i+1),
-			Mountpoint: p.Mountpoint,
-			Filesystem: p.Filesystem,
-			Label:      p.Label,
-			Size:       p.Size,
-		})
-	}
-	return pl, nil
 }
 
 // PartitionName returns the device path for partition n on disk:

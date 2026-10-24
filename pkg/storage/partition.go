@@ -17,7 +17,7 @@ func (pl *Plan) Commands() ([][]string, error) {
 	var cmds [][]string
 
 	// mklabel destroys the existing partition table, so it is gated on
-	// Wipe — the descriptor's explicit authorisation to repartition.
+	// Wipe — the config's explicit authorisation to repartition.
 	if pl.Wipe {
 		cmds = append(cmds, []string{"parted", "-s", pl.Disk, "mklabel", "gpt"})
 	}
@@ -70,9 +70,9 @@ func (pl *Plan) Commands() ([][]string, error) {
 	return cmds, nil
 }
 
-// restSize mirrors descriptor.SizeRest without importing it into every
-// file; BuildPlan copies the value straight from the descriptor, so the
-// literal match holds.
+// restSize is the Partition.Size value meaning "all remaining space".
+// A caller that knows a partition's exact size gives it as bytes or a
+// human size; one that wants a partition to fill the disk uses this.
 const restSize = "rest"
 
 // partedMkpart builds one mkpart command. The ESP is named EFI with an

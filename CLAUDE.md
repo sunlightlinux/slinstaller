@@ -11,8 +11,9 @@ installer for Sunlight Linux (a UEFI-only distribution).
 > **Status:** a new installer, written in **Go** as a port and adaptation of
 > [clr-installer](https://github.com/clearlinux/clr-installer). The core
 > subsystems are ported from clr-installer package by package and reduced to
-> what Sunlight Linux installs; the front-ends and the install descriptor are
-> slinstaller's own.
+> what Sunlight Linux installs, and it reads clr-installer's config format so
+> an existing clr-installer `config.yaml` runs here — the same relationship
+> slinit has to dinit.
 
 **Tradeoff:** These guidelines bias toward caution over speed. An installer
 runs as root and performs **irreversible** operations (partitioning, `mkfs`,
