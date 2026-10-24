@@ -56,12 +56,19 @@ if [ "${FRESH}" -eq 1 ]; then
 fi
 
 # Locate the OVMF firmware (read-only code) and seed a writable VARS copy.
+# Naming varies a lot across distros: Debian/Fedora use OVMF_CODE*.fd,
+# openSUSE/qemu use ovmf-x86_64-*-code.bin, Arch uses edk2 paths.
 if [ -z "${OVMF_CODE:-}" ]; then
     for c in \
-        /usr/share/OVMF/OVMF_CODE.fd \
+        /usr/share/OVMF/OVMF_CODE.4m.fd \
         /usr/share/OVMF/OVMF_CODE_4M.fd \
+        /usr/share/OVMF/OVMF_CODE.fd \
         /usr/share/edk2/x64/OVMF_CODE.4m.fd \
+        /usr/share/edk2/x64/OVMF_CODE.fd \
+        /usr/share/edk2/ovmf/OVMF_CODE.fd \
         /usr/share/edk2-ovmf/x64/OVMF_CODE.fd \
+        /usr/share/qemu/ovmf-x86_64-4m-code.bin \
+        /usr/share/qemu/ovmf-x86_64-code.bin \
         /usr/share/qemu/OVMF_CODE.fd; do
         [ -f "$c" ] && OVMF_CODE="$c" && break
     done
@@ -70,12 +77,22 @@ if [ -z "${OVMF_CODE:-}" ] || [ ! -f "${OVMF_CODE}" ]; then
     echo "Error: OVMF firmware not found. Install edk2/OVMF, or set OVMF_CODE=/path/to/OVMF_CODE.fd" >&2
     exit 1
 fi
+echo "→ OVMF firmware: ${OVMF_CODE}"
 if [ ! -f "${VARS}" ]; then
-    # Pair the VARS template with the CODE we found; fall back to blank.
-    tmpl="${OVMF_CODE/CODE/VARS}"
-    if [ -f "${tmpl}" ]; then
-        cp "${tmpl}" "${VARS}"
+    # Find the matching writable VARS template next to the CODE image.
+    tmpl=""
+    for cand in \
+        "${OVMF_VARS:-}" \
+        "${OVMF_CODE/-code./-vars.}" \
+        "${OVMF_CODE/code/vars}" \
+        "${OVMF_CODE/CODE/VARS}"; do
+        [ -n "$cand" ] && [ -f "$cand" ] && tmpl="$cand" && break
+    done
+    if [ -n "$tmpl" ]; then
+        echo "→ OVMF NVRAM template: ${tmpl}"
+        cp "$tmpl" "${VARS}"
     else
+        echo "→ OVMF NVRAM: no template found, starting blank"
         truncate -s 540672 "${VARS}" # 528K, standard 4M-split VARS size
     fi
 fi
