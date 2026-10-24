@@ -37,12 +37,17 @@ for what will and will not be allowed to change once releases begin.
   signing keys into the target, `xbps-install` from the repository, then a
   chrooted `xbps-reconfigure -fa`. Expressed as a command list; the
   repository, keys, architecture and package set are the caller's to supply.
+- `pkg/grub` — the UEFI bootloader install: chrooted `grub-install` (which
+  writes the loader to the ESP and registers the firmware boot entry) and
+  `grub-mkconfig`. Kernel arguments from the config are rendered into
+  `/etc/default/grub`. clr-installer uses clr-boot-manager, which is
+  Clear-specific; GRUB is Sunlight's choice, as it is Void's.
 - `pkg/controller` — sequences the install from a config: partition →
-  mount → bind meta filesystems → base-system install → fstab (bootloader
-  and first-boot config to follow). It refuses a full install while those
-  later steps are unimplemented rather than wipe a disk it cannot finish;
-  a run names how far to go (`Options.Through`) to exercise the available
-  stages in a VM, and cleans up mounts on failure.
+  mount → bind meta filesystems → base-system install → fstab → bootloader
+  (first-boot config to follow). It refuses a full install while the
+  remaining step is unimplemented rather than wipe a disk it cannot
+  finish; a run names how far to go (`Options.Through`) to exercise the
+  available stages in a VM, and cleans up mounts on failure.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,
   and prints the partitioning plan. With `--apply` it runs the install
   through the controller, gated on running as root and on the operator

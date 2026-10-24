@@ -28,9 +28,11 @@ var version = "0.0.0-dev"
 // repo exists. base-system is what void-installer lays down (it still
 // pulls runit; slinit replaces it once it is in a repo we control).
 const (
-	defaultRepo     = "https://repo-default.voidlinux.org/current"
-	defaultKeysDir  = "/var/db/xbps/keys"
-	defaultPackages = "base-system"
+	defaultRepo    = "https://repo-default.voidlinux.org/current"
+	defaultKeysDir = "/var/db/xbps/keys"
+	// base-system is the Void base; grub-x86_64-efi is the UEFI
+	// bootloader (x86_64 — override --packages for another architecture).
+	defaultPackages = "base-system,grub-x86_64-efi"
 )
 
 func main() {
@@ -131,13 +133,19 @@ func run(args []string) error {
 		}
 	}
 
+	var kernelArgs []string
+	if cfg.KernelArguments != nil {
+		kernelArgs = cfg.KernelArguments.Add
+	}
+
 	opts := controller.Options{
-		Root:     root,
-		Through:  through,
-		Repo:     repo,
-		KeysDir:  keys,
-		Arch:     arch,
-		Packages: packages,
+		Root:       root,
+		Through:    through,
+		Repo:       repo,
+		KeysDir:    keys,
+		Arch:       arch,
+		Packages:   packages,
+		KernelArgs: kernelArgs,
 	}
 
 	// With no stage limit the controller refuses — a full install is not

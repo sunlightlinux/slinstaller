@@ -16,9 +16,12 @@ package controller
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
+	"github.com/sunlightlinux/slinstaller/pkg/grub"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/xbps"
 )
@@ -40,6 +43,9 @@ type Options struct {
 	KeysDir  string
 	Arch     string
 	Packages []string
+
+	// KernelArgs are added to the kernel command line via the bootloader.
+	KernelArgs []string
 
 	// Through names the last stage to run, inclusive. It is required
 	// until a full install is possible, so a run cannot begin a
@@ -76,9 +82,9 @@ type stage struct {
 	run  func() error
 }
 
-// stages are the install steps implemented today, in order. The
-// bootloader and first-boot config come after these and are not
-// sequenced yet — they join as they land.
+// stages are the install steps implemented today, in order. First-boot
+// config comes after these and is not sequenced yet — it joins as it
+// lands.
 func (in *installer) stages() []stage {
 	return []stage{
 		{"partition", in.partition},
@@ -86,6 +92,7 @@ func (in *installer) stages() []stage {
 		{"meta-fs", in.mountMeta},
 		{"base-install", in.baseInstall},
 		{"fstab", in.fstab},
+		{"bootloader", in.bootloader},
 	}
 }
 
@@ -93,8 +100,8 @@ func (in *installer) run() error {
 	stages := in.stages()
 
 	if in.opts.Through == "" {
-		return fmt.Errorf("controller: a full install also needs bootloader and "+
-			"first-boot config, which are not implemented yet; "+
+		return fmt.Errorf("controller: a full install also needs first-boot config, "+
+			"which is not implemented yet; "+
 			"pass Through to run the available stages (%s) in a VM", stageNames(stages))
 	}
 
@@ -154,6 +161,40 @@ func (in *installer) fstab() error {
 		return err
 	}
 	return storage.WriteFstab(in.opts.Root, in.plan.Fstab(uuids))
+}
+
+// bootloader installs GRUB onto the ESP and registers the firmware boot
+// entry. Any kernel arguments are written to /etc/default/grub before
+// grub-mkconfig reads it.
+func (in *installer) bootloader() error {
+	esp := in.plan.ESPMountpoint()
+	if esp == "" {
+		return fmt.Errorf("no EFI System Partition in the plan")
+	}
+
+	g := grub.Options{Root: in.opts.Root, ESPDir: esp, KernelArgs: in.opts.KernelArgs}
+
+	if line := g.CmdlineConfig(); line != "" {
+		path := filepath.Join(in.opts.Root, "etc", "default", "grub")
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", path, err)
+		}
+		_, werr := f.WriteString("\n# kernel command line set by slinstaller\n" + line)
+		cerr := f.Close()
+		if werr != nil {
+			return werr
+		}
+		if cerr != nil {
+			return cerr
+		}
+	}
+
+	cmds, err := g.Commands()
+	if err != nil {
+		return err
+	}
+	return storage.RunCommands(cmds, in.opts.Runner)
 }
 
 func stageNames(stages []stage) string {

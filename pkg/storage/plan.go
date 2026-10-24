@@ -62,6 +62,18 @@ func (p Partition) isESP() bool {
 	return p.Filesystem == "vfat" && (p.Mountpoint == "/boot" || p.Mountpoint == "/boot/efi")
 }
 
+// ESPMountpoint returns where the EFI System Partition is mounted in the
+// target (e.g. /boot), or "" if the plan has no ESP. The bootloader
+// needs it to know which directory is the ESP.
+func (pl *Plan) ESPMountpoint() string {
+	for _, p := range pl.Parts {
+		if p.isESP() {
+			return p.Mountpoint
+		}
+	}
+	return ""
+}
+
 // guid returns the GPT type code for this partition, or "" to leave it
 // at parted's default.
 func (p Partition) guid() string {
