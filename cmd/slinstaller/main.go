@@ -31,8 +31,9 @@ const (
 	defaultRepo    = "https://repo-default.voidlinux.org/current"
 	defaultKeysDir = "/var/db/xbps/keys"
 	// base-system is the Void base; grub-x86_64-efi is the UEFI
-	// bootloader (x86_64 — override --packages for another architecture).
-	defaultPackages = "base-system,grub-x86_64-efi"
+	// bootloader (x86_64 — override --packages for another architecture);
+	// glibc-locales lets the configured locale be generated.
+	defaultPackages = "base-system,grub-x86_64-efi,glibc-locales"
 )
 
 func main() {

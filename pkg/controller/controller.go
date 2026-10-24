@@ -214,9 +214,9 @@ func (in *installer) bootloader() error {
 	return storage.RunCommands(cmds, in.opts.Runner)
 }
 
-// firstBoot sets the installed system's hostname, timezone and user
-// accounts. Keymap, locale and network are not configured yet — they
-// wait on the slinit conventions for them.
+// firstBoot sets the installed system's hostname, timezone, console
+// keymap, locale and user accounts. Network configuration is the one
+// first-boot piece still to come.
 func (in *installer) firstBoot() error {
 	root := in.opts.Root
 	if err := system.Hostname(root, in.cfg.Hostname); err != nil {
@@ -224,6 +224,19 @@ func (in *installer) firstBoot() error {
 	}
 	if err := system.Timezone(root, in.cfg.Timezone); err != nil {
 		return err
+	}
+	if err := system.Keymap(root, in.cfg.Keyboard); err != nil {
+		return err
+	}
+	if generated, err := system.Locale(root, in.cfg.Language); err != nil {
+		return err
+	} else if generated {
+		// Regenerate glibc locales so the one just enabled exists.
+		if err := storage.RunCommands(
+			[][]string{{"chroot", root, "xbps-reconfigure", "-f", "glibc-locales"}},
+			in.opts.Runner); err != nil {
+			return err
+		}
 	}
 
 	for _, cu := range in.cfg.Users {

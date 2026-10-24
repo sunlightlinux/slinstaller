@@ -1,11 +1,13 @@
 // Package system configures the installed target: its hostname,
-// timezone and user accounts — the first-boot settings that make a
-// freshly installed disk usable.
+// timezone, console keymap, locale and user accounts — the first-boot
+// settings that make a freshly installed disk usable.
 //
-// This is the universal part of first-boot, the same on any Linux. The
-// parts that depend on how Sunlight and slinit are wired — console
-// keymap, locale generation, network interfaces — are not here yet; they
-// follow once those conventions are settled.
+// hostname and timezone are the same on any Linux; keymap uses
+// /etc/rc.conf, which both Void's core services and slinit's OpenRC
+// compatibility read; locale follows the glibc convention. Network
+// interface configuration is the remaining first-boot piece and is not
+// here yet — it is the most service-manager-specific, and waits on the
+// slinit conventions for it.
 package system
 
 import (
@@ -47,6 +49,76 @@ func Timezone(root, tz string) error {
 		return fmt.Errorf("system: link localtime: %w", err)
 	}
 	return nil
+}
+
+// Keymap sets the console keymap by appending KEYMAP to /etc/rc.conf,
+// which is where both Void's core services and slinit's OpenRC
+// compatibility read it. An empty code is a no-op.
+func Keymap(root, code string) error {
+	if code == "" {
+		return nil
+	}
+	path := filepath.Join(root, "etc", "rc.conf")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("system: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("system: open rc.conf: %w", err)
+	}
+	_, werr := fmt.Fprintf(f, "\n# console keymap set by slinstaller\nKEYMAP=%q\n", code)
+	cerr := f.Close()
+	if werr != nil {
+		return fmt.Errorf("system: write rc.conf: %w", werr)
+	}
+	return cerr
+}
+
+// Locale sets the system locale. It writes /etc/locale.conf and, on a
+// glibc system, uncomments the matching line in /etc/default/libc-locales
+// so the locale can be generated. It reports whether a glibc locale was
+// enabled, which tells the caller to regenerate locales; musl has neither
+// the file nor the need, so there it is a no-op beyond locale.conf. An
+// empty lang is a no-op.
+func Locale(root, lang string) (bool, error) {
+	if lang == "" {
+		return false, nil
+	}
+
+	conf := filepath.Join(root, "etc", "locale.conf")
+	if err := os.MkdirAll(filepath.Dir(conf), 0o755); err != nil {
+		return false, fmt.Errorf("system: %w", err)
+	}
+	if err := os.WriteFile(conf, []byte("LANG="+lang+"\n"), 0o644); err != nil {
+		return false, fmt.Errorf("system: write locale.conf: %w", err)
+	}
+
+	locales := filepath.Join(root, "etc", "default", "libc-locales")
+	data, err := os.ReadFile(locales)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil // musl: nothing to generate
+		}
+		return false, fmt.Errorf("system: read libc-locales: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	changed := false
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "#") {
+			continue
+		}
+		if fields := strings.Fields(strings.TrimLeft(line, "# ")); len(fields) > 0 && fields[0] == lang {
+			lines[i] = strings.TrimPrefix(line, "#")
+			changed = true
+		}
+	}
+	if changed {
+		if err := os.WriteFile(locales, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+			return false, fmt.Errorf("system: write libc-locales: %w", err)
+		}
+	}
+	return changed, nil
 }
 
 // User is an account to create in the target.

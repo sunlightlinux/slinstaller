@@ -43,11 +43,14 @@ for what will and will not be allowed to change once releases begin.
   `grub-mkconfig`. Kernel arguments from the config are rendered into
   `/etc/default/grub`. clr-installer uses clr-boot-manager, which is
   Clear-specific; GRUB is Sunlight's choice, as it is Void's.
-- `pkg/system` — the universal part of first-boot config: hostname
-  (`/etc/hostname`), timezone (the `/etc/localtime` symlink), and user
-  accounts (`useradd` with the crypt-hash password via `-p`, `wheel` for
-  admins, and `authorized_keys` for any SSH keys). Keymap, locale and
-  network wait on slinit's conventions.
+- `pkg/system` — first-boot config: hostname (`/etc/hostname`), timezone
+  (the `/etc/localtime` symlink), console keymap (`KEYMAP` in
+  `/etc/rc.conf`, which Void's core services and slinit's OpenRC
+  compatibility both read), locale (`/etc/locale.conf` plus uncommenting
+  the glibc `libc-locales` entry, with the controller regenerating
+  locales), and user accounts (`useradd` with the crypt-hash password via
+  `-p`, `wheel` for admins, and `authorized_keys` for any SSH keys).
+  Network interfaces are the one first-boot piece still to come.
 - `pkg/controller` — sequences the whole install from a config:
   pre-install hooks → partition → mount → bind meta filesystems →
   base-system install → fstab → bootloader → first-boot → post-install
