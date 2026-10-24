@@ -24,6 +24,7 @@ import (
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/grub"
+	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
 	"github.com/sunlightlinux/slinstaller/pkg/xbps"
@@ -98,6 +99,7 @@ func (in *installer) stages() []stage {
 		{"fstab", in.fstab},
 		{"bootloader", in.bootloader},
 		{"first-boot", in.firstBoot},
+		{"network", in.network},
 		{"post-install", in.postHooks},
 	}
 }
@@ -215,8 +217,7 @@ func (in *installer) bootloader() error {
 }
 
 // firstBoot sets the installed system's hostname, timezone, console
-// keymap, locale and user accounts. Network configuration is the one
-// first-boot piece still to come.
+// keymap, locale and user accounts. Networking is its own stage.
 func (in *installer) firstBoot() error {
 	root := in.opts.Root
 	if err := system.Hostname(root, in.cfg.Hostname); err != nil {
@@ -263,6 +264,55 @@ func (in *installer) firstBoot() error {
 		}
 	}
 	return nil
+}
+
+// network configures the installed system's networking: static
+// interfaces from the config become /etc/dhcpcd.conf stanzas, and dhcpcd
+// is enabled so the system comes up with DHCP on the rest. dhcpcd is
+// enabled even with no interfaces declared, so a plain install still has
+// network.
+func (in *installer) network() error {
+	var ifaces []network.Interface
+	for _, ni := range in.cfg.NetworkInterfaces {
+		if ni == nil || ni.Name == "" {
+			continue
+		}
+		iface := network.Interface{
+			Name:    ni.Name,
+			Static:  strings.EqualFold(ni.DHCP, "false") && len(ni.Addrs) > 0,
+			Gateway: ni.Gateway,
+			DNS:     ni.DNS,
+		}
+		for _, a := range ni.Addrs {
+			if a == nil {
+				continue
+			}
+			iface.Addrs = append(iface.Addrs, network.Addr{IP: a.IP, Netmask: a.Netmask, V6: a.Version == 1})
+		}
+		ifaces = append(ifaces, iface)
+	}
+
+	conf, err := network.DhcpcdConf(ifaces)
+	if err != nil {
+		return err
+	}
+	if conf != "" {
+		path := filepath.Join(in.opts.Root, "etc", "dhcpcd.conf")
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", path, err)
+		}
+		_, werr := f.WriteString(conf)
+		cerr := f.Close()
+		if werr != nil {
+			return werr
+		}
+		if cerr != nil {
+			return cerr
+		}
+	}
+
+	return system.EnableService(in.opts.Root, "dhcpcd")
 }
 
 func (in *installer) preHooks() error  { return in.runHooks(in.cfg.PreInstall) }

@@ -153,3 +153,18 @@ func TestLocaleMusl(t *testing.T) {
 		t.Error("locale.conf should still be written")
 	}
 }
+
+func TestEnableService(t *testing.T) {
+	root := t.TempDir()
+	if err := EnableService(root, "dhcpcd"); err != nil {
+		t.Fatalf("EnableService: %v", err)
+	}
+	link := filepath.Join(root, "etc", "runit", "runsvdir", "default", "dhcpcd")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if target != "/etc/sv/dhcpcd" {
+		t.Errorf("service link -> %q, want /etc/sv/dhcpcd", target)
+	}
+}

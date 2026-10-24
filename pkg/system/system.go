@@ -4,10 +4,9 @@
 //
 // hostname and timezone are the same on any Linux; keymap uses
 // /etc/rc.conf, which both Void's core services and slinit's OpenRC
-// compatibility read; locale follows the glibc convention. Network
-// interface configuration is the remaining first-boot piece and is not
-// here yet — it is the most service-manager-specific, and waits on the
-// slinit conventions for it.
+// compatibility read; locale follows the glibc convention. EnableService
+// turns on a runit service in the target. Network interface
+// configuration itself lives in pkg/network.
 package system
 
 import (
@@ -119,6 +118,24 @@ func Locale(root, lang string) (bool, error) {
 		}
 	}
 	return changed, nil
+}
+
+// EnableService enables a runit service in the target by symlinking it
+// into the default runsvdir, which is what runit scans at boot. It
+// points straight at /etc/runit/runsvdir/default rather than /var/service
+// (a symlink that may not resolve from outside the installed system), the
+// chroot-free way to enable a Void service at install time.
+func EnableService(root, name string) error {
+	dir := filepath.Join(root, "etc", "runit", "runsvdir", "default")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("system: %w", err)
+	}
+	link := filepath.Join(dir, name)
+	_ = os.Remove(link)
+	if err := os.Symlink("/etc/sv/"+name, link); err != nil {
+		return fmt.Errorf("system: enable service %s: %w", name, err)
+	}
+	return nil
 }
 
 // User is an account to create in the target.

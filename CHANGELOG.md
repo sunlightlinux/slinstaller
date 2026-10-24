@@ -49,12 +49,17 @@ for what will and will not be allowed to change once releases begin.
   compatibility both read), locale (`/etc/locale.conf` plus uncommenting
   the glibc `libc-locales` entry, with the controller regenerating
   locales), and user accounts (`useradd` with the crypt-hash password via
-  `-p`, `wheel` for admins, and `authorized_keys` for any SSH keys).
-  Network interfaces are the one first-boot piece still to come.
+  `-p`, `wheel` for admins, and `authorized_keys` for any SSH keys), plus
+  `EnableService` to turn on a runit service in the target.
+- `pkg/network` — the installed system's networking, via dhcpcd rather
+  than clr-installer's systemd-networkd/NetworkManager (Sunlight has no
+  systemd). Static interfaces from the config become `/etc/dhcpcd.conf`
+  stanzas; dhcpcd is enabled so DHCP covers the rest, and so a plain
+  install still comes up with network.
 - `pkg/controller` — sequences the whole install from a config:
   pre-install hooks → partition → mount → bind meta filesystems →
-  base-system install → fstab → bootloader → first-boot → post-install
-  hooks. A full install runs end to end (gated by the front-end on root
+  base-system install → fstab → bootloader → first-boot → network →
+  post-install hooks. A full install runs end to end (gated by the front-end on root
   and disk confirmation); `Options.Through` stops after a named stage for
   a staged VM run, and a failure unmounts what it mounted.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,

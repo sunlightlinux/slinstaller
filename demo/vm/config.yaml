@@ -43,14 +43,8 @@ users:
 # config feature). It runs chrooted in the target, after the account
 # exists, and writes a sudoers drop-in. sudo reads everything in
 # /etc/sudoers.d; the 0440 mode is what sudo requires.
+# Networking is handled by the install's network stage (dhcpcd enabled,
+# DHCP by default), so no hook is needed for it.
 post-install:
 - chroot: true
   cmd: "echo 'demo ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/demo && chmod 0440 /etc/sudoers.d/demo"
-# Enable DHCP so the installed system has network. slinstaller does not
-# configure networkInterfaces yet, so without this the base boots with
-# only `lo`. Enable the service by symlinking into the default runsvdir
-# directly — /var/service is a symlink to it and may not resolve inside
-# the install chroot, but the default dir is real and is what runit scans
-# at boot. dhcpcd then brings up every interface.
-- chroot: true
-  cmd: "ln -sf /etc/sv/dhcpcd /etc/runit/runsvdir/default/dhcpcd"
