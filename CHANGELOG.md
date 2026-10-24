@@ -81,6 +81,11 @@ for what will and will not be allowed to change once releases begin.
   systemd). Static interfaces from the config become `/etc/dhcpcd.conf`
   stanzas; dhcpcd is enabled so DHCP covers the rest, and so a plain
   install still comes up with network.
+- Three smaller clr-installer parities: install hooks get `$chrootDir`
+  and `$chrooted` in their environment, as clr expands them; the config's
+  `httpsProxy` is passed to `xbps-install` for the download; and
+  `kernel-arguments`'s `remove` list is honoured (its entries are dropped
+  from what slinstaller writes to the kernel command line).
 - `pkg/controller` — sequences the whole install from a config:
   pre-install hooks → partition → mount → bind meta filesystems →
   base-system install → fstab → bootloader → first-boot → network →

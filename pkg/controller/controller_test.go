@@ -76,8 +76,13 @@ func TestInstallThroughPreInstallRunsHooks(t *testing.T) {
 	if err := Install(cfg, Options{Through: "pre-install", Runner: r.run}); err != nil {
 		t.Fatalf("Install through pre-install: %v", err)
 	}
-	if got := r.flat(); !strings.Contains(got, "sh -c echo hello") {
+	got := r.flat()
+	if !strings.Contains(got, "sh -c echo hello") {
 		t.Errorf("pre-install hook not run: %q", got)
+	}
+	// clr-style hook variables are passed as environment.
+	if !strings.Contains(got, "chrootDir=") || !strings.Contains(got, "chrooted=0") {
+		t.Errorf("hook env vars missing: %q", got)
 	}
 	if strings.Contains(r.flat(), "parted") {
 		t.Error("pre-install stage reached partition")

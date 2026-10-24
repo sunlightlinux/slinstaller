@@ -187,6 +187,7 @@ func (in *installer) baseInstall() error {
 		Repo:     in.opts.Repo,
 		KeysDir:  in.opts.KeysDir,
 		Arch:     in.opts.Arch,
+		Proxy:    in.cfg.HTTPSProxy,
 		Packages: in.opts.Packages,
 	}.Commands()
 	if err != nil {
@@ -267,9 +268,21 @@ func (in *installer) bootloader() error {
 		return fmt.Errorf("no EFI System Partition in the plan")
 	}
 
+	// Kernel arguments: the config's additions, minus any it also asks to
+	// remove. GRUB has no "remove" directive and slinstaller writes the
+	// whole default command line itself, so a removed argument is simply
+	// one slinstaller does not write.
 	var kargs []string
 	if in.cfg.KernelArguments != nil {
-		kargs = in.cfg.KernelArguments.Add
+		remove := map[string]bool{}
+		for _, r := range in.cfg.KernelArguments.Remove {
+			remove[r] = true
+		}
+		for _, a := range in.cfg.KernelArguments.Add {
+			if !remove[a] {
+				kargs = append(kargs, a)
+			}
+		}
 	}
 
 	// An encrypted root must be unlocked by the initramfs before the
@@ -449,11 +462,14 @@ func (in *installer) runHooks(hooks []*config.Hook) error {
 		if h == nil || h.Cmd == "" {
 			continue
 		}
+		// clr-installer expands $chrootDir and $chrooted in hook commands;
+		// pass them as environment so the shell does the same. Inside the
+		// chroot the target root is /; outside it is the mount tree.
 		var cmd []string
 		if h.Chroot {
-			cmd = []string{"chroot", in.opts.Root, "sh", "-c", h.Cmd}
+			cmd = []string{"chroot", in.opts.Root, "env", "chrootDir=/", "chrooted=1", "sh", "-c", h.Cmd}
 		} else {
-			cmd = []string{"sh", "-c", h.Cmd}
+			cmd = []string{"env", "chrootDir=" + in.opts.Root, "chrooted=0", "sh", "-c", h.Cmd}
 		}
 		if err := storage.RunCommands([][]string{cmd}, in.opts.Runner); err != nil {
 			return err
