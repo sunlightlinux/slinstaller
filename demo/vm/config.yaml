@@ -38,3 +38,11 @@ users:
 - login: demo
   password: "$6$VSGJJlJ4HsRjJiL0$iOD.YPsE3bTdnzcjVnRcTiskHk8Qi3H2s9H6.p.b7N9n/OTajSFtM1B1j46w5L6wZiLyAmxmyXTzILnIvhetM0"
   admin: true
+
+# Passwordless sudo for demo, via a post-install hook (a clr-installer
+# config feature). It runs chrooted in the target, after the account
+# exists, and writes a sudoers drop-in. sudo reads everything in
+# /etc/sudoers.d; the 0440 mode is what sudo requires.
+post-install:
+- chroot: true
+  cmd: "echo 'demo ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/demo && chmod 0440 /etc/sudoers.d/demo"
