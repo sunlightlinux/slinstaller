@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -126,33 +127,94 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
-// Validate checks the few things that must hold for the config to
-// describe a bootable UEFI install, before any disk is touched.
+// hostnameRe is the conservative intersection of what Linux and DNS
+// accept: letters, digits and hyphens, not starting or ending with one.
+var hostnameRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
+
+// Validate checks what must hold for the config to describe a bootable
+// UEFI install, before any disk is touched. It reports every problem it
+// finds at once, so an operator fixing a config by hand does not have to
+// run it once per mistake.
+//
+// It stays within clr-installer compatibility: it does not require fields
+// a valid clr config may omit (a login account, a hostname), only
+// rejects layouts that cannot install or boot.
 func (c *Config) Validate() error {
 	disk, err := c.installDisk()
 	if err != nil {
 		return err
 	}
 
-	var root, esp bool
-	for _, ch := range disk.Children {
+	var probs []string
+	add := func(format string, a ...any) { probs = append(probs, fmt.Sprintf(format, a...)) }
+
+	roots, esps := 0, 0
+	seen := map[string]bool{}
+	for i, ch := range disk.Children {
 		if ch == nil {
 			continue
 		}
+		where := ch.Name
+		if where == "" {
+			where = fmt.Sprintf("partition %d", i+1)
+		}
+
+		switch {
+		case ch.FsType == "":
+			add("%s: no filesystem", where)
+		case !storage.KnownFilesystem(ch.FsType):
+			add("%s: filesystem %q is not supported", where, ch.FsType)
+		}
+
+		if ch.Mountpoint != "" {
+			if !strings.HasPrefix(ch.Mountpoint, "/") {
+				add("%s: mountpoint %q is not absolute", where, ch.Mountpoint)
+			}
+			if seen[ch.Mountpoint] {
+				add("%s: mountpoint %q is used more than once", where, ch.Mountpoint)
+			}
+			seen[ch.Mountpoint] = true
+		}
 		if ch.Mountpoint == "/" {
-			root = true
+			roots++
 		}
+
 		if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
-			esp = true
+			esps++
+			if ch.Type == "crypt" {
+				add("%s: the EFI System Partition cannot be encrypted", where)
+			}
 		}
 	}
-	if !root {
-		return fmt.Errorf("config: no partition mounts / on %s", disk.Name)
+
+	switch roots {
+	case 0:
+		add("no partition mounts /")
+	case 1:
+	default:
+		add("%d partitions mount /", roots)
 	}
-	if !esp {
-		return fmt.Errorf("config: no EFI System Partition (vfat at /boot or /boot/efi) on %s; Sunlight Linux is UEFI-only", disk.Name)
+	if esps == 0 {
+		add("no EFI System Partition (vfat at /boot or /boot/efi); Sunlight Linux is UEFI-only")
 	}
-	return nil
+
+	if c.Hostname != "" && (len(c.Hostname) > 63 || !hostnameRe.MatchString(c.Hostname)) {
+		add("hostname %q must be 1-63 characters of letters, digits and hyphens", c.Hostname)
+	}
+	if c.SwapFileSize != "" {
+		if _, err := parseSize(c.SwapFileSize); err != nil {
+			add("swapFileSize: %v", err)
+		}
+	}
+
+	switch len(probs) {
+	case 0:
+		return nil
+	case 1:
+		return fmt.Errorf("config: %s", probs[0])
+	default:
+		return fmt.Errorf("config: %d problems:\n  - %s", len(probs), strings.Join(probs, "\n  - "))
+	}
 }
 
 // Plan turns the target disk's layout into a storage plan.

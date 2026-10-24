@@ -21,8 +21,12 @@ for what will and will not be allowed to change once releases begin.
   probe fields and Clear Linux specifics real configs carry, and the
   three size forms clr-installer writes (byte count, integer+unit,
   decimal+unit), and a missing size / 0 / "rest" on the last partition to
-  mean "fill the disk" (as clr-installer uses size 0). Tested against
-  clr-installer's own fixtures.
+  mean "fill the disk" (as clr-installer uses size 0). `Validate` reports
+  every problem at once before any disk is touched — unknown filesystem,
+  non-absolute or duplicate mountpoint, no or more than one root, no ESP,
+  an encrypted ESP, a bad hostname or swapFileSize — while staying
+  clr-compatible (it does not require fields a valid clr config may omit,
+  like a login account). Tested against clr-installer's own fixtures.
 - `pkg/blockdev` — discovers the machine's block devices with `lsblk -J`
   (size parsed whether lsblk emits a number or a string). Lean next to
   clr-installer's full BlockDevice tree: enough to confirm the target disk

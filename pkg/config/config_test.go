@@ -254,3 +254,48 @@ func TestPlanEncrypted(t *testing.T) {
 		t.Errorf("mkfs targets the raw partition:\n%s", flat)
 	}
 }
+
+func TestValidateCollectsProblems(t *testing.T) {
+	c := &Config{
+		Hostname:     "bad_host!",
+		SwapFileSize: "notasize",
+		TargetMedia: []*Media{{
+			Name: "sda", Type: "disk",
+			Children: []*Media{
+				{Name: "sda1", Type: "crypt", FsType: "vfat", Mountpoint: "/boot"}, // encrypted ESP
+				{Name: "sda2", Type: "part", FsType: "zfs", Mountpoint: "/"},       // unsupported fs
+				{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: "/"},      // second root
+				{Name: "sda4", Type: "part", FsType: "ext4", Mountpoint: "rel"},    // not absolute
+			},
+		}},
+	}
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("Validate = nil, want problems")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"EFI System Partition cannot be encrypted",
+		`"zfs" is not supported`,
+		"2 partitions mount /",
+		"not absolute",
+		"hostname",
+		"swapFileSize",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestValidateAcceptsMinimalClrConfig(t *testing.T) {
+	// A clr config with no users / no hostname must still validate — we
+	// stay compatible and do not require fields clr allows to be absent.
+	c, err := Load("testdata/valid-minimal.yaml")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("minimal clr config rejected: %v", err)
+	}
+}

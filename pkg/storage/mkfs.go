@@ -15,6 +15,17 @@ var mkfsArgs = map[string][]string{
 	"vfat":  {"-F32"},
 }
 
+// KnownFilesystem reports whether slinstaller can create this
+// filesystem, so a config can be rejected before any disk is touched
+// rather than at mkfs time.
+func KnownFilesystem(fs string) bool {
+	if fs == "swap" {
+		return true
+	}
+	_, ok := mkfsArgs[fs]
+	return ok
+}
+
 // mkfsCommand builds the command that creates this partition's
 // filesystem. Swap is special — it is mkswap, not mkfs.swap — so it is
 // handled apart; everything else is mkfs.<type> with its label and
