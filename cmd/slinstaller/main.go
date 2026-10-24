@@ -17,6 +17,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
+	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/tui"
 )
@@ -204,6 +205,15 @@ func run(args []string) error {
 			return fmt.Errorf("target disk %s is not among the machine's block devices", plan.Disk)
 		case d.Type != "disk" && d.Type != "loop":
 			return fmt.Errorf("target %s is a %s, not a whole disk", plan.Disk, d.Type)
+		}
+
+		// Fetching the base system needs the repository; check it is
+		// reachable before wiping, not after. Local (non-http) repos are
+		// skipped.
+		if strings.HasPrefix(repo, "http") {
+			if err := network.VerifyConnectivity(repo); err != nil {
+				return fmt.Errorf("%w — check the network/proxy, or pass --repo", err)
+			}
 		}
 	}
 

@@ -1,6 +1,8 @@
 package network
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -81,5 +83,21 @@ func TestMaskToCIDR(t *testing.T) {
 	}
 	if _, err := maskToCIDR("not-a-mask", false); err == nil {
 		t.Error("maskToCIDR should reject garbage")
+	}
+}
+
+func TestVerifyConnectivity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound) // any response counts as reachable
+	}))
+	defer srv.Close()
+
+	if err := VerifyConnectivity(srv.URL); err != nil {
+		t.Errorf("reachable server reported unreachable: %v", err)
+	}
+
+	// A port nothing listens on is unreachable.
+	if err := VerifyConnectivity("http://127.0.0.1:1"); err == nil {
+		t.Error("unreachable URL reported reachable")
 	}
 }

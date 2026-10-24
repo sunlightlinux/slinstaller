@@ -11,9 +11,31 @@ package network
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// VerifyConnectivity checks that url is reachable, so an install can fail
+// before wiping a disk rather than partway through the base-system
+// download. Any HTTP response counts as reachable — connectivity is the
+// question, not the exact status; only a transport error (no DNS, no
+// route) is a failure. It uses the environment's proxy, if any.
+func VerifyConnectivity(url string) error {
+	client := &http.Client{Timeout: 10 * time.Second}
+	if resp, err := client.Head(url); err == nil {
+		resp.Body.Close()
+		return nil
+	}
+	// Some servers refuse HEAD; a GET that connects is still reachable.
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("network: cannot reach %s: %w", url, err)
+	}
+	resp.Body.Close()
+	return nil
+}
 
 // Addr is one static address on an interface.
 type Addr struct {

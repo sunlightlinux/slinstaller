@@ -80,7 +80,9 @@ for what will and will not be allowed to change once releases begin.
   than clr-installer's systemd-networkd/NetworkManager (Sunlight has no
   systemd). Static interfaces from the config become `/etc/dhcpcd.conf`
   stanzas; dhcpcd is enabled so DHCP covers the rest, and so a plain
-  install still comes up with network.
+  install still comes up with network. `VerifyConnectivity` checks the
+  repository is reachable before a disk is wiped, so an offline install
+  fails early rather than partway through the base download.
 - Three smaller clr-installer parities: install hooks get `$chrootDir`
   and `$chrooted` in their environment, as clr expands them; the config's
   `httpsProxy` is passed to `xbps-install` for the download; and
