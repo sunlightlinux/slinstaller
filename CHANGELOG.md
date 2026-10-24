@@ -32,9 +32,16 @@ for what will and will not be allowed to change once releases begin.
   for chroot, and renders `fstab` by UUID (`Plan.Fstab`) — listing every
   mount, since Sunlight boots slinit and has no systemd gpt-auto to defer
   standard mounts to.
+- `pkg/controller` — sequences the install from a config (partition →
+  mount → bind meta filesystems, with base-system install, fstab,
+  bootloader and first-boot config to follow). It refuses a full install
+  while those later steps are unimplemented rather than wipe a disk it
+  cannot finish; a run names how far to go (`Options.Through`) to
+  exercise the disk steps in a VM, and cleans up mounts on failure.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,
-  and prints the partitioning plan. With `--apply` it carries the plan
-  out, gated on running as root and on the operator retyping the target
-  disk path.
+  and prints the partitioning plan. With `--apply` it runs the install
+  through the controller, gated on running as root and on the operator
+  retyping the target disk path; `--through` and `--root` steer a staged
+  VM run.
 - `demo/uefi-basic.yaml` — a minimal UEFI install in clr-installer's
   config format.

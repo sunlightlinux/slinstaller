@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
+	"github.com/sunlightlinux/slinstaller/pkg/controller"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
@@ -32,10 +33,15 @@ func run(args []string) error {
 	fs := flag.NewFlagSet("slinstaller", flag.ContinueOnError)
 	var (
 		apply       bool
+		through     string
+		root        string
 		showVersion bool
 	)
 	fs.BoolVar(&apply, "apply", false,
 		"carry out the plan (destructive); without it, the plan is only printed")
+	fs.StringVar(&through, "through", "",
+		"with --apply, run only up to this install stage (partition, mount, meta-fs) — for VM testing")
+	fs.StringVar(&root, "root", "/mnt", "with --apply, the target mount tree")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] <config.yaml>\n\n")
@@ -89,13 +95,20 @@ func run(args []string) error {
 		return nil
 	}
 
+	// With no stage limit the controller refuses — a full install is not
+	// possible yet — so let it say so without a root check or a prompt,
+	// since nothing will be touched.
+	if through == "" {
+		return controller.Install(cfg, controller.Options{Root: root})
+	}
+
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("--apply must run as root")
 	}
 	if !confirm(plan.Disk) {
 		return fmt.Errorf("aborted")
 	}
-	return storage.RunCommands(cmds, storage.DefaultRunner)
+	return controller.Install(cfg, controller.Options{Root: root, Through: through})
 }
 
 // confirm requires the operator to retype the target disk. A yes/no
