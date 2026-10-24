@@ -31,9 +31,10 @@ timezone: UTC
 keyboard: us
 language: en_US.UTF-8
 
-# A demo account. The password hash is for "demo" (generate your own with
-# `openssl passwd -6`). admin puts it in the wheel group.
+# A demo account. The password is "demo" (this is a real SHA-512 crypt
+# hash of it — regenerate your own with `openssl passwd -6`). admin puts
+# it in the wheel group.
 users:
 - login: demo
-  password: "$6$demodemodemodemo$WnU0y8pUQ4aQ7y9yq8r5nFv3x0xq0Zr2kq1m9b7c3d5e7f9g1h3j5k7l9m1n3p5q7r9s1t3u5v7w9x1y3z5A7"
+  password: "$6$VSGJJlJ4HsRjJiL0$iOD.YPsE3bTdnzcjVnRcTiskHk8Qi3H2s9H6.p.b7N9n/OTajSFtM1B1j46w5L6wZiLyAmxmyXTzILnIvhetM0"
   admin: true
