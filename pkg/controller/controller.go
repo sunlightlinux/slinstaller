@@ -29,6 +29,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
 	"github.com/sunlightlinux/slinstaller/pkg/xbps"
+	"gopkg.in/yaml.v3"
 )
 
 // Options controls an install run.
@@ -106,6 +107,7 @@ func (in *installer) stages() []stage {
 		{"bootloader", in.bootloader},
 		{"first-boot", in.firstBoot},
 		{"network", in.network},
+		{"save-config", in.saveConfig},
 		{"post-install", in.postHooks},
 	}
 }
@@ -178,8 +180,46 @@ func (in *installer) partition() error {
 	return storage.RunCommands(mkfs, in.opts.Runner)
 }
 
-func (in *installer) mount() error     { return in.mnt.MountAll(in.plan) }
-func (in *installer) mountMeta() error { return in.mnt.MountMeta() }
+func (in *installer) mount() error { return in.mnt.MountAll(in.plan) }
+
+func (in *installer) mountMeta() error {
+	if err := in.mnt.MountMeta(); err != nil {
+		return err
+	}
+	// Give chrooted commands (and hooks) working DNS during the install.
+	// The installed system gets its own resolv.conf from dhcpcd at boot,
+	// so this is only for install time; a missing host file is not fatal.
+	if data, err := os.ReadFile("/etc/resolv.conf"); err == nil {
+		dst := filepath.Join(in.opts.Root, "etc", "resolv.conf")
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fmt.Errorf("mkdir for resolv.conf: %w", err)
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			return fmt.Errorf("copy resolv.conf: %w", err)
+		}
+	}
+	return nil
+}
+
+// saveConfig records, on the installed system, the config it was built
+// from — a replayable account, like clr-installer's saved results. It is
+// re-marshalled from the loaded config, so it reflects what actually ran.
+func (in *installer) saveConfig() error {
+	data, err := yaml.Marshal(in.cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	dir := filepath.Join(in.opts.Root, "root")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	header := "# Written by slinstaller — the config this system was installed from.\n"
+	path := filepath.Join(dir, "slinstaller.yaml")
+	if err := os.WriteFile(path, append([]byte(header), data...), 0o600); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	return nil
+}
 
 func (in *installer) baseInstall() error {
 	cmds, err := xbps.Options{
