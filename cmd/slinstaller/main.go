@@ -18,6 +18,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
+	"github.com/sunlightlinux/slinstaller/pkg/tui"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
@@ -70,9 +71,9 @@ func run(args []string) error {
 	var listDisks bool
 	fs.BoolVar(&listDisks, "list-disks", false, "list the machine's disks and exit")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] <config.yaml>\n\n")
-		fmt.Fprintf(os.Stderr, "Reads a clr-installer-format config and prints its partitioning plan.\n")
-		fmt.Fprintf(os.Stderr, "With --apply, partitions and formats the target disk, destroying its contents.\n\n")
+		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] [config.yaml]\n\n")
+		fmt.Fprintf(os.Stderr, "With a config file, reads a clr-installer-format config and prints its plan;\n")
+		fmt.Fprintf(os.Stderr, "--apply carries it out. With no file, runs the interactive installer.\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -89,12 +90,23 @@ func run(args []string) error {
 	}
 
 	rest := fs.Args()
-	if len(rest) != 1 {
+	var cfg *config.Config
+	var err error
+	switch len(rest) {
+	case 1:
+		cfg, err = config.Load(rest[0])
+	case 0:
+		// No config file: drive the interactive front-end, which builds
+		// one. It installs, so it needs root.
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("interactive install must run as root (or pass a config file for a dry run)")
+		}
+		cfg, err = tui.Run(os.Stdin, os.Stderr)
+		apply = true
+	default:
 		fs.Usage()
-		return fmt.Errorf("expected exactly one config file")
+		return fmt.Errorf("expected at most one config file")
 	}
-
-	cfg, err := config.Load(rest[0])
 	if err != nil {
 		return err
 	}
