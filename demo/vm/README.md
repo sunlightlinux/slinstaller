@@ -13,8 +13,8 @@ the bootloader. It is the installer's counterpart to slinit's QEMU demo.
 
 ## How it works
 
-slinstaller drives standard tools (`xbps`, `parted`, `sgdisk`, `mkfs.*`,
-`grub`, `efibootmgr`). Rather than build a live medium that carries them,
+slinstaller drives standard tools (`xbps`, `parted`, `mkfs.*`, `grub`,
+`efibootmgr`). Rather than build a live medium that carries them,
 the demo boots a **Void Linux live ISO**, which already has them, and
 hands the guest the slinstaller binary and config over a **9p share** —
 the ISO is never modified. QEMU runs under **OVMF**, so the guest is in

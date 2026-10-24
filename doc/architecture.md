@@ -65,7 +65,7 @@ clr-installer's; the code and the scope are ours:
 - **`pkg/config`** — reads clr-installer's config schema and produces a
   `storage.Plan` from the target disk's layout.
 - **`pkg/storage`** — partition the disk and make its filesystems.
-  `parted` for the GPT label and partitions, `sgdisk` for type codes,
+  `parted` for the GPT label, the partitions and the ESP type,
   `mkfs.*` / `mkswap` for filesystems. The destructive work is a command
   list computed purely from the plan (`Plan.Commands`); nothing writes to
   a disk except `RunCommands`, so there is one gate to hold and one list

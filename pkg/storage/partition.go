@@ -49,11 +49,16 @@ func (pl *Plan) Commands() ([][]string, error) {
 		cmds = append(cmds, partedMkpart(pl.Disk, p, start, end))
 	}
 
-	// GPT type codes, by partition number, for the types we recognise.
+	// Mark the EFI System Partition so firmware recognises it. parted's
+	// esp flag sets the right GPT type; the other partitions are mounted
+	// by UUID from fstab, so their GPT type is left at parted's default.
+	// That keeps the whole partition step on one tool — no sgdisk to
+	// install on the live medium.
 	for _, p := range pl.Parts {
-		if g := p.guid(); g != "" {
-			cmds = append(cmds, []string{"sgdisk", pl.Disk,
-				fmt.Sprintf("--typecode=%d:%s", p.Number, g)})
+		if p.isESP() {
+			cmds = append(cmds, []string{"parted", "-s", pl.Disk, "set",
+				fmt.Sprintf("%d", p.Number), "esp", "on"})
+			break
 		}
 	}
 

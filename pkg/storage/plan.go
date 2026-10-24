@@ -43,17 +43,6 @@ func PartitionName(disk string, n int) string {
 	return fmt.Sprintf("%s%s%d", disk, sep, n)
 }
 
-// GPT partition type GUIDs, ported from clr-installer. Only the types
-// slinstaller assigns are listed; any other partition is left at
-// parted's default, a generic Linux filesystem type.
-var partTypeGUID = map[string]string{
-	"/":     "4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709",
-	"/home": "933AC7E1-2EB4-4F13-B844-0E14E2AEF915",
-	"/srv":  "3B8F8425-20E0-4F3B-907F-1A25A76F98E8",
-	"swap":  "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F",
-	"efi":   "C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
-}
-
 // isESP reports whether this partition is the EFI System Partition.
 //
 // clr-installer keyed the ESP off vfat mounted at /boot; Sunlight is
@@ -72,17 +61,4 @@ func (pl *Plan) ESPMountpoint() string {
 		}
 	}
 	return ""
-}
-
-// guid returns the GPT type code for this partition, or "" to leave it
-// at parted's default.
-func (p Partition) guid() string {
-	switch {
-	case p.isESP():
-		return partTypeGUID["efi"]
-	case p.Filesystem == "swap":
-		return partTypeGUID["swap"]
-	default:
-		return partTypeGUID[p.Mountpoint]
-	}
 }

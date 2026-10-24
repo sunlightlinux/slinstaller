@@ -104,7 +104,7 @@ func TestLoadMinimalClrConfig(t *testing.T) {
 	for _, line := range []string{
 		"parted -s /dev/sda mklabel gpt",
 		"mkfs.vfat", "mkswap /dev/sda2", "mkfs.ext4",
-		"sgdisk /dev/sda --typecode=1:C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
+		"parted -s /dev/sda set 1 esp on",
 	} {
 		if !strings.Contains(out, line) {
 			t.Errorf("command list missing %q\n%s", line, out)

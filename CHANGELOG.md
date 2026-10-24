@@ -23,8 +23,9 @@ for what will and will not be allowed to change once releases begin.
   decimal+unit). Tested against clr-installer's own fixtures.
 - `pkg/storage` — the first core subsystem ported from
   [clr-installer](https://github.com/clearlinux/clr-installer), reduced
-  to a single UEFI target: GPT labelling, partitioning with `parted`,
-  GPT type codes with `sgdisk`, and filesystem creation with `mkfs.*` /
+  to a single UEFI target: GPT labelling and partitioning with `parted`
+  (the ESP marked with parted's `esp` flag — no `sgdisk` dependency), and
+  filesystem creation with `mkfs.*` /
   `mkswap`. The destructive work is expressed as a command list
   (`Plan.Commands`) that executes nothing until handed to `RunCommands`,
   so a dry run shows exactly what an apply would do. Also mounts the

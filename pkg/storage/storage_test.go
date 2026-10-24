@@ -78,9 +78,7 @@ func TestCommandsDryRun(t *testing.T) {
 		"parted -a optimal --script /dev/sda mkpart EFI fat32 0% 512MiB",
 		"parted -a optimal --script /dev/sda mkpart linux-swap 512MiB 2560MiB",
 		"parted -a optimal --script /dev/sda mkpart / 2560MiB 100%", // the "rest" partition
-		"sgdisk /dev/sda --typecode=1:C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
-		"sgdisk /dev/sda --typecode=2:0657FD6D-A4AB-43C4-84E5-0933C84B4F4F",
-		"sgdisk /dev/sda --typecode=3:4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709",
+		"parted -s /dev/sda set 1 esp on",                           // ESP is partition 1
 		"partprobe /dev/sda",
 		"mkfs.vfat -n EFI -F32 /dev/sda1",
 		"mkswap /dev/sda2", // swap carries no label here
