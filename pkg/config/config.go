@@ -49,6 +49,11 @@ type Config struct {
 	SwupdMirror string   `yaml:"swupdMirror,omitempty"`
 	HTTPSProxy  string   `yaml:"httpsProxy,omitempty"`
 
+	// SwapFileSize, if set, creates a swap file of that size on root
+	// instead of (or besides) a swap partition — clr-installer's
+	// swapFileSize. A human size such as "2G".
+	SwapFileSize string `yaml:"swapFileSize,omitempty"`
+
 	PreInstall  []*Hook `yaml:"pre-install,omitempty"`
 	PostInstall []*Hook `yaml:"post-install,omitempty"`
 

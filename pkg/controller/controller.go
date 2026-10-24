@@ -97,6 +97,7 @@ func (in *installer) stages() []stage {
 		{"meta-fs", in.mountMeta},
 		{"base-install", in.baseInstall},
 		{"fstab", in.fstab},
+		{"swapfile", in.swapfile},
 		{"bootloader", in.bootloader},
 		{"first-boot", in.firstBoot},
 		{"network", in.network},
@@ -176,6 +177,31 @@ func (in *installer) fstab() error {
 		return err
 	}
 	return storage.WriteFstab(in.opts.Root, in.plan.Fstab(uuids))
+}
+
+// swapfile creates a swap file on root and adds it to fstab, when the
+// config asks for one. It runs after fstab so the entry is appended to a
+// file that already exists, and after base-install so root is populated.
+func (in *installer) swapfile() error {
+	if in.cfg.SwapFileSize == "" {
+		return nil
+	}
+	if err := storage.RunCommands(
+		storage.SwapFileCommands(in.opts.Root, in.cfg.SwapFileSize), in.opts.Runner); err != nil {
+		return err
+	}
+
+	path := filepath.Join(in.opts.Root, "etc", "fstab")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	_, werr := f.WriteString(storage.SwapFileFstab)
+	cerr := f.Close()
+	if werr != nil {
+		return werr
+	}
+	return cerr
 }
 
 // bootloader installs GRUB onto the ESP and registers the firmware boot

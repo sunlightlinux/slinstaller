@@ -173,3 +173,23 @@ func TestMissingTools(t *testing.T) {
 		t.Errorf("MissingTools = %v, want the one bogus name", missing)
 	}
 }
+
+func TestSwapFileCommands(t *testing.T) {
+	cmds := SwapFileCommands("/mnt", "2G")
+	want := []string{
+		"fallocate -l 2G /mnt/swapfile",
+		"chmod 600 /mnt/swapfile",
+		"mkswap /mnt/swapfile",
+	}
+	if len(cmds) != len(want) {
+		t.Fatalf("got %d commands, want %d", len(cmds), len(want))
+	}
+	for i, w := range want {
+		if got := strings.Join(cmds[i], " "); got != w {
+			t.Errorf("command %d = %q, want %q", i, got, w)
+		}
+	}
+	if SwapFileFstab != "/swapfile none swap defaults 0 0\n" {
+		t.Errorf("fstab line = %q", SwapFileFstab)
+	}
+}

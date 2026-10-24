@@ -40,7 +40,9 @@ for what will and will not be allowed to change once releases begin.
   target tree parent-first (`Mounter`), bind-mounts `proc`/`sys`/`dev`
   for chroot, and renders `fstab` by UUID (`Plan.Fstab`) — listing every
   mount, since Sunlight boots slinit and has no systemd gpt-auto to defer
-  standard mounts to.
+  standard mounts to. A config `swapFileSize` creates a swap file on root
+  (`SwapFileCommands`) instead of a swap partition — clr-installer's
+  swapFileSize, run as a controller stage after fstab.
 - `pkg/xbps` — the base-system install, the counterpart to clr-installer's
   swupd step, following how Void bootstraps a rootfs: seed the repository
   signing keys into the target, `xbps-install` from the repository, then a
