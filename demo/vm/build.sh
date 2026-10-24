@@ -31,8 +31,9 @@ mkdir -p "${OUTPUT_DIR}" "${CACHE_DIR}"
 echo "→ building static slinstaller"
 ( cd "${REPO_ROOT}" && CGO_ENABLED=0 go build -o "${OUTPUT_DIR}/slinstaller" ./cmd/slinstaller )
 
-echo "→ staging demo config (targets /dev/vda)"
+echo "→ staging demo config (targets /dev/vda) and guest-prep script"
 cp "${SCRIPT_DIR}/config.yaml" "${OUTPUT_DIR}/config.yaml"
+cp "${SCRIPT_DIR}/guest-prep.sh" "${OUTPUT_DIR}/guest-prep.sh"
 
 TARGET="${OUTPUT_DIR}/target.qcow2"
 if [ ! -f "${TARGET}" ]; then

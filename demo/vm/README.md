@@ -33,17 +33,21 @@ Log in at the live prompt as `root` (Void live password: `voidlinux`),
 then:
 
 ```sh
-# The base live ISO ships mkfs.*, mkswap, grub and efibootmgr, but not
-# parted — install it (and refresh xbps itself) first.
-xbps-install -Su xbps
-xbps-install -Sy parted
-
 mkdir -p /mnt/share
 mount -t 9p -o trans=virtio slshare /mnt/share
+
+# The base live ISO ships mkfs.*, mkswap, grub and efibootmgr, but not
+# parted. guest-prep.sh refreshes xbps and installs it.
+sh /mnt/share/guest-prep.sh
+
 /mnt/share/slinstaller /mnt/share/config.yaml           # dry run: print the plan
 /mnt/share/slinstaller --apply /mnt/share/config.yaml   # do it (retype /dev/vda to confirm)
 poweroff
 ```
+
+slinstaller checks for the tools it needs before touching the disk, so if
+you skip the prep it stops with a clear "missing tools" message rather
+than failing partway through.
 
 Then `./run.sh --installed` boots the freshly installed disk.
 

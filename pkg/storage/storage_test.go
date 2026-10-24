@@ -148,3 +148,28 @@ func TestRunCommands(t *testing.T) {
 		t.Fatalf("ran %d commands after failure, want 1", len(ran))
 	}
 }
+
+func TestRequiredTools(t *testing.T) {
+	got := uefiPlan().RequiredTools()
+	// Always-present tools plus one mkfs per distinct non-swap fs.
+	want := map[string]bool{
+		"parted": true, "partprobe": true, "mkswap": true, "blkid": true,
+		"mkfs.vfat": true, "mkfs.ext4": true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("RequiredTools = %v", got)
+	}
+	for _, g := range got {
+		if !want[g] {
+			t.Errorf("unexpected tool %q in %v", g, got)
+		}
+	}
+}
+
+func TestMissingTools(t *testing.T) {
+	// "sh" exists on any system that runs these tests; the other does not.
+	missing := MissingTools([]string{"sh", "slinstaller-definitely-not-a-real-tool"})
+	if len(missing) != 1 || missing[0] != "slinstaller-definitely-not-a-real-tool" {
+		t.Errorf("MissingTools = %v, want the one bogus name", missing)
+	}
+}

@@ -149,6 +149,19 @@ func run(args []string) error {
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("--apply must run as root")
 	}
+
+	// Preflight: a full install needs these on the live system. Check
+	// before confirming, so a missing tool fails here rather than partway
+	// through partitioning. (Staged --through runs skip this — the
+	// operator steering them knows the environment.)
+	if through == "" {
+		required := append(plan.RequiredTools(), "xbps-install", "chroot")
+		if missing := storage.MissingTools(required); len(missing) > 0 {
+			return fmt.Errorf("missing tools on the live system: %s — install them and retry",
+				strings.Join(missing, ", "))
+		}
+	}
+
 	if !confirm(plan.Disk) {
 		return fmt.Errorf("aborted")
 	}
