@@ -4,14 +4,21 @@
 // It is the counterpart to clr-installer's swupd step: where clr runs
 // swupd to install bundles into the target, slinstaller runs
 // xbps-install to install packages into it, then reconfigures them in a
-// chroot. The mechanism lives here; which packages and which repository
-// are the caller's to supply.
+// chroot. The sequence follows how Void bootstraps a rootfs (see the
+// void-containers reference): seed the repository signing keys into the
+// target, install from the repository, reconfigure. The mechanism lives
+// here; which packages, which repository and which keys are the
+// caller's to supply.
 package xbps
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+)
 
 // Options is a base-system install: the target tree, the repository to
-// pull from, the packages to install, and optionally the architecture.
+// pull from, the packages to install, and the signing keys and
+// architecture needed to do it.
 type Options struct {
 	// Root is the target mount tree the system is installed into.
 	Root string
@@ -19,8 +26,15 @@ type Options struct {
 	// Repo is the xbps repository URL.
 	Repo string
 
-	// Arch is XBPS_ARCH; empty means the host's architecture, which is
-	// right for a normal install and wrong only when cross-installing.
+	// KeysDir holds the repository signing keys to seed into the target
+	// before installing; without them xbps cannot verify what it
+	// fetches. On the live medium this is /var/db/xbps/keys. Empty skips
+	// the step, for a target that already has its keys.
+	KeysDir string
+
+	// Arch is XBPS_TARGET_ARCH, for installing a target whose
+	// architecture differs from the host's. Empty — the usual case —
+	// installs the host's architecture.
 	Arch string
 
 	// Packages is the set to install — the Sunlight base plus whatever
@@ -29,10 +43,11 @@ type Options struct {
 }
 
 // Commands returns the ordered commands that install the base system:
-// xbps-install from the repository into the target, then a chrooted
-// xbps-reconfigure so the freshly installed packages set themselves up.
-// It is pure; the controller runs the list. The chroot step needs
-// /proc, /sys and /dev already bound into the target.
+// seed the signing keys into the target, xbps-install from the
+// repository, then a chrooted xbps-reconfigure so the freshly installed
+// packages set themselves up. It is pure; the controller runs the list.
+// The reconfigure step needs /proc, /sys and /dev already bound into the
+// target.
 func (o Options) Commands() ([][]string, error) {
 	if o.Root == "" {
 		return nil, fmt.Errorf("xbps: no target root")
@@ -44,14 +59,27 @@ func (o Options) Commands() ([][]string, error) {
 		return nil, fmt.Errorf("xbps: no packages to install")
 	}
 
+	var cmds [][]string
+
+	// Keys first: xbps verifies signatures against the keys in the
+	// target, so they must be there before anything is fetched.
+	if o.KeysDir != "" {
+		dest := filepath.Join(o.Root, "var", "db", "xbps", "keys")
+		cmds = append(cmds,
+			[]string{"mkdir", "-p", dest},
+			[]string{"cp", "-a", o.KeysDir + "/.", dest + "/"},
+		)
+	}
+
 	install := []string{}
 	if o.Arch != "" {
-		install = append(install, "env", "XBPS_ARCH="+o.Arch)
+		install = append(install, "env", "XBPS_TARGET_ARCH="+o.Arch)
 	}
 	install = append(install, "xbps-install", "-Sy", "-R", o.Repo, "-r", o.Root)
 	install = append(install, o.Packages...)
+	cmds = append(cmds, install)
 
-	reconfigure := []string{"chroot", o.Root, "xbps-reconfigure", "-a"}
+	cmds = append(cmds, []string{"chroot", o.Root, "xbps-reconfigure", "-fa"})
 
-	return [][]string{install, reconfigure}, nil
+	return cmds, nil
 }

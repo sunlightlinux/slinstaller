@@ -33,9 +33,10 @@ for what will and will not be allowed to change once releases begin.
   mount, since Sunlight boots slinit and has no systemd gpt-auto to defer
   standard mounts to.
 - `pkg/xbps` — the base-system install, the counterpart to clr-installer's
-  swupd step: `xbps-install` from a repository into the target, then a
-  chrooted `xbps-reconfigure`. Expressed as a command list; the repository
-  and package set are the caller's to supply.
+  swupd step, following how Void bootstraps a rootfs: seed the repository
+  signing keys into the target, `xbps-install` from the repository, then a
+  chrooted `xbps-reconfigure -fa`. Expressed as a command list; the
+  repository, keys, architecture and package set are the caller's to supply.
 - `pkg/controller` — sequences the install from a config: partition →
   mount → bind meta filesystems → base-system install → fstab (bootloader
   and first-boot config to follow). It refuses a full install while those

@@ -32,9 +32,12 @@ type Options struct {
 	// storage.DefaultRunner; tests substitute their own.
 	Runner storage.Runner
 
-	// Repo, Arch and Packages are the base-system install: the xbps
-	// repository, the architecture (empty = host), and the package set.
+	// Repo, KeysDir, Arch and Packages are the base-system install: the
+	// xbps repository, the signing keys to seed into the target (empty =
+	// the live medium's), the architecture (empty = host), and the
+	// package set.
 	Repo     string
+	KeysDir  string
 	Arch     string
 	Packages []string
 
@@ -132,6 +135,7 @@ func (in *installer) baseInstall() error {
 	cmds, err := xbps.Options{
 		Root:     in.opts.Root,
 		Repo:     in.opts.Repo,
+		KeysDir:  in.opts.KeysDir,
 		Arch:     in.opts.Arch,
 		Packages: in.opts.Packages,
 	}.Commands()
