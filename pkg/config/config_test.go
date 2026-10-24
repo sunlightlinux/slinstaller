@@ -299,3 +299,32 @@ func TestValidateAcceptsMinimalClrConfig(t *testing.T) {
 		t.Errorf("minimal clr config rejected: %v", err)
 	}
 }
+
+func TestValidateUsers(t *testing.T) {
+	c := &Config{
+		Hostname: "ok",
+		TargetMedia: []*Media{{
+			Name: "sda", Type: "disk",
+			Children: []*Media{
+				{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot"},
+				{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+			},
+		}},
+		Users: []*User{
+			{Login: "Bad Name", Password: "$6$a$b"},    // invalid login
+			{Login: "joe", Password: "plaintext"},      // plaintext, not a hash
+			{Login: "joe"},                             // duplicate login
+			{Login: "ok", SSHKeys: []string{"ssh..."}}, // fine: ssh-key, no password
+		},
+	}
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("Validate = nil, want user problems")
+	}
+	msg := err.Error()
+	for _, want := range []string{"valid Unix name", "crypt(3) hash", "used more than once"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("missing %q:\n%s", want, msg)
+		}
+	}
+}

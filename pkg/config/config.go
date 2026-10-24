@@ -131,6 +131,16 @@ func Load(path string) (*Config, error) {
 // accept: letters, digits and hyphens, not starting or ending with one.
 var hostnameRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
 
+// loginRe is what useradd accepts for a login name.
+var loginRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
+
+// looksHashed reports whether s is a crypt(3) hash ($id$...$...) rather
+// than a plaintext password, so a config cannot carry a password in the
+// clear even by accident.
+func looksHashed(s string) bool {
+	return strings.HasPrefix(s, "$") && strings.Count(s, "$") >= 3
+}
+
 // Validate checks what must hold for the config to describe a bootable
 // UEFI install, before any disk is touched. It reports every problem it
 // finds at once, so an operator fixing a config by hand does not have to
@@ -196,6 +206,28 @@ func (c *Config) Validate() error {
 	}
 	if esps == 0 {
 		add("no EFI System Partition (vfat at /boot or /boot/efi); Sunlight Linux is UEFI-only")
+	}
+
+	logins := map[string]bool{}
+	for i, u := range c.Users {
+		if u == nil {
+			continue
+		}
+		who := u.Login
+		if who == "" {
+			add("users[%d]: no login", i)
+			continue
+		}
+		if !loginRe.MatchString(u.Login) {
+			add("users[%d]: login %q must be a valid Unix name (lowercase letter or _ then letters, digits, - or _)", i, u.Login)
+		}
+		if logins[u.Login] {
+			add("users[%d]: login %q is used more than once", i, u.Login)
+		}
+		logins[u.Login] = true
+		if u.Password != "" && !looksHashed(u.Password) {
+			add("users[%d] (%s): password does not look like a crypt(3) hash — a config must carry a hash, not a plaintext password", i, u.Login)
+		}
 	}
 
 	if c.Hostname != "" && (len(c.Hostname) > 63 || !hostnameRe.MatchString(c.Hostname)) {

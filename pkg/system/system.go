@@ -159,6 +159,7 @@ func EnableService(root, name string) error {
 // User is an account to create in the target.
 type User struct {
 	Login        string
+	FullName     string // GECOS / display name; "" leaves it empty
 	PasswordHash string // a crypt(3) hash, or "" for no password
 	Shell        string // "" leaves useradd's default
 	Admin        bool   // added to the wheel group
@@ -174,6 +175,9 @@ func (u User) AddCommand(root string) []string {
 	}
 	if u.Shell != "" {
 		args = append(args, "-s", u.Shell)
+	}
+	if u.FullName != "" {
+		args = append(args, "-c", u.FullName)
 	}
 	if u.PasswordHash != "" {
 		args = append(args, "-p", u.PasswordHash)

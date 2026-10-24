@@ -375,6 +375,7 @@ func (in *installer) firstBoot() error {
 		}
 		u := system.User{
 			Login:        cu.Login,
+			FullName:     cu.UserName,
 			PasswordHash: cu.Password,
 			Admin:        cu.Admin,
 			SSHKeys:      cu.SSHKeys,
