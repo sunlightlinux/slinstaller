@@ -71,6 +71,8 @@ Then `./run.sh --installed` boots the freshly installed disk.
 |-------|-----------------|--------|
 | build.sh | `VOID_ISO=/path.iso` | use a local ISO instead of downloading |
 | build.sh | `DISK_SIZE=20G` | size of the blank target disk |
+| build.sh | `--cleanupdisk` | wipe the target disk + OVMF NVRAM for a clean reinstall |
+| build.sh | `--clean` | remove everything in `_output` (keeps the cached ISO) |
 | run.sh | `--fresh` | wipe the target disk back to blank first |
 | run.sh | `--mem=N` | guest memory in MB (default 2048) |
 | run.sh | `--installed` | boot the installed disk instead of the ISO |
