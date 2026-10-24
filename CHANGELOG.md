@@ -58,7 +58,10 @@ for what will and will not be allowed to change once releases begin.
   the glibc `libc-locales` entry, with the controller regenerating
   locales), and user accounts (`useradd` with the crypt-hash password via
   `-p`, `wheel` for admins, and `authorized_keys` for any SSH keys), plus
-  `EnableService` to turn on a runit service in the target.
+  `EnableService` to turn on a runit service in the target. An `admin`
+  account now also gets working sudo: the controller writes a
+  `%wheel`-enabling `/etc/sudoers.d/wheel` (0440) when any user is admin,
+  so `admin: true` means sudo, not just group membership.
 - `pkg/network` — the installed system's networking, via dhcpcd rather
   than clr-installer's systemd-networkd/NetworkManager (Sunlight has no
   systemd). Static interfaces from the config become `/etc/dhcpcd.conf`

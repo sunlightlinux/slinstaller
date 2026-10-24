@@ -120,6 +120,24 @@ func Locale(root, lang string) (bool, error) {
 	return changed, nil
 }
 
+// WheelSudo gives the wheel group sudo by writing a sudoers drop-in in
+// the target. Admin accounts are put in wheel, so this is what turns
+// their sudo on — with a password; passwordless is a separate choice.
+// The 0440 mode is what sudo requires of files in sudoers.d.
+func WheelSudo(root string) error {
+	dir := filepath.Join(root, "etc", "sudoers.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("system: %w", err)
+	}
+	path := filepath.Join(dir, "wheel")
+	if err := os.WriteFile(path, []byte("%wheel ALL=(ALL:ALL) ALL\n"), 0o440); err != nil {
+		return fmt.Errorf("system: write sudoers wheel: %w", err)
+	}
+	// WriteFile's mode is subject to umask; force it, since sudo rejects
+	// a group- or world-writable drop-in.
+	return os.Chmod(path, 0o440)
+}
+
 // EnableService enables a runit service in the target by symlinking it
 // into the default runsvdir, which is what runit scans at boot. It
 // points straight at /etc/runit/runsvdir/default rather than /var/service

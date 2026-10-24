@@ -168,3 +168,22 @@ func TestEnableService(t *testing.T) {
 		t.Errorf("service link -> %q, want /etc/sv/dhcpcd", target)
 	}
 }
+
+func TestWheelSudo(t *testing.T) {
+	root := t.TempDir()
+	if err := WheelSudo(root); err != nil {
+		t.Fatalf("WheelSudo: %v", err)
+	}
+	path := filepath.Join(root, "etc", "sudoers.d", "wheel")
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(got), "%wheel ALL=(ALL:ALL) ALL") {
+		t.Errorf("sudoers.d/wheel = %q", got)
+	}
+	info, _ := os.Stat(path)
+	if info.Mode().Perm() != 0o440 {
+		t.Errorf("mode = %o, want 440", info.Mode().Perm())
+	}
+}

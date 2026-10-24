@@ -240,9 +240,13 @@ func (in *installer) firstBoot() error {
 		}
 	}
 
+	anyAdmin := false
 	for _, cu := range in.cfg.Users {
 		if cu == nil || cu.Login == "" {
 			continue
+		}
+		if cu.Admin {
+			anyAdmin = true
 		}
 		u := system.User{
 			Login:        cu.Login,
@@ -261,6 +265,14 @@ func (in *installer) firstBoot() error {
 			if err := storage.RunCommands([][]string{chown}, in.opts.Runner); err != nil {
 				return err
 			}
+		}
+	}
+
+	// An admin account is added to wheel; this is what actually gives
+	// wheel sudo (with a password).
+	if anyAdmin {
+		if err := system.WheelSudo(root); err != nil {
+			return err
 		}
 	}
 	return nil
