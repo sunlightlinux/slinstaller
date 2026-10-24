@@ -27,7 +27,11 @@ for what will and will not be allowed to change once releases begin.
   GPT type codes with `sgdisk`, and filesystem creation with `mkfs.*` /
   `mkswap`. The destructive work is expressed as a command list
   (`Plan.Commands`) that executes nothing until handed to `RunCommands`,
-  so a dry run shows exactly what an apply would do.
+  so a dry run shows exactly what an apply would do. Also mounts the
+  target tree parent-first (`Mounter`), bind-mounts `proc`/`sys`/`dev`
+  for chroot, and renders `fstab` by UUID (`Plan.Fstab`) — listing every
+  mount, since Sunlight boots slinit and has no systemd gpt-auto to defer
+  standard mounts to.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,
   and prints the partitioning plan. With `--apply` it carries the plan
   out, gated on running as root and on the operator retyping the target
