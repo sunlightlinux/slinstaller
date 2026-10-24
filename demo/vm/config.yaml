@@ -46,3 +46,9 @@ users:
 post-install:
 - chroot: true
   cmd: "echo 'demo ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/demo && chmod 0440 /etc/sudoers.d/demo"
+# Enable DHCP so the installed system has network. slinstaller does not
+# configure networkInterfaces yet, so without this the base boots with
+# only `lo`. On Void's runit, enabling a service is a symlink into
+# /var/service; dhcpcd then brings up every interface.
+- chroot: true
+  cmd: "ln -sf /etc/sv/dhcpcd /var/service/dhcpcd"

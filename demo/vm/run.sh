@@ -176,4 +176,5 @@ exec qemu-system-x86_64 "${COMMON[@]}" \
     -cdrom "${ISO}" \
     -boot d \
     -virtfs "local,path=${OUTPUT_DIR},mount_tag=slshare,security_model=none" \
-    -nic "user,model=virtio-net-pci"
+    -nic "user,model=virtio-net-pci" \
+    -nic "user,model=e1000"
