@@ -75,6 +75,13 @@ var metaMounts = []string{"proc", "sys", "dev"}
 
 // MountMeta bind-mounts /proc, /sys and /dev into the target tree. The
 // target root must already be mounted.
+//
+// The bind is recursive (MS_REC), the way arch-chroot's `mount --rbind`
+// is, because the submounts matter: efivarfs lives at
+// /sys/firmware/efi/efivars as its own mount, and a plain bind of /sys
+// would leave it behind — then grub-install's efibootmgr call fails with
+// "EFI variables are not supported on this system". /dev/pts and
+// /dev/shm come along for the same reason.
 func (m *Mounter) MountMeta() error {
 	for _, name := range metaMounts {
 		src := "/" + name
@@ -82,8 +89,8 @@ func (m *Mounter) MountMeta() error {
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return fmt.Errorf("storage: mkdir %s: %w", target, err)
 		}
-		// MS_BIND rebinds the live filesystem; the fstype is ignored.
-		if err := syscall.Mount(src, target, "", syscall.MS_BIND, ""); err != nil {
+		// MS_BIND rebinds the live filesystem; MS_REC carries submounts.
+		if err := syscall.Mount(src, target, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
 			return fmt.Errorf("storage: bind %s to %s: %w", src, target, err)
 		}
 		m.mounted = append(m.mounted, target)
