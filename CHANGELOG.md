@@ -63,3 +63,7 @@ for what will and will not be allowed to change once releases begin.
   has its own.
 - `demo/uefi-basic.yaml` — a minimal UEFI install in clr-installer's
   config format.
+- `demo/vm` — a QEMU + OVMF harness that boots a Void live ISO with a
+  blank virtio disk and the slinstaller binary over a 9p share, so the
+  whole install runs end to end under real UEFI, and `run.sh --installed`
+  boots the result. slinstaller's counterpart to slinit's QEMU demo.

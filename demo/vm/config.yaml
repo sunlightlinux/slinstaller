@@ -1,0 +1,39 @@
+#clear-linux-config
+# Demo install config for the VM, in clr-installer's format. It targets
+# /dev/vda — the virtio disk run.sh attaches — so it is safe to --apply
+# inside the VM and nowhere else.
+#
+# clr-installer configs give every partition an explicit size, and so
+# does this one: the root is sized for the demo's 10G disk, not "the
+# rest". Grow both here and DISK_SIZE in build.sh together.
+
+targetMedia:
+- name: vda
+  type: disk
+  children:
+  - name: vda1
+    type: part
+    fstype: vfat
+    mountpoint: /boot
+    size: 512M
+  - name: vda2
+    type: part
+    fstype: swap
+    size: 1G
+  - name: vda3
+    type: part
+    fstype: ext4
+    mountpoint: /
+    size: 8G
+
+hostname: sunlight-demo
+timezone: UTC
+keyboard: us
+language: en_US.UTF-8
+
+# A demo account. The password hash is for "demo" (generate your own with
+# `openssl passwd -6`). admin puts it in the wheel group.
+users:
+- login: demo
+  password: "$6$demodemodemodemo$WnU0y8pUQ4aQ7y9yq8r5nFv3x0xq0Zr2kq1m9b7c3d5e7f9g1h3j5k7l9m1n3p5q7r9s1t3u5v7w9x1y3z5A7"
+  admin: true
