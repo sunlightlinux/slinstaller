@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
+	"github.com/sunlightlinux/slinstaller/pkg/config"
 )
 
 func send(m tea.Model, k tea.KeyMsg) model {
@@ -20,88 +21,109 @@ var (
 
 func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
 
-func twoDisks() []blockdev.Device {
-	return []blockdev.Device{{Name: "sda", Path: "/dev/sda"}, {Name: "vdb", Path: "/dev/vdb"}}
-}
+func oneDisk() []blockdev.Device { return []blockdev.Device{{Name: "sda", Path: "/dev/sda"}} }
 
-// moveTo returns a model with the hub cursor on section s.
-func moveTo(m model, s section) model {
-	for m.hubCursor < int(s) {
-		m = send(m, down)
+// planOf builds a config from an editor layout and plans it, as Install
+// would.
+func planOf(t *testing.T, parts []partEntry) *config.Config {
+	t.Helper()
+	return &config.Config{
+		Hostname: "box",
+		Users:    []*config.User{{Login: "me", Password: "$6$a$b", Admin: true}},
+		TargetMedia: []*config.Media{{
+			Name: "sda", Type: "disk", Children: layoutToMedia("sda", parts),
+		}},
 	}
-	return m
 }
 
-func TestInstallDisabledUntilValid(t *testing.T) {
-	m := newModel(twoDisks())
+func TestLayoutToMediaPlain(t *testing.T) {
+	cfg := planOf(t, []partEntry{
+		{Type: "part", FS: "vfat", Mount: "/boot", Size: "512M"},
+		{Type: "part", FS: "swap", Size: "1G"},
+		{Type: "part", FS: "ext4", Mount: "/"}, // fill
+	})
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	plan, err := cfg.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan.Parts) != 3 || plan.Parts[0].Device != "/dev/sda1" || plan.Parts[2].Mountpoint != "/" {
+		t.Fatalf("parts = %+v", plan.Parts)
+	}
+}
+
+func TestLayoutToMediaLVM(t *testing.T) {
+	cfg := planOf(t, []partEntry{
+		{Type: "part", FS: "vfat", Mount: "/boot", Size: "512M"},
+		{Type: "lvm", VG: "vg0", Size: "rest", LVs: []lvEntry{
+			{Name: "root", FS: "ext4", Mount: "/", Size: "4G"},
+			{Name: "home", FS: "ext4", Mount: "/home"}, // fill
+		}},
+	})
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	plan, err := cfg.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	// ESP + PV + 2 LVs.
+	if len(plan.Parts) != 4 {
+		t.Fatalf("got %d parts, want 4", len(plan.Parts))
+	}
+	if !plan.Parts[1].IsPV || plan.Parts[1].VGName != "vg0" {
+		t.Errorf("PV = %+v", plan.Parts[1])
+	}
+	if plan.Parts[2].EffectiveDevice() != "/dev/vg0/root" {
+		t.Errorf("root LV device = %q", plan.Parts[2].EffectiveDevice())
+	}
+}
+
+func TestCanInstall(t *testing.T) {
+	m := newModel(oneDisk())
 	if m.canInstall() {
-		t.Fatal("fresh model should not be installable")
+		t.Fatal("empty model installable")
 	}
-	// Pressing Install (the section after the last) does nothing.
-	m = moveTo(m, sectionCount) // Install button
-	m = send(m, enter)
-	if m.confirmed {
-		t.Error("Install fired while disabled")
+	m.diskSet = true
+	m.userSet = true
+	m.parts = []partEntry{
+		{Type: "part", FS: "vfat", Mount: "/boot", Size: "512M"},
+		{Type: "part", FS: "ext4", Mount: "/"},
 	}
-}
-
-func TestConfigureAndInstall(t *testing.T) {
-	var m tea.Model = newModel(twoDisks())
-
-	// Disk: open, pick the second, back to hub.
-	m = send(m, enter) // hub cursor 0 = Disk -> editor
-	m = send(m, down)  // choose /dev/vdb
-	m = send(m, enter) // commit -> hub
-	if !m.(model).diskSet || m.(model).diskIdx != 1 {
-		t.Fatalf("disk not set: %+v", m.(model))
+	if !m.canInstall() {
+		t.Fatal("complete model not installable")
 	}
-
-	// Admin user: login then password.
-	mm := moveTo(m.(model), secUser)
-	var cur tea.Model = mm
-	cur = send(cur, enter)       // open user editor (login, default "user")
-	cur = send(cur, enter)       // accept login "user" -> password step
-	cur = send(cur, runes("pw")) // type password
-	cur = send(cur, enter)       // commit -> hub
-	if !cur.(model).userSet || cur.(model).login != "user" || cur.(model).password != "pw" {
-		t.Fatalf("user not set: %+v", cur.(model))
+	// A crypt partition needs a passphrase.
+	m.parts[1].Type = "crypt"
+	if m.canInstall() {
+		t.Error("installable with crypt but no passphrase")
 	}
-	if !cur.(model).canInstall() {
-		t.Fatal("should be installable now")
-	}
-
-	// Install.
-	fin := send(moveTo(cur.(model), sectionCount), enter)
-	if !fin.confirmed {
-		t.Error("Install did not confirm")
+	m.passphrase = "x"
+	if !m.canInstall() {
+		t.Error("not installable with crypt + passphrase")
 	}
 }
 
-func TestEncryptEditor(t *testing.T) {
-	m := moveTo(newModel(twoDisks()), secEncrypt)
-	var cur tea.Model = m
-	cur = send(cur, enter) // open encryption editor (off/on)
-	cur = send(cur, down)  // -> "on"
-	cur = send(cur, enter) // choose on -> passphrase step
-	cur = send(cur, enter) // empty passphrase: stays
-	if cur.(model).onHub {
-		t.Fatal("empty passphrase returned to hub")
-	}
-	cur = send(cur, runes("secret"))
-	cur = send(cur, enter) // commit -> hub
-	if !cur.(model).encrypt || cur.(model).passphrase != "secret" || !cur.(model).onHub {
-		t.Fatalf("encryption not set: %+v", cur.(model))
-	}
-}
+func TestFormAddPartition(t *testing.T) {
+	// Hub -> Partitions -> add a plain ext4 root.
+	var m tea.Model = newModel(oneDisk())
+	m = send(m, down)  // cursor 0 Disk -> 1 Partitions
+	m = send(m, enter) // open partition list
+	m = send(m, runes("a"))
+	m = send(m, enter)      // type = "part" (first choice)
+	m = send(m, enter)      // fs = "ext4" (first choice)
+	m = send(m, runes("/")) // mountpoint
+	m = send(m, enter)      //
+	m = send(m, enter)      // size blank = fill -> append
 
-func TestSwapNone(t *testing.T) {
-	m := moveTo(newModel(twoDisks()), secSwap)
-	var cur tea.Model = m
-	cur = send(cur, enter) // open swap editor
-	cur = send(cur, down)  // file
-	cur = send(cur, down)  // none
-	cur = send(cur, enter) // choose none -> straight back to hub (no size)
-	if cur.(model).swap != "none" || !cur.(model).onHub {
-		t.Fatalf("swap none not set: %+v", cur.(model))
+	got := m.(model)
+	if len(got.parts) != 1 {
+		t.Fatalf("got %d parts, want 1", len(got.parts))
+	}
+	p := got.parts[0]
+	if p.Type != "part" || p.FS != "ext4" || p.Mount != "/" || p.Size != "" {
+		t.Fatalf("entry = %+v", p)
 	}
 }

@@ -98,6 +98,12 @@ type assembly struct {
 	PassHash        string
 }
 
+// partDevName is the bare partition name for partition n on a disk
+// (sda -> sda1, nvme0n1 -> nvme0n1p1).
+func partDevName(disk string, n int) string {
+	return strings.TrimPrefix(storage.PartitionName("/dev/"+disk, n), "/dev/")
+}
+
 // assemble builds the config for the chosen layout: an ESP, an optional
 // swap partition, and a root (encrypted or not) that fills the disk, plus
 // the identity and a single admin account. Separate from the prompting so

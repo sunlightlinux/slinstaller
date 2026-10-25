@@ -12,11 +12,12 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 )
 
-// RunFullscreen drives the install as a clr-installer-style menu: a hub
-// of sections, each showing its configured value, edited in any order,
-// with an Install button that lights up once the required sections are
-// set. It returns the config and (for an encrypted root) the passphrase;
-// cmd uses it on a real terminal and falls back to Run otherwise.
+// RunFullscreen drives the install as a full-screen, clr-installer-style
+// menu: a hub of sections configured in any order, including a manual
+// partition editor (plain, encrypted and LVM), with an Install button
+// that lights up once the layout is complete. It returns the config and
+// the LUKS passphrase; cmd uses it on a real terminal, the prompt flow
+// otherwise.
 func RunFullscreen() (*config.Config, string, error) {
 	devs, err := blockdev.List()
 	if err != nil {
@@ -40,69 +41,164 @@ func RunFullscreen() (*config.Config, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	cfg := assemble(assembly{
-		Disk: disks[m.diskIdx].Name, RootFS: m.fs, Encrypt: m.encrypt,
-		Swap: m.swap, SwapSize: m.swapSize,
-		Hostname: m.hostname, Login: m.login, PassHash: hash,
-	})
+	cfg := &config.Config{
+		TargetMedia: []*config.Media{{
+			Name: m.disks[m.diskIdx].Name, Type: "disk",
+			Children: layoutToMedia(m.disks[m.diskIdx].Name, m.parts),
+		}},
+		Hostname: m.hostname, Keyboard: m.keyboard, Language: m.language, Timezone: m.timezone,
+		Users: []*config.User{{Login: m.login, Password: hash, Admin: true}},
+	}
 	return cfg, m.passphrase, nil
 }
+
+// --- the layout data model (separate from the UI, so it is testable) ---
+
+type lvEntry struct {
+	Name, FS, Mount, Size string
+}
+
+type partEntry struct {
+	Type  string // "part", "crypt", "lvm"
+	FS    string
+	Mount string
+	Size  string
+	VG    string // for lvm
+	LVs   []lvEntry
+}
+
+// layoutToMedia turns the editor's partition list into config children,
+// numbering the physical partitions (sda1, sda2, ...) and nesting an
+// lvm partition's logical volumes.
+func layoutToMedia(disk string, parts []partEntry) []*config.Media {
+	var out []*config.Media
+	for i, p := range parts {
+		name := partDevName(disk, i+1)
+		m := &config.Media{Name: name, Type: p.Type, FsType: p.FS, Mountpoint: p.Mount, Size: p.Size}
+		if p.Type == "lvm" {
+			m.FsType, m.Mountpoint = "", ""
+			m.VolumeGroup = p.VG
+			for _, lv := range p.LVs {
+				m.Children = append(m.Children, &config.Media{
+					Name: lv.Name, FsType: lv.FS, Mountpoint: lv.Mount, Size: lv.Size,
+				})
+			}
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func hasRoot(parts []partEntry) bool {
+	for _, p := range parts {
+		if p.Mount == "/" {
+			return true
+		}
+		for _, lv := range p.LVs {
+			if lv.Mount == "/" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasESP(parts []partEntry) bool {
+	for _, p := range parts {
+		if p.FS == "vfat" && (p.Mount == "/boot" || p.Mount == "/boot/efi") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCrypt(parts []partEntry) bool {
+	for _, p := range parts {
+		if p.Type == "crypt" {
+			return true
+		}
+	}
+	return false
+}
+
+// --- the model ---
 
 type section int
 
 const (
 	secDisk section = iota
-	secFS
-	secEncrypt
-	secSwap
+	secParts
+	secPassphrase
+	secKeyboard
+	secLanguage
+	secTimezone
 	secHostname
 	secUser
 	sectionCount
 )
 
-var sectionLabels = [sectionCount]string{"Disk", "Filesystem", "Encryption", "Swap", "Hostname", "Admin user"}
+var sectionLabels = [sectionCount]string{
+	"Disk", "Partitions", "Passphrase", "Keyboard", "Language", "Timezone", "Hostname", "Admin user",
+}
+
+type view int
+
+const (
+	viewHub view = iota
+	viewSectionChoice
+	viewSectionText
+	viewPartList
+	viewPartForm
+)
 
 type model struct {
 	disks []blockdev.Device
 
-	// configured values
-	diskIdx                   int
-	diskSet, encrypt, userSet bool
-	fs, swap, swapSize        string
-	passphrase                string
-	hostname, login, password string
+	diskIdx                     int
+	diskSet, userSet            bool
+	keyboard, language          string
+	timezone, hostname          string
+	login, password, passphrase string
+	parts                       []partEntry
 
-	// UI
-	onHub     bool
-	hubCursor int // 0..sectionCount-1 = sections; sectionCount = Install; +1 = Cancel
-	editing   section
-	edStep    int
-	edCursor  int
-	input     textinput.Model
+	view      view
+	hubCursor int
+
+	// simple section editors
+	editing  section
+	input    textinput.Model
+	edCursor int
+
+	// partition editor
+	partCursor int       // index into parts (and -1.. for buttons)
+	form       partEntry // the entry being built
+	formLV     lvEntry
+	formStep   int
+	formIsLV   bool
 
 	confirmed bool
 }
 
 func newModel(disks []blockdev.Device) model {
 	return model{
-		disks: disks, onHub: true,
-		fs: "ext4", swap: "partition", swapSize: "2G", hostname: "sunlight", login: "user",
+		disks: disks, view: viewHub,
+		keyboard: "us", language: "en_US.UTF-8", timezone: "UTC", hostname: "sunlight", login: "user",
 	}
 }
 
 var (
-	appStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("27")).Padding(0, 1)
-	rowCursor   = lipgloss.NewStyle().Foreground(lipgloss.Color("45")).Bold(true)
-	valStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	needStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("78"))
-	btnOn       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("45")).Padding(0, 2)
-	btnOff      = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("240")).Padding(0, 2)
-	btnDisabled = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Padding(0, 2)
-	pick        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("45")).Padding(0, 1)
-	plain       = lipgloss.NewStyle().Padding(0, 1)
-	help        = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	dangerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("203"))
+	appStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("27")).Padding(0, 1)
+	rowCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("45")).Bold(true)
+	valStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	needStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	okStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("78"))
+	btnOn     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("45")).Padding(0, 2)
+	btnOff    = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("240")).Padding(0, 2)
+	btnGrey   = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Padding(0, 2)
+	pick      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("45")).Padding(0, 1)
+	plain     = lipgloss.NewStyle().Padding(0, 1)
+	help      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	danger    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("203"))
 )
 
 func (m model) Init() tea.Cmd { return textinput.Blink }
@@ -115,16 +211,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if key.String() == "ctrl+c" {
-		m.confirmed = false
 		return m, tea.Quit
 	}
-	if m.onHub {
+	switch m.view {
+	case viewHub:
 		return m.updateHub(key)
+	case viewSectionChoice:
+		return m.updateSectionChoice(key)
+	case viewSectionText:
+		return m.updateSectionText(key)
+	case viewPartList:
+		return m.updatePartList(key)
+	case viewPartForm:
+		return m.updatePartForm(key)
 	}
-	return m.updateEditor(key)
+	return m, nil
 }
 
 // --- hub ---
+
+func (m model) canInstall() bool {
+	return m.diskSet && m.userSet && hasRoot(m.parts) && hasESP(m.parts) &&
+		(!hasCrypt(m.parts) || m.passphrase != "")
+}
 
 func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	last := int(sectionCount) + 1 // Install, Cancel
@@ -138,26 +247,57 @@ func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.hubCursor++
 		}
 	case "esc":
-		m.confirmed = false
 		return m, tea.Quit
 	case "enter":
 		switch {
 		case m.hubCursor < int(sectionCount):
-			return m.openEditor(section(m.hubCursor))
-		case m.hubCursor == int(sectionCount): // Install
+			return m.openSection(section(m.hubCursor))
+		case m.hubCursor == int(sectionCount):
 			if m.canInstall() {
 				m.confirmed = true
 				return m, tea.Quit
 			}
-		default: // Cancel
-			m.confirmed = false
+		default:
 			return m, tea.Quit
 		}
 	}
 	return m, nil
 }
 
-func (m model) canInstall() bool { return m.diskSet && m.userSet }
+func (m model) openSection(s section) (tea.Model, tea.Cmd) {
+	m.editing = s
+	switch s {
+	case secParts:
+		m.view = viewPartList
+		m.partCursor = 0
+		return m, nil
+	case secDisk:
+		m.view = viewSectionChoice
+		m.edCursor = m.diskIdx
+		return m, nil
+	default: // text sections
+		m.view = viewSectionText
+		ti := textinput.New()
+		ti.Focus()
+		switch s {
+		case secKeyboard:
+			ti.SetValue(m.keyboard)
+		case secLanguage:
+			ti.SetValue(m.language)
+		case secTimezone:
+			ti.SetValue(m.timezone)
+		case secHostname:
+			ti.SetValue(m.hostname)
+		case secPassphrase, secUser:
+			if s == secPassphrase {
+				ti.EchoMode = textinput.EchoPassword
+			}
+		}
+		m.input = ti
+		m.formStep = 0 // for the two-field user editor
+		return m, textinput.Blink
+	}
+}
 
 func (m model) sectionValue(s section) string {
 	switch s {
@@ -166,18 +306,25 @@ func (m model) sectionValue(s section) string {
 			return m.disks[m.diskIdx].Path
 		}
 		return "— choose —"
-	case secFS:
-		return m.fs
-	case secEncrypt:
-		if m.encrypt {
-			return "on (LUKS)"
+	case secParts:
+		if len(m.parts) == 0 {
+			return "— none —"
 		}
-		return "off"
-	case secSwap:
-		if m.swap == "none" {
-			return "none"
+		return fmt.Sprintf("%d defined", len(m.parts))
+	case secPassphrase:
+		if m.passphrase != "" {
+			return "set"
 		}
-		return m.swapSize + " " + m.swap
+		if hasCrypt(m.parts) {
+			return "— required —"
+		}
+		return "—"
+	case secKeyboard:
+		return m.keyboard
+	case secLanguage:
+		return m.language
+	case secTimezone:
+		return m.timezone
 	case secHostname:
 		return m.hostname
 	case secUser:
@@ -193,6 +340,10 @@ func (m model) sectionOK(s section) bool {
 	switch s {
 	case secDisk:
 		return m.diskSet
+	case secParts:
+		return hasRoot(m.parts) && hasESP(m.parts)
+	case secPassphrase:
+		return !hasCrypt(m.parts) || m.passphrase != ""
 	case secUser:
 		return m.userSet
 	default:
@@ -200,168 +351,266 @@ func (m model) sectionOK(s section) bool {
 	}
 }
 
-// --- editor ---
+// --- simple section editors ---
 
-func (m model) openEditor(s section) (tea.Model, tea.Cmd) {
-	m.onHub = false
-	m.editing = s
-	m.edStep = 0
-	m.edCursor = 0
-	if ch := m.editorChoices(); ch == nil {
-		m.initInput()
-	}
-	return m, textinput.Blink
-}
-
-// editorChoices returns the options for the current editor step, or nil
-// when the step is a text field.
-func (m model) editorChoices() []string {
-	switch {
-	case m.editing == secDisk:
-		out := make([]string, len(m.disks))
-		for i, d := range m.disks {
-			out[i] = fmt.Sprintf("%-14s %s", d.Path, d.Model)
-		}
-		return out
-	case m.editing == secFS:
-		return rootFilesystems
-	case m.editing == secEncrypt && m.edStep == 0:
-		return []string{"off", "on"}
-	case m.editing == secSwap && m.edStep == 0:
-		return []string{"partition", "file", "none"}
-	default:
-		return nil
-	}
-}
-
-func (m *model) initInput() {
-	ti := textinput.New()
-	ti.Focus()
-	switch {
-	case m.editing == secEncrypt: // passphrase
-		ti.EchoMode = textinput.EchoPassword
-	case m.editing == secSwap: // size
-		ti.SetValue(m.swapSize)
-	case m.editing == secHostname:
-		ti.SetValue(m.hostname)
-	case m.editing == secUser && m.edStep == 0:
-		ti.SetValue(m.login)
-	case m.editing == secUser && m.edStep == 1:
-		ti.EchoMode = textinput.EchoPassword
-	}
-	m.input = ti
-}
-
-func (m model) updateEditor(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.String() == "esc" {
-		m.onHub = true // cancel this edit, back to the hub
-		return m, nil
-	}
-	if m.editorChoices() != nil {
-		return m.updateEditorChoice(key)
-	}
-	return m.updateEditorText(key)
-}
-
-func (m model) updateEditorChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	n := len(m.editorChoices())
+func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
+	case "esc":
+		m.view = viewHub
 	case "up", "k":
 		if m.edCursor > 0 {
 			m.edCursor--
 		}
 	case "down", "j":
-		if m.edCursor < n-1 {
+		if m.edCursor < len(m.disks)-1 {
 			m.edCursor++
 		}
 	case "enter":
-		return m.commitChoice()
-	}
-	return m, nil
-}
-
-func (m model) commitChoice() (tea.Model, tea.Cmd) {
-	switch m.editing {
-	case secDisk:
 		m.diskIdx = m.edCursor
 		m.diskSet = true
-		return m.backToHub()
-	case secFS:
-		m.fs = rootFilesystems[m.edCursor]
-		return m.backToHub()
-	case secEncrypt:
-		m.encrypt = m.edCursor == 1
-		if m.encrypt {
-			m.edStep = 1 // ask for the passphrase next
-			m.initInput()
-			return m, textinput.Blink
-		}
-		m.passphrase = ""
-		return m.backToHub()
-	case secSwap:
-		m.swap = []string{"partition", "file", "none"}[m.edCursor]
-		if m.swap == "none" {
-			return m.backToHub()
-		}
-		m.edStep = 1 // ask for the size next
-		m.initInput()
-		return m, textinput.Blink
+		m.view = viewHub
 	}
 	return m, nil
 }
 
-func (m model) updateEditorText(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.String() == "enter" {
-		v := m.input.Value()
-		switch {
-		case m.editing == secEncrypt: // passphrase
-			if v == "" {
-				return m, nil // required
-			}
-			m.passphrase = v
-			return m.backToHub()
-		case m.editing == secSwap: // size
+func (m model) updateSectionText(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		m.view = viewHub
+		return m, nil
+	case "enter":
+		v := strings.TrimSpace(m.input.Value())
+		switch m.editing {
+		case secKeyboard:
 			if v != "" {
-				m.swapSize = v
+				m.keyboard = v
 			}
-			return m.backToHub()
-		case m.editing == secHostname:
+		case secLanguage:
+			if v != "" {
+				m.language = v
+			}
+		case secTimezone:
+			if v != "" {
+				m.timezone = v
+			}
+		case secHostname:
 			if v != "" {
 				m.hostname = v
 			}
-			return m.backToHub()
-		case m.editing == secUser && m.edStep == 0:
-			if v == "" {
-				return m, nil
+		case secPassphrase:
+			m.passphrase = v
+		case secUser:
+			if m.formStep == 0 {
+				if v == "" {
+					return m, nil
+				}
+				m.login = v
+				m.formStep = 1
+				ti := textinput.New()
+				ti.Focus()
+				ti.EchoMode = textinput.EchoPassword
+				m.input = ti
+				return m, textinput.Blink
 			}
-			m.login = v
-			m.edStep = 1 // password next
-			m.initInput()
-			return m, textinput.Blink
-		case m.editing == secUser && m.edStep == 1:
-			m.password = v
+			m.password = m.input.Value()
 			m.userSet = true
-			return m.backToHub()
 		}
+		m.view = viewHub
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(key)
 	return m, cmd
 }
 
-func (m model) backToHub() (tea.Model, tea.Cmd) {
-	m.onHub = true
+// --- partition editor ---
+
+func (m model) updatePartList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		m.view = viewHub
+	case "up", "k":
+		if m.partCursor > 0 {
+			m.partCursor--
+		}
+	case "down", "j":
+		if m.partCursor < len(m.parts)-1 {
+			m.partCursor++
+		}
+	case "a":
+		return m.startForm(false)
+	case "l": // add a logical volume to the selected lvm partition
+		if m.partCursor < len(m.parts) && m.parts[m.partCursor].Type == "lvm" {
+			return m.startForm(true)
+		}
+	case "d":
+		if len(m.parts) > 0 {
+			m.parts = append(m.parts[:m.partCursor], m.parts[m.partCursor+1:]...)
+			if m.partCursor > 0 {
+				m.partCursor--
+			}
+		}
+	}
 	return m, nil
+}
+
+func (m model) startForm(isLV bool) (tea.Model, tea.Cmd) {
+	m.view = viewPartForm
+	m.formStep = 0
+	m.formIsLV = isLV
+	m.edCursor = 0
+	if isLV {
+		m.formLV = lvEntry{}
+		m.initFormInput()
+	} else {
+		m.form = partEntry{Type: "part"}
+	}
+	return m, textinput.Blink
+}
+
+// formChoices returns the options for the current form step, or nil for
+// a text step.
+func (m model) formChoices() []string {
+	if m.formIsLV {
+		if m.formStep == 1 {
+			return rootFilesystems
+		}
+		return nil
+	}
+	switch m.formStep {
+	case 0:
+		return []string{"part", "crypt", "lvm"}
+	case 1:
+		if m.form.Type == "lvm" {
+			return nil // volumeGroup is text
+		}
+		return append(append([]string{}, rootFilesystems...), "vfat", "swap")
+	default:
+		return nil
+	}
+}
+
+func (m *model) initFormInput() {
+	ti := textinput.New()
+	ti.Focus()
+	m.input = ti
+}
+
+func (m model) updatePartForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.String() == "esc" {
+		m.view = viewPartList
+		return m, nil
+	}
+	if m.formChoices() != nil {
+		return m.updateFormChoice(key)
+	}
+	return m.updateFormText(key)
+}
+
+func (m model) updateFormChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	ch := m.formChoices()
+	switch key.String() {
+	case "up", "k":
+		if m.edCursor > 0 {
+			m.edCursor--
+		}
+	case "down", "j":
+		if m.edCursor < len(ch)-1 {
+			m.edCursor++
+		}
+	case "enter":
+		return m.commitFormField(ch[m.edCursor])
+	}
+	return m, nil
+}
+
+func (m model) updateFormText(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.String() == "enter" {
+		return m.commitFormField(strings.TrimSpace(m.input.Value()))
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(key)
+	return m, cmd
+}
+
+// commitFormField records the current field and moves to the next, or
+// finishes the form.
+func (m model) commitFormField(v string) (tea.Model, tea.Cmd) {
+	if m.formIsLV {
+		switch m.formStep {
+		case 0: // name
+			if v == "" {
+				return m, nil
+			}
+			m.formLV.Name = v
+		case 1: // fs
+			m.formLV.FS = v
+		case 2: // mount
+			m.formLV.Mount = v
+		case 3: // size
+			m.formLV.Size = v
+			p := &m.parts[m.partCursor]
+			p.LVs = append(p.LVs, m.formLV)
+			m.view = viewPartList
+			return m, nil
+		}
+		m.formStep++
+		m.edCursor = 0
+		m.initFormInput()
+		return m, textinput.Blink
+	}
+
+	switch m.formStep {
+	case 0: // type
+		m.form.Type = v
+	case 1: // fs or vg
+		if m.form.Type == "lvm" {
+			if v == "" {
+				v = "vg0"
+			}
+			m.form.VG = v
+		} else {
+			m.form.FS = v
+		}
+	case 2: // mountpoint (skipped for lvm/swap below)
+		m.form.Mount = v
+	case 3: // size
+		m.form.Size = v
+		m.parts = append(m.parts, m.form)
+		m.view = viewPartList
+		m.partCursor = len(m.parts) - 1
+		return m, nil
+	}
+
+	m.formStep++
+	// Skip the mountpoint for an LVM PV and for swap.
+	if m.formStep == 2 && (m.form.Type == "lvm" || m.form.FS == "swap") {
+		m.formStep = 3
+	}
+	m.edCursor = 0
+	if m.formChoices() == nil {
+		m.initFormInput()
+	}
+	return m, textinput.Blink
 }
 
 // --- views ---
 
 func (m model) View() string {
 	header := "\n" + appStyle.Render(" slinstaller ") + "  Install Sunlight Linux\n\n"
-	if m.onHub {
+	switch m.view {
+	case viewHub:
 		return header + m.hubView()
+	case viewSectionChoice:
+		return header + m.diskChoiceView()
+	case viewSectionText:
+		return header + m.textView()
+	case viewPartList:
+		return header + m.partListView()
+	case viewPartForm:
+		return header + m.partFormView()
 	}
-	return header + m.editorView()
+	return header
 }
 
 func (m model) hubView() string {
@@ -371,14 +620,16 @@ func (m model) hubView() string {
 		if !m.sectionOK(s) {
 			mark = needStyle.Render("✗")
 		}
-		label := fmt.Sprintf("  %-12s %s", sectionLabels[s], valStyle.Render(m.sectionValue(s)))
+		label := fmt.Sprintf("%-12s", sectionLabels[s])
 		if m.hubCursor == int(s) {
-			label = rowCursor.Render("▸ "+fmt.Sprintf("%-12s", sectionLabels[s])) + " " + valStyle.Render(m.sectionValue(s))
+			label = rowCursor.Render("▸ " + label)
+		} else {
+			label = "  " + label
 		}
-		fmt.Fprintf(&b, "%s %s\n", mark, label)
+		fmt.Fprintf(&b, "%s %s  %s\n", mark, label, valStyle.Render(m.sectionValue(s)))
 	}
 
-	install := btnDisabled.Render("Install")
+	install := btnGrey.Render("Install")
 	if m.canInstall() {
 		install = btnOff.Render("Install")
 		if m.hubCursor == int(sectionCount) {
@@ -390,44 +641,133 @@ func (m model) hubView() string {
 		cancel = btnOn.Render("Cancel")
 	}
 	b.WriteString("\n    " + install + "   " + cancel + "\n")
-
 	if !m.canInstall() {
-		b.WriteString("\n  " + needStyle.Render("Set the disk and an admin user to enable Install.") + "\n")
+		b.WriteString("\n  " + needStyle.Render("Need: a disk, a / and an ESP, an admin user (and a passphrase if encrypting).") + "\n")
 	}
-	b.WriteString("\n" + help.Render("↑/↓ move · enter select/edit · esc cancel"))
+	b.WriteString("\n" + help.Render("↑/↓ move · enter select · esc cancel"))
 	return b.String()
 }
 
-func (m model) editorView() string {
+func (m model) diskChoiceView() string {
+	var b strings.Builder
+	b.WriteString(danger.Render("  the chosen disk will be ERASED") + "\n\n")
+	for i, d := range m.disks {
+		line := fmt.Sprintf("%-14s %s", d.Path, d.Model)
+		if i == m.edCursor {
+			b.WriteString(pick.Render("▸ "+line) + "\n")
+		} else {
+			b.WriteString(plain.Render("  "+line) + "\n")
+		}
+	}
+	return b.String() + "\n" + help.Render("↑/↓ move · enter select · esc back")
+}
+
+func (m model) textView() string {
 	title := sectionLabels[m.editing]
-	var body string
-	if ch := m.editorChoices(); ch != nil {
-		for i, c := range ch {
-			if i == m.edCursor {
-				body += pick.Render("▸ "+c) + "\n"
-			} else {
-				body += plain.Render("  "+c) + "\n"
-			}
-		}
-		if m.editing == secDisk {
-			body = dangerStyle.Render("  the chosen disk will be ERASED") + "\n\n" + body
-		}
-	} else {
-		switch {
-		case m.editing == secEncrypt:
-			title = "LUKS passphrase"
-		case m.editing == secSwap:
-			title = "Swap size"
-		case m.editing == secUser && m.edStep == 0:
+	if m.editing == secUser {
+		if m.formStep == 0 {
 			title = "Admin username"
-		case m.editing == secUser && m.edStep == 1:
+		} else {
 			title = "Password for " + m.login
 		}
-		body = m.input.View()
 	}
-	h := "↑/↓ move · enter confirm · esc back"
-	if m.editorChoices() == nil {
-		h = "type · enter confirm · esc back"
+	return "  " + lipgloss.NewStyle().Bold(true).Render(title) + "\n\n" + m.input.View() +
+		"\n\n" + help.Render("type · enter confirm · esc back")
+}
+
+func (m model) partListView() string {
+	var b strings.Builder
+	b.WriteString("  " + lipgloss.NewStyle().Bold(true).Render("Partitions") + "\n\n")
+	if len(m.parts) == 0 {
+		b.WriteString("  " + help.Render("none yet — press 'a' to add") + "\n")
+	}
+	for i, p := range m.parts {
+		line := partSummary(p)
+		if i == m.partCursor {
+			b.WriteString(pick.Render("▸ "+line) + "\n")
+		} else {
+			b.WriteString(plain.Render("  "+line) + "\n")
+		}
+		for _, lv := range p.LVs {
+			b.WriteString(plain.Render("      lv "+lvSummary(lv)) + "\n")
+		}
+	}
+	b.WriteString("\n" + help.Render("a add · l add LV (on lvm) · d delete · esc back"))
+	return b.String()
+}
+
+func partSummary(p partEntry) string {
+	switch p.Type {
+	case "lvm":
+		return fmt.Sprintf("lvm  group=%s  %s", p.VG, orFill(p.Size))
+	case "crypt":
+		return fmt.Sprintf("crypt %s  %s  %s", p.FS, orNone(p.Mount), orFill(p.Size))
+	default:
+		return fmt.Sprintf("part  %s  %s  %s", p.FS, orNone(p.Mount), orFill(p.Size))
+	}
+}
+
+func lvSummary(lv lvEntry) string {
+	return fmt.Sprintf("%-6s %s  %s  %s", lv.Name, lv.FS, orNone(lv.Mount), orFill(lv.Size))
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "(no mount)"
+	}
+	return s
+}
+func orFill(s string) string {
+	if s == "" || strings.EqualFold(s, "rest") {
+		return "fill"
+	}
+	return s
+}
+
+func (m model) partFormView() string {
+	var title, body string
+	if m.formIsLV {
+		switch m.formStep {
+		case 0:
+			title, body = "LV name", m.input.View()
+		case 1:
+			title, body = "LV filesystem", m.choiceBody()
+		case 2:
+			title, body = "LV mountpoint (blank for none)", m.input.View()
+		case 3:
+			title, body = "LV size (blank = fill the group)", m.input.View()
+		}
+	} else {
+		switch m.formStep {
+		case 0:
+			title, body = "Partition type", m.choiceBody()
+		case 1:
+			if m.form.Type == "lvm" {
+				title, body = "Volume group name", m.input.View()
+			} else {
+				title, body = "Filesystem", m.choiceBody()
+			}
+		case 2:
+			title, body = "Mountpoint (e.g. / or /boot)", m.input.View()
+		case 3:
+			title, body = "Size (e.g. 512M, 30G; blank = fill)", m.input.View()
+		}
+	}
+	h := "type · enter next · esc cancel"
+	if m.formChoices() != nil {
+		h = "↑/↓ move · enter next · esc cancel"
 	}
 	return "  " + lipgloss.NewStyle().Bold(true).Render(title) + "\n\n" + body + "\n" + help.Render(h)
+}
+
+func (m model) choiceBody() string {
+	var b strings.Builder
+	for i, c := range m.formChoices() {
+		if i == m.edCursor {
+			b.WriteString(pick.Render("▸ "+c) + "\n")
+		} else {
+			b.WriteString(plain.Render("  "+c) + "\n")
+		}
+	}
+	return b.String()
 }

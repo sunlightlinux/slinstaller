@@ -109,13 +109,16 @@ for what will and will not be allowed to change once releases begin.
   account (password hashed with openssl, confirmed), shows a summary to
   confirm, and installs through the same path as a config file. On a real
   terminal it runs as a **full-screen clr-installer-style menu**
-  (bubbletea/bubbles/lipgloss): a hub of sections (disk, filesystem,
-  encryption, swap, hostname, admin user) each showing its value and a
-  ✓/✗, edited in any order, with an Install button that lights up only
-  once the required ones are set, beside Cancel — and masked passphrase
-  and password fields. Over a serial console or a pipe, where that cannot
-  render, it falls back to the plain prompt flow. Both build the same
-  config.
+  (bubbletea/bubbles/lipgloss): a hub of sections — disk, a **manual
+  partition editor**, passphrase, keyboard, language, timezone, hostname,
+  admin user — each showing its value and a ✓/✗, edited in any order, with
+  an Install button that lights up only once the layout is complete
+  (a disk, a root, an ESP, a user, and a passphrase if encrypting), beside
+  Cancel. The partition editor adds, deletes and nests entries: plain,
+  encrypted (`crypt`) or LVM partitions, with logical volumes under an
+  LVM group — the full layout the config file can express. Over a serial
+  console or a pipe it falls back to the plain prompt flow; both build the
+  same config.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,
   and prints the partitioning plan. With `--apply` it runs the install
   through the controller, gated on running as root and on the operator
