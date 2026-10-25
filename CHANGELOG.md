@@ -99,9 +99,11 @@ for what will and will not be allowed to change once releases begin.
   to encrypt the root (with a LUKS passphrase, confirmed), swap (a
   partition, a file, or none) and its size, a hostname and an admin
   account (password hashed with openssl, confirmed), shows a summary to
-  confirm, and installs through the same path as a config file. A plain
-  prompt flow rather than a full-screen UI — no dependency, and it works
-  over a serial console; a richer UI can layer on later.
+  confirm, and installs through the same path as a config file. On a real
+  terminal it runs as a **full-screen wizard** (bubbletea/bubbles/lipgloss)
+  with highlighted selections and masked passwords; over a serial console
+  or a pipe, where that cannot render, it falls back to the plain prompt
+  flow. Both build the same config.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,
   and prints the partitioning plan. With `--apply` it runs the install
   through the controller, gated on running as root and on the operator

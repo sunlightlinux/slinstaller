@@ -107,7 +107,13 @@ func run(args []string) error {
 		if os.Geteuid() != 0 {
 			return fmt.Errorf("interactive install must run as root (or pass a config file for a dry run)")
 		}
-		cfg, interactivePass, err = tui.Run(stdin, os.Stderr)
+		// Full-screen wizard on a real terminal; the plain prompt flow
+		// over a serial console or a pipe, where it would not render.
+		if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
+			cfg, interactivePass, err = tui.RunFullscreen()
+		} else {
+			cfg, interactivePass, err = tui.Run(stdin, os.Stderr)
+		}
 		apply = true
 	default:
 		fs.Usage()
@@ -286,6 +292,13 @@ func humanSize(b uint64) string {
 		i++
 	}
 	return fmt.Sprintf("%.1f%s", v, units[i])
+}
+
+// isTerminal reports whether f is a terminal (not a pipe or file), so
+// the full-screen wizard is used only where it can render.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && (fi.Mode()&os.ModeCharDevice) != 0
 }
 
 // confirm requires the operator to retype the target disk. A yes/no
