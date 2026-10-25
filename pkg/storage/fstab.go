@@ -10,8 +10,13 @@ import (
 
 // ProbeUUID reads a device's filesystem UUID with blkid. The UUID exists
 // only once the filesystem is made, so this runs after Plan.Commands.
+//
+// -p probes the device directly rather than trusting blkid's cache: on a
+// reused disk the cache can still hold the previous filesystem's UUID,
+// which would end up in fstab and leave the system unbootable (fsck
+// looking for a UUID that no longer exists).
 func ProbeUUID(device string) (string, error) {
-	out, err := exec.Command("blkid", "-s", "UUID", "-o", "value", device).Output()
+	out, err := exec.Command("blkid", "-p", "-s", "UUID", "-o", "value", device).Output()
 	if err != nil {
 		return "", fmt.Errorf("storage: blkid %s: %w", device, err)
 	}
