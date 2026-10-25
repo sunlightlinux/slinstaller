@@ -1,41 +1,56 @@
 #clear-linux-config
-# A minimal UEFI install in clr-installer's config format, which
+# A complete, minimal UEFI install in clr-installer's config format, which
 # slinstaller reads directly. Print its plan with:
 #
 #     slinstaller demo/uefi-basic.yaml
 #
-# Nothing runs until you pass --apply, and even then slinstaller makes
-# you retype the disk path first.
+# Nothing runs until you pass --apply, and even then slinstaller makes you
+# retype the disk path first. (This targets /dev/sda; demo/vm/config.yaml
+# targets the virtio disk the VM harness uses.)
 
 targetMedia:
 - name: sda
   type: disk
   children:
-  # The ESP. vfat at /boot marks it the EFI System Partition.
+  # The ESP. vfat at /boot marks it the EFI System Partition. To encrypt
+  # the root instead, give it `type: crypt` (not the ESP — firmware reads
+  # it in the clear); the passphrase is prompted, never in the config.
   - name: sda1
     type: part
     fstype: vfat
     mountpoint: /boot
     size: 512M
-  # Swap, created but not mounted.
+  # Swap, created but not mounted. (Or drop this and set swapFileSize
+  # below for a swap file on root instead.)
   - name: sda2
     type: part
     fstype: swap
     size: 2G
-  # Root.
+  # Root. No size means "fill the remaining space".
   - name: sda3
     type: part
     fstype: ext4
     mountpoint: /
-    size: 20G
 
+hostname: sunlight
 keyboard: us
 language: en_US.UTF-8
-hostname: sunlight
 timezone: UTC
 
-# Clear Linux specifics a clr-installer config carries. slinstaller loads
-# them without error; they do not yet drive a Sunlight install.
+# An admin account (wheel + sudo). The password here is "demo" — a real
+# SHA-512 crypt hash, never plaintext; generate your own with
+# `openssl passwd -6`.
+users:
+- login: me
+  username: Sunlight User
+  password: "$6$VSGJJlJ4HsRjJiL0$iOD.YPsE3bTdnzcjVnRcTiskHk8Qi3H2s9H6.p.b7N9n/OTajSFtM1B1j46w5L6wZiLyAmxmyXTzILnIvhetM0"
+  admin: true
+
+# A swap file instead of (or besides) a swap partition:
+#   swapFileSize: 2G
+
+# Clear Linux specifics a clr-installer config may carry. slinstaller
+# loads them without error; they do not drive a Sunlight install.
 bundles: [os-core]
 telemetry: false
 kernel: kernel-native
