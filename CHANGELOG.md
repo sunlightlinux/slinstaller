@@ -95,11 +95,13 @@ for what will and will not be allowed to change once releases begin.
   and disk confirmation); `Options.Through` stops after a named stage for
   a staged VM run, and a failure unmounts what it mounted.
 - `pkg/tui` — an interactive front-end: with no config file,
-  `cmd/slinstaller` asks for a target disk (from the discovered disks), a
-  hostname and an admin account (password hashed with openssl), assembles
-  a standard UEFI layout, and installs through the same path as a config
-  file. A plain prompt flow rather than a full-screen UI — no dependency,
-  and it works over a serial console; a richer UI can layer on later.
+  `cmd/slinstaller` asks for a target disk, the root filesystem, whether
+  to encrypt the root (with a LUKS passphrase, confirmed), swap (a
+  partition, a file, or none) and its size, a hostname and an admin
+  account (password hashed with openssl, confirmed), shows a summary to
+  confirm, and installs through the same path as a config file. A plain
+  prompt flow rather than a full-screen UI — no dependency, and it works
+  over a serial console; a richer UI can layer on later.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,
   and prints the partitioning plan. With `--apply` it runs the install
   through the controller, gated on running as root and on the operator

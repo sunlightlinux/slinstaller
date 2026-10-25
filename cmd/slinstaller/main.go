@@ -90,8 +90,13 @@ func run(args []string) error {
 		return printDisks()
 	}
 
+	// One reader for all terminal input, so the interactive front-end and
+	// the later prompts don't fight over buffered stdin.
+	stdin := bufio.NewReader(os.Stdin)
+
 	rest := fs.Args()
 	var cfg *config.Config
+	var interactivePass string
 	var err error
 	switch len(rest) {
 	case 1:
@@ -102,7 +107,7 @@ func run(args []string) error {
 		if os.Geteuid() != 0 {
 			return fmt.Errorf("interactive install must run as root (or pass a config file for a dry run)")
 		}
-		cfg, err = tui.Run(os.Stdin, os.Stderr)
+		cfg, interactivePass, err = tui.Run(stdin, os.Stderr)
 		apply = true
 	default:
 		fs.Usage()
@@ -217,21 +222,22 @@ func run(args []string) error {
 		}
 	}
 
-	stdin := bufio.NewReader(os.Stdin)
-
-	// LUKS passphrase, when the layout is encrypted: from the environment
-	// for an unattended install, otherwise prompted.
+	// LUKS passphrase, when the layout is encrypted. The interactive
+	// front-end already collected it; otherwise take it from the
+	// environment for an unattended install, or prompt.
 	if encrypted {
-		pass := os.Getenv("SLINSTALLER_LUKS_PASSPHRASE")
-		if pass == "" {
+		opts.Passphrase = interactivePass
+		if opts.Passphrase == "" {
+			opts.Passphrase = os.Getenv("SLINSTALLER_LUKS_PASSPHRASE")
+		}
+		if opts.Passphrase == "" {
 			fmt.Fprint(os.Stderr, "LUKS passphrase: ")
 			line, _ := stdin.ReadString('\n')
-			pass = strings.TrimSpace(line)
+			opts.Passphrase = strings.TrimSpace(line)
 		}
-		if pass == "" {
+		if opts.Passphrase == "" {
 			return fmt.Errorf("the layout is encrypted but no passphrase was given")
 		}
-		opts.Passphrase = pass
 	}
 
 	if !confirm(stdin, plan.Disk) {
