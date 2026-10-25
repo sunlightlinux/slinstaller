@@ -1,0 +1,17 @@
+#clear-linux-config
+# Encrypted root (LUKS). /dev/vda only. slinstaller prompts for the
+# passphrase (or set SLINSTALLER_LUKS_PASSPHRASE). Password is "demo".
+targetMedia:
+- name: vda
+  type: disk
+  children:
+  - { name: vda1, type: part,  fstype: vfat, mountpoint: /boot, size: 512M }
+  - { name: vda2, type: part,  fstype: swap, size: 1G }
+  - { name: vda3, type: crypt, fstype: ext4, mountpoint: / }
+hostname: sunlight-luks
+keyboard: us
+language: en_US.UTF-8
+users:
+- login: demo
+  password: "$6$VSGJJlJ4HsRjJiL0$iOD.YPsE3bTdnzcjVnRcTiskHk8Qi3H2s9H6.p.b7N9n/OTajSFtM1B1j46w5L6wZiLyAmxmyXTzILnIvhetM0"
+  admin: true

@@ -1,0 +1,22 @@
+#clear-linux-config
+# LVM: root and home as logical volumes in one group on /dev/vda.
+# Password is "demo".
+targetMedia:
+- name: vda
+  type: disk
+  children:
+  - { name: vda1, type: part, fstype: vfat, mountpoint: /boot, size: 512M }
+  - name: vda2
+    type: lvm
+    size: rest
+    volumeGroup: vg0
+    children:
+    - { name: root, fstype: ext4, mountpoint: /,     size: 4G }
+    - { name: home, fstype: ext4, mountpoint: /home }
+hostname: sunlight-lvm
+keyboard: us
+language: en_US.UTF-8
+users:
+- login: demo
+  password: "$6$VSGJJlJ4HsRjJiL0$iOD.YPsE3bTdnzcjVnRcTiskHk8Qi3H2s9H6.p.b7N9n/OTajSFtM1B1j46w5L6wZiLyAmxmyXTzILnIvhetM0"
+  admin: true
