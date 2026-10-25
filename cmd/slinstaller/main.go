@@ -160,10 +160,21 @@ func run(args []string) error {
 		}
 	}
 	var packages []string
-	for _, p := range strings.Split(pkgs, ",") {
-		if p = strings.TrimSpace(p); p != "" {
+	seen := map[string]bool{}
+	addPkg := func(p string) {
+		if p = strings.TrimSpace(p); p != "" && !seen[p] {
+			seen[p] = true
 			packages = append(packages, p)
 		}
+	}
+	for _, p := range strings.Split(pkgs, ",") {
+		addPkg(p)
+	}
+	// The installed system needs the tools for the filesystems and
+	// features the layout uses, or it cannot fsck/mount/assemble them at
+	// boot. (ext4's e2fsprogs and vfat's dosfstools are in base-system.)
+	for _, p := range layoutPackages(plan) {
+		addPkg(p)
 	}
 
 	opts := controller.Options{
@@ -296,6 +307,35 @@ func humanSize(b uint64) string {
 		i++
 	}
 	return fmt.Sprintf("%.1f%s", v, units[i])
+}
+
+// layoutPackages is the extra target packages a layout needs so the
+// installed system can handle its filesystems and features at boot.
+// Names are Void's (the interim base); they move with the repo.
+func layoutPackages(plan *storage.Plan) []string {
+	var out []string
+	add := func(p string) { out = append(out, p) }
+	fs := map[string]bool{}
+	for _, p := range plan.Parts {
+		if p.Filesystem != "" && !fs[p.Filesystem] {
+			fs[p.Filesystem] = true
+			switch p.Filesystem {
+			case "btrfs":
+				add("btrfs-progs")
+			case "xfs":
+				add("xfsprogs")
+			case "f2fs":
+				add("f2fs-tools")
+			}
+		}
+		if p.Encrypted {
+			add("cryptsetup")
+		}
+		if p.IsPV || p.LV {
+			add("lvm2")
+		}
+	}
+	return out
 }
 
 // isTerminal reports whether f is a terminal (not a pipe or file), so
