@@ -20,69 +20,88 @@ var (
 
 func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
 
-// A no-encryption, swap-partition run: the passphrase step is skipped,
-// the swap-size step is kept, and the answers end up where expected.
-func TestWizardPlainRun(t *testing.T) {
-	disks := []blockdev.Device{
-		{Name: "sda", Path: "/dev/sda"},
-		{Name: "vdb", Path: "/dev/vdb"},
-	}
-	var m tea.Model = newModel(disks)
+func twoDisks() []blockdev.Device {
+	return []blockdev.Device{{Name: "sda", Path: "/dev/sda"}, {Name: "vdb", Path: "/dev/vdb"}}
+}
 
-	m = send(m, down)  // pick the second disk
-	m = send(m, enter) // disk -> fs
-	m = send(m, enter) // fs = ext4 -> encrypt
-	m = send(m, enter) // encrypt = "no" -> swap (passphrase skipped)
-	m = send(m, enter) // swap = "partition" -> swap size
-	m = send(m, enter) // swap size default 2G -> hostname
-	m = send(m, enter) // hostname default -> username
-	m = send(m, enter) // username default -> password
-	m = send(m, runes("pw"))
-	m = send(m, enter) // password -> confirm
-
-	got := m.(model)
-	if got.step != stepConfirm {
-		t.Fatalf("ended at step %d, want stepConfirm", got.step)
+// moveTo returns a model with the hub cursor on section s.
+func moveTo(m model, s section) model {
+	for m.hubCursor < int(s) {
+		m = send(m, down)
 	}
-	if got.diskIdx != 1 || got.fs != "ext4" || got.encrypt || got.swap != "partition" ||
-		got.swapSize != "2G" || got.hostname != "sunlight" || got.login != "user" || got.password != "pw" {
-		t.Fatalf("answers = %+v", got)
-	}
+	return m
+}
 
-	// Install.
-	final := send(m, enter)
-	if !final.confirmed {
-		t.Error("Install not confirmed")
+func TestInstallDisabledUntilValid(t *testing.T) {
+	m := newModel(twoDisks())
+	if m.canInstall() {
+		t.Fatal("fresh model should not be installable")
+	}
+	// Pressing Install (the section after the last) does nothing.
+	m = moveTo(m, sectionCount) // Install button
+	m = send(m, enter)
+	if m.confirmed {
+		t.Error("Install fired while disabled")
 	}
 }
 
-// Encryption on and swap none: the passphrase step is required and the
-// swap-size step is skipped.
-func TestWizardEncryptNoSwap(t *testing.T) {
-	var m tea.Model = newModel([]blockdev.Device{{Name: "sda", Path: "/dev/sda"}})
+func TestConfigureAndInstall(t *testing.T) {
+	var m tea.Model = newModel(twoDisks())
 
-	m = send(m, enter) // disk -> fs
-	m = send(m, enter) // fs ext4 -> encrypt
-	m = send(m, down)  // encrypt cursor -> "yes"
-	m = send(m, enter) // encrypt = yes -> passphrase
-	if m.(model).step != stepPassphrase {
-		t.Fatalf("encrypt=yes did not reach passphrase, at %d", m.(model).step)
+	// Disk: open, pick the second, back to hub.
+	m = send(m, enter) // hub cursor 0 = Disk -> editor
+	m = send(m, down)  // choose /dev/vdb
+	m = send(m, enter) // commit -> hub
+	if !m.(model).diskSet || m.(model).diskIdx != 1 {
+		t.Fatalf("disk not set: %+v", m.(model))
 	}
-	m = send(m, enter) // empty passphrase: stays put
-	if m.(model).step != stepPassphrase {
-		t.Fatal("empty passphrase advanced")
-	}
-	m = send(m, runes("secret"))
-	m = send(m, enter) // passphrase -> swap
-	m = send(m, down)  // swap -> "file"
-	m = send(m, down)  // swap -> "none"
-	m = send(m, enter) // swap = none -> hostname (swap size skipped)
 
-	got := m.(model)
-	if got.step != stepHostname {
-		t.Fatalf("swap=none did not skip swap size, at step %d", got.step)
+	// Admin user: login then password.
+	mm := moveTo(m.(model), secUser)
+	var cur tea.Model = mm
+	cur = send(cur, enter)       // open user editor (login, default "user")
+	cur = send(cur, enter)       // accept login "user" -> password step
+	cur = send(cur, runes("pw")) // type password
+	cur = send(cur, enter)       // commit -> hub
+	if !cur.(model).userSet || cur.(model).login != "user" || cur.(model).password != "pw" {
+		t.Fatalf("user not set: %+v", cur.(model))
 	}
-	if !got.encrypt || got.passphrase != "secret" || got.swap != "none" {
-		t.Fatalf("answers = %+v", got)
+	if !cur.(model).canInstall() {
+		t.Fatal("should be installable now")
+	}
+
+	// Install.
+	fin := send(moveTo(cur.(model), sectionCount), enter)
+	if !fin.confirmed {
+		t.Error("Install did not confirm")
+	}
+}
+
+func TestEncryptEditor(t *testing.T) {
+	m := moveTo(newModel(twoDisks()), secEncrypt)
+	var cur tea.Model = m
+	cur = send(cur, enter) // open encryption editor (off/on)
+	cur = send(cur, down)  // -> "on"
+	cur = send(cur, enter) // choose on -> passphrase step
+	cur = send(cur, enter) // empty passphrase: stays
+	if cur.(model).onHub {
+		t.Fatal("empty passphrase returned to hub")
+	}
+	cur = send(cur, runes("secret"))
+	cur = send(cur, enter) // commit -> hub
+	if !cur.(model).encrypt || cur.(model).passphrase != "secret" || !cur.(model).onHub {
+		t.Fatalf("encryption not set: %+v", cur.(model))
+	}
+}
+
+func TestSwapNone(t *testing.T) {
+	m := moveTo(newModel(twoDisks()), secSwap)
+	var cur tea.Model = m
+	cur = send(cur, enter) // open swap editor
+	cur = send(cur, down)  // file
+	cur = send(cur, down)  // none
+	cur = send(cur, enter) // choose none -> straight back to hub (no size)
+	if cur.(model).swap != "none" || !cur.(model).onHub {
+		t.Fatalf("swap none not set: %+v", cur.(model))
 	}
 }
