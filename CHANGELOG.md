@@ -108,10 +108,14 @@ for what will and will not be allowed to change once releases begin.
   partition, a file, or none) and its size, a hostname and an admin
   account (password hashed with openssl, confirmed), shows a summary to
   confirm, and installs through the same path as a config file. On a real
-  terminal it runs as a **full-screen wizard** (bubbletea/bubbles/lipgloss)
-  with highlighted selections and masked passwords; over a serial console
-  or a pipe, where that cannot render, it falls back to the plain prompt
-  flow. Both build the same config.
+  terminal it runs as a **full-screen clr-installer-style menu**
+  (bubbletea/bubbles/lipgloss): a hub of sections (disk, filesystem,
+  encryption, swap, hostname, admin user) each showing its value and a
+  ✓/✗, edited in any order, with an Install button that lights up only
+  once the required ones are set, beside Cancel — and masked passphrase
+  and password fields. Over a serial console or a pipe, where that cannot
+  render, it falls back to the plain prompt flow. Both build the same
+  config.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,
   and prints the partitioning plan. With `--apply` it runs the install
   through the controller, gated on running as root and on the operator
