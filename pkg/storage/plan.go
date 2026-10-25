@@ -24,15 +24,31 @@ type Partition struct {
 	// mapper name (/dev/mapper/<MapName>).
 	Encrypted bool
 	MapName   string
+
+	// LVM. IsPV marks a physical partition used as an LVM physical
+	// volume: it is cut by parted and carries no filesystem — its volume
+	// group (VGName) and logical volumes live on top. LV marks a logical
+	// volume (not a physical partition): it is created by lvcreate in
+	// VGName and named LVName, and its filesystem lives at
+	// /dev/<VGName>/<LVName>.
+	IsPV   bool
+	VGName string
+	LV     bool
+	LVName string
 }
 
-// EffectiveDevice is where the filesystem lives: the LUKS mapper device
-// for an encrypted partition, the raw partition otherwise.
+// EffectiveDevice is where the filesystem lives: a logical volume's path
+// for an LV, the LUKS mapper for an encrypted partition, the raw
+// partition otherwise.
 func (p Partition) EffectiveDevice() string {
-	if p.Encrypted {
+	switch {
+	case p.LV:
+		return "/dev/" + p.VGName + "/" + p.LVName
+	case p.Encrypted:
 		return "/dev/mapper/" + p.MapName
+	default:
+		return p.Device
 	}
-	return p.Device
 }
 
 // Plan is a disk laid out: the target, whether it is being wiped, and

@@ -328,3 +328,42 @@ func TestValidateUsers(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanLVM(t *testing.T) {
+	c := &Config{
+		Hostname: "box",
+		Users:    []*User{{Login: "me", Password: "$6$a$b", Admin: true}},
+		TargetMedia: []*Media{{
+			Name: "sda", Type: "disk",
+			Children: []*Media{
+				{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+				{Name: "sda2", Type: "lvm", Size: "rest", VolumeGroup: "vg0", Children: []*Media{
+					{Name: "root", FsType: "ext4", Mountpoint: "/", Size: "30G"},
+					{Name: "home", FsType: "ext4", Mountpoint: "/home"}, // fill
+				}},
+			},
+		}},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	plan, err := c.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	// ESP + PV + 2 LVs.
+	if len(plan.Parts) != 4 {
+		t.Fatalf("got %d parts, want 4", len(plan.Parts))
+	}
+	pv := plan.Parts[1]
+	if !pv.IsPV || pv.VGName != "vg0" || pv.Device != "/dev/sda2" {
+		t.Fatalf("PV = %+v", pv)
+	}
+	root := plan.Parts[2]
+	if !root.LV || root.LVName != "root" || root.EffectiveDevice() != "/dev/vg0/root" {
+		t.Fatalf("root LV = %+v", root)
+	}
+	if plan.Parts[3].Size != "rest" { // fill LV keeps SizeRest
+		t.Errorf("home LV size = %q, want rest", plan.Parts[3].Size)
+	}
+}

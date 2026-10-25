@@ -55,6 +55,14 @@ for what will and will not be allowed to change once releases begin.
   line for an encrypted root, and rebuilds the initramfs so the system
   unlocks at boot. The passphrase comes from `SLINSTALLER_LUKS_PASSPHRASE`
   or a prompt — never from the config, and never in a process's argv.
+- `pkg/lvm` — LVM: a partition typed `lvm` is a physical volume carrying
+  a `volumeGroup`, and its children are logical volumes. The controller
+  runs `pvcreate`/`vgcreate`/`lvcreate` between partitioning and mkfs, the
+  filesystems are made and mounted on the logical volumes
+  (`storage.Partition.EffectiveDevice`), an LV may fill the group, and a
+  root on LVM gets `rd.lvm.lv` on the kernel command line with an
+  initramfs rebuild so it assembles at boot. (v1 is LVM on plain
+  partitions; LVM-on-LUKS is a later step.)
 - `pkg/xbps` — the base-system install, the counterpart to clr-installer's
   swupd step, following how Void bootstraps a rootfs: seed the repository
   signing keys into the target, `xbps-install` from the repository, then a

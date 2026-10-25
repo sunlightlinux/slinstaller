@@ -17,6 +17,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
+	"github.com/sunlightlinux/slinstaller/pkg/lvm"
 	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/tui"
@@ -198,6 +199,9 @@ func run(args []string) error {
 		required := append(plan.RequiredTools(), "xbps-install", "chroot")
 		if encrypted {
 			required = append(required, "cryptsetup")
+		}
+		if lvm.Used(plan) {
+			required = append(required, "pvcreate", "vgcreate", "lvcreate")
 		}
 		if missing := storage.MissingTools(required); len(missing) > 0 {
 			return fmt.Errorf("missing tools on the live system: %s — install them and retry",

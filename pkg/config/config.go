@@ -72,6 +72,10 @@ type Media struct {
 	FsType     string   `yaml:"fstype,omitempty"`
 	Mountpoint string   `yaml:"mountpoint,omitempty"`
 	Children   []*Media `yaml:"children,omitempty"`
+
+	// VolumeGroup names the LVM volume group a `type: lvm` partition
+	// hosts; its children are the logical volumes.
+	VolumeGroup string `yaml:"volumeGroup,omitempty"`
 }
 
 // User is an account to create, in clr-installer's shape.
@@ -160,6 +164,31 @@ func (c *Config) Validate() error {
 
 	roots, esps := 0, 0
 	seen := map[string]bool{}
+
+	// checkFS validates a filesystem-bearing entry (a plain partition or a
+	// logical volume): the filesystem is known, the mountpoint is absolute
+	// and unique, and a root mount is counted.
+	checkFS := func(where, fsType, mnt string) {
+		switch {
+		case fsType == "":
+			add("%s: no filesystem", where)
+		case !storage.KnownFilesystem(fsType):
+			add("%s: filesystem %q is not supported", where, fsType)
+		}
+		if mnt != "" {
+			if !strings.HasPrefix(mnt, "/") {
+				add("%s: mountpoint %q is not absolute", where, mnt)
+			}
+			if seen[mnt] {
+				add("%s: mountpoint %q is used more than once", where, mnt)
+			}
+			seen[mnt] = true
+		}
+		if mnt == "/" {
+			roots++
+		}
+	}
+
 	for i, ch := range disk.Children {
 		if ch == nil {
 			continue
@@ -169,25 +198,33 @@ func (c *Config) Validate() error {
 			where = fmt.Sprintf("partition %d", i+1)
 		}
 
-		switch {
-		case ch.FsType == "":
-			add("%s: no filesystem", where)
-		case !storage.KnownFilesystem(ch.FsType):
-			add("%s: filesystem %q is not supported", where, ch.FsType)
+		// An lvm partition carries no filesystem itself; its logical
+		// volumes do. Validate those, and the group it names.
+		if ch.Type == "lvm" {
+			if ch.VolumeGroup == "" {
+				add("%s: lvm partition has no volumeGroup", where)
+			}
+			fills := 0
+			for j, lv := range ch.Children {
+				if lv == nil {
+					continue
+				}
+				lvWhere := fmt.Sprintf("%s/%s", where, lv.Name)
+				if lv.Name == "" {
+					lvWhere = fmt.Sprintf("%s/lv%d", where, j+1)
+				}
+				checkFS(lvWhere, lv.FsType, lv.Mountpoint)
+				if s := strings.TrimSpace(lv.Size); s == "" || s == "0" || strings.EqualFold(s, "rest") {
+					fills++
+				}
+			}
+			if fills > 1 {
+				add("%s: more than one logical volume fills the group", where)
+			}
+			continue
 		}
 
-		if ch.Mountpoint != "" {
-			if !strings.HasPrefix(ch.Mountpoint, "/") {
-				add("%s: mountpoint %q is not absolute", where, ch.Mountpoint)
-			}
-			if seen[ch.Mountpoint] {
-				add("%s: mountpoint %q is used more than once", where, ch.Mountpoint)
-			}
-			seen[ch.Mountpoint] = true
-		}
-		if ch.Mountpoint == "/" {
-			roots++
-		}
+		checkFS(where, ch.FsType, ch.Mountpoint)
 
 		if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
 			esps++
@@ -269,6 +306,19 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		if ch == nil {
 			continue
 		}
+
+		// An lvm partition is a physical volume: it is cut like any other,
+		// and its children become logical volumes on top.
+		if ch.Type == "lvm" {
+			pv, lvs, err := lvmParts(device, i, ch)
+			if err != nil {
+				return nil, err
+			}
+			pl.Parts = append(pl.Parts, pv)
+			pl.Parts = append(pl.Parts, lvs...)
+			continue
+		}
+
 		// A child is a partition ("part" or unset) or an encrypted
 		// partition ("crypt"), the way clr-installer marks LUKS.
 		var encrypted bool
@@ -277,30 +327,15 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		case "crypt":
 			encrypted = true
 		default:
-			return nil, fmt.Errorf("config: %s child %q has type %q; expected part or crypt",
+			return nil, fmt.Errorf("config: %s child %q has type %q; expected part, crypt or lvm",
 				disk.Name, ch.Name, ch.Type)
 		}
 
-		// A missing size, 0, or "rest" means "fill the remaining space",
-		// the way clr-installer uses size 0. Otherwise parse to bytes.
-		var size string
-		if s := strings.TrimSpace(ch.Size); s == "" || s == "0" || strings.EqualFold(s, "rest") {
-			size = storage.SizeRest
-		} else {
-			bytes, err := parseSize(s)
-			if err != nil {
-				return nil, fmt.Errorf("config: %s/%s: %w", disk.Name, ch.Name, err)
-			}
-			size = strconv.FormatUint(bytes, 10)
+		size, err := physSize(ch.Size)
+		if err != nil {
+			return nil, fmt.Errorf("config: %s/%s: %w", disk.Name, ch.Name, err)
 		}
-
-		dev, num := device, i+1
-		if ch.Name != "" {
-			dev = "/dev/" + ch.Name
-			num = partNumber(ch.Name, i+1)
-		} else {
-			dev = storage.PartitionName(device, num)
-		}
+		dev, num := partDev(device, i, ch.Name)
 
 		p := storage.Partition{
 			Number:     num,
@@ -320,14 +355,73 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		return nil, fmt.Errorf("config: target disk %s declares no partitions", disk.Name)
 	}
 
-	// A fill partition must be the last one, or the partitions after it
-	// would have nowhere to go.
+	// A fill physical partition must be the last physical one; logical
+	// volumes (which fill the group, not the disk) are exempt.
+	lastPhys := -1
 	for i, p := range pl.Parts {
-		if p.Size == storage.SizeRest && i != len(pl.Parts)-1 {
+		if !p.LV {
+			lastPhys = i
+		}
+	}
+	for i, p := range pl.Parts {
+		if !p.LV && p.Size == storage.SizeRest && i != lastPhys {
 			return nil, fmt.Errorf("config: %s fills the disk but is not the last partition", p.Device)
 		}
 	}
 	return pl, nil
+}
+
+// physSize resolves a physical partition's size to a byte count, or
+// SizeRest for a missing size / 0 / "rest".
+func physSize(s string) (string, error) {
+	if s = strings.TrimSpace(s); s == "" || s == "0" || strings.EqualFold(s, "rest") {
+		return storage.SizeRest, nil
+	}
+	bytes, err := parseSize(s)
+	if err != nil {
+		return "", err
+	}
+	return strconv.FormatUint(bytes, 10), nil
+}
+
+// partDev is the device path and number for a physical partition: from
+// its config name when it has one, else derived from its position.
+func partDev(disk string, i int, name string) (string, int) {
+	if name != "" {
+		return "/dev/" + name, partNumber(name, i+1)
+	}
+	return storage.PartitionName(disk, i+1), i + 1
+}
+
+// lvmParts turns a `type: lvm` partition into the physical volume and its
+// logical volumes. The PV is sized on the disk; each LV keeps its human
+// size (lvcreate's), or SizeRest to fill the group.
+func lvmParts(disk string, i int, ch *Media) (storage.Partition, []storage.Partition, error) {
+	if ch.VolumeGroup == "" {
+		return storage.Partition{}, nil, fmt.Errorf("config: lvm partition %q has no volumeGroup", ch.Name)
+	}
+	size, err := physSize(ch.Size)
+	if err != nil {
+		return storage.Partition{}, nil, fmt.Errorf("config: %s: %w", ch.Name, err)
+	}
+	dev, num := partDev(disk, i, ch.Name)
+	pv := storage.Partition{Number: num, Device: dev, Size: size, IsPV: true, VGName: ch.VolumeGroup}
+
+	var lvs []storage.Partition
+	for _, lv := range ch.Children {
+		if lv == nil {
+			continue
+		}
+		lvSize := strings.TrimSpace(lv.Size)
+		if lvSize == "" || lvSize == "0" || strings.EqualFold(lvSize, "rest") {
+			lvSize = storage.SizeRest
+		}
+		lvs = append(lvs, storage.Partition{
+			LV: true, VGName: ch.VolumeGroup, LVName: lv.Name,
+			Mountpoint: lv.Mountpoint, Filesystem: lv.FsType, Size: lvSize,
+		})
+	}
+	return pv, lvs, nil
 }
 
 // cryptMapName is the LUKS mapper name for an encrypted partition,

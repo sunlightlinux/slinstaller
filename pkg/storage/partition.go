@@ -38,6 +38,9 @@ func (pl *Plan) TableCommands() [][]string {
 	// "rest" partition runs to 100%.
 	cursorMiB := uint64(0)
 	for i, p := range pl.Parts {
+		if p.LV {
+			continue // logical volumes are not cut by parted
+		}
 		start := fmt.Sprintf("%dMiB", cursorMiB)
 		if i == 0 {
 			start = "0%"
@@ -81,6 +84,9 @@ func (pl *Plan) TableCommands() [][]string {
 func (pl *Plan) MkfsCommands() ([][]string, error) {
 	var cmds [][]string
 	for _, p := range pl.Parts {
+		if p.IsPV {
+			continue // a physical volume has no filesystem
+		}
 		mkfs, err := mkfsCommand(p)
 		if err != nil {
 			return nil, err

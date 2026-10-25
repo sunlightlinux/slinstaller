@@ -25,6 +25,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/grub"
 	"github.com/sunlightlinux/slinstaller/pkg/luks"
+	"github.com/sunlightlinux/slinstaller/pkg/lvm"
 	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
@@ -169,6 +170,14 @@ func (in *installer) partition() error {
 			return err
 		}
 		if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase); err != nil {
+			return err
+		}
+	}
+
+	// LVM, on top of the (possibly encrypted) physical volumes, before
+	// the filesystems are made on the logical volumes.
+	if lvm.Used(in.plan) {
+		if err := storage.RunCommands(lvm.Commands(in.plan), in.opts.Runner); err != nil {
 			return err
 		}
 	}
@@ -327,19 +336,22 @@ func (in *installer) bootloader() error {
 
 	// An encrypted root must be unlocked by the initramfs before the
 	// kernel can mount it, so the root's LUKS UUID goes on the command
-	// line for dracut's rd.luks to pick up.
+	// line for dracut's rd.luks to pick up. A root on LVM needs its group
+	// activated the same way — rd.lvm.lv.
 	encrypted := false
 	for _, p := range in.plan.Parts {
-		if !p.Encrypted {
-			continue
-		}
-		encrypted = true
-		if p.Mountpoint == "/" {
-			uuid, err := luks.UUID(p.Device)
-			if err != nil {
-				return err
+		if p.Encrypted {
+			encrypted = true
+			if p.Mountpoint == "/" {
+				uuid, err := luks.UUID(p.Device)
+				if err != nil {
+					return err
+				}
+				kargs = append(kargs, "rd.luks.uuid="+uuid)
 			}
-			kargs = append(kargs, "rd.luks.uuid="+uuid)
+		}
+		if p.LV && p.Mountpoint == "/" {
+			kargs = append(kargs, "rd.lvm.lv="+p.VGName+"/"+p.LVName)
 		}
 	}
 
@@ -369,11 +381,11 @@ func (in *installer) bootloader() error {
 		return err
 	}
 
-	// Rebuild the initramfs now that /etc/crypttab and the rd.luks
-	// command line exist, so dracut includes the crypt module and the
-	// system can unlock the root at boot. The one built during
-	// base-install predates them.
-	if encrypted {
+	// Rebuild the initramfs now that /etc/crypttab and the rd.luks /
+	// rd.lvm command line exist, so dracut includes the crypt and lvm
+	// modules and the system can assemble the root at boot. The one built
+	// during base-install predates them.
+	if encrypted || lvm.Used(in.plan) {
 		return storage.RunCommands(
 			[][]string{{"chroot", in.opts.Root, "xbps-reconfigure", "-fa"}},
 			in.opts.Runner)
