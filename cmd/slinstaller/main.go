@@ -202,6 +202,7 @@ func run(args []string) error {
 		// install work rather than a silent pause.
 		Runner: storage.VerboseRunner,
 		Log:    os.Stderr,
+		Output: os.Stderr,
 	}
 
 	if os.Geteuid() != 0 {

@@ -65,6 +65,13 @@ type Options struct {
 	// an operator can see progress. nil is silent.
 	Log io.Writer
 
+	// Output, if set, receives the output of sub-commands that cannot go
+	// through Runner because they need stdin — namely cryptsetup, which is
+	// fed the LUKS passphrase. A full-screen front-end points this at its
+	// own view so the output does not leak onto the terminal; nil sends it
+	// to stderr.
+	Output io.Writer
+
 	// Progress, if set, is called as each stage starts with the number of
 	// stages already completed, the total to run, and the stage's name —
 	// and once more with done == total and stage "complete" after the last
@@ -185,10 +192,10 @@ func (in *installer) partition() error {
 		if in.opts.Passphrase == "" {
 			return fmt.Errorf("%s is encrypted but no passphrase was given", p.Device)
 		}
-		if err := luks.Format(p.Device, in.opts.Passphrase); err != nil {
+		if err := luks.Format(p.Device, in.opts.Passphrase, in.output()); err != nil {
 			return err
 		}
-		if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase); err != nil {
+		if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase, in.output()); err != nil {
 			return err
 		}
 		in.settle()
@@ -217,6 +224,15 @@ func (in *installer) partition() error {
 		return err
 	}
 	return storage.RunCommands(mkfs, in.opts.Runner)
+}
+
+// output is where sub-command output that cannot go through Runner (the
+// stdin-fed cryptsetup) is written: the configured Output, or stderr.
+func (in *installer) output() io.Writer {
+	if in.opts.Output != nil {
+		return in.opts.Output
+	}
+	return os.Stderr
 }
 
 // settle waits for udev to finish creating device nodes, so a device that

@@ -153,3 +153,17 @@ func TestFormAddPartition(t *testing.T) {
 		t.Fatalf("entry = %+v", p)
 	}
 }
+
+func TestLineWriter(t *testing.T) {
+	var got []string
+	w := &lineWriter{sink: func(s string) { got = append(got, s) }}
+	// A line split across writes, a trailing \r, and a not-yet-complete line.
+	w.Write([]byte("hel"))
+	w.Write([]byte("lo\r\nwor"))
+	w.Write([]byte("ld\n"))
+	w.Write([]byte("partial"))
+
+	if len(got) != 2 || got[0] != "hello" || got[1] != "world" {
+		t.Fatalf("got %q, want [hello world] (partial line held back)", got)
+	}
+}

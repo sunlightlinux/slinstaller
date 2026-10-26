@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -134,16 +135,42 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // on it.
 func (m installModel) start() tea.Cmd {
 	ch := m.ch
+	sink := func(line string) { ch <- logMsg(line) }
 	opts := m.opts
 	opts.Log = nil
 	opts.Progress = func(done, total int, stage string) {
 		ch <- stageMsg{done: done, total: total, name: stage}
 	}
-	opts.Runner = storage.SinkRunner(func(line string) { ch <- logMsg(line) })
+	opts.Runner = storage.SinkRunner(sink)
+	// cryptsetup is fed the passphrase on stdin, so it runs outside Runner;
+	// point its output at the log too, or it would leak onto the terminal
+	// and corrupt the full-screen view.
+	opts.Output = &lineWriter{sink: sink}
 
 	cfg := m.cfg
 	go func() { ch <- doneMsg{err: controller.Install(cfg, opts)} }()
 	return m.wait()
+}
+
+// lineWriter forwards whole lines written to it to a sink, buffering a
+// partial last line until its newline arrives. It lets a sub-command that
+// writes to an io.Writer (cryptsetup) feed the same log the Runner does.
+type lineWriter struct {
+	sink func(string)
+	buf  []byte
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		w.sink(strings.TrimRight(string(w.buf[:i]), "\r"))
+		w.buf = w.buf[i+1:]
+	}
+	return len(p), nil
 }
 
 // wait reads the next event from the install goroutine.

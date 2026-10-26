@@ -14,6 +14,7 @@ package luks
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -29,22 +30,29 @@ func OpenArgs(device, name string) []string {
 	return []string{"cryptsetup", "--batch-mode", "luksOpen", device, name, "-"}
 }
 
-// Format creates a LUKS volume on device with the given passphrase.
-func Format(device, passphrase string) error {
-	return run(FormatArgs(device), passphrase)
+// Format creates a LUKS volume on device with the given passphrase. out
+// receives the command echo and cryptsetup's output (nil means stderr); a
+// front-end that renders the install itself passes its own writer so the
+// output does not leak onto the terminal.
+func Format(device, passphrase string, out io.Writer) error {
+	return run(FormatArgs(device), passphrase, out)
 }
 
-// Open unlocks device to /dev/mapper/<name> with the passphrase.
-func Open(device, name, passphrase string) error {
-	return run(OpenArgs(device, name), passphrase)
+// Open unlocks device to /dev/mapper/<name> with the passphrase. See
+// Format for out.
+func Open(device, name, passphrase string, out io.Writer) error {
+	return run(OpenArgs(device, name), passphrase, out)
 }
 
-func run(args []string, passphrase string) error {
-	fmt.Fprintf(os.Stderr, "    + %s\n", strings.Join(args, " "))
+func run(args []string, passphrase string, out io.Writer) error {
+	if out == nil {
+		out = os.Stderr
+	}
+	fmt.Fprintf(out, "    + %s\n", strings.Join(args, " "))
 	c := exec.Command(args[0], args[1:]...)
 	c.Stdin = strings.NewReader(passphrase)
-	c.Stdout = os.Stderr
-	c.Stderr = os.Stderr
+	c.Stdout = out
+	c.Stderr = out
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("luks: %s: %w", args[1], err)
 	}
