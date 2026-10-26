@@ -72,6 +72,22 @@ for what will and will not be allowed to change once releases begin.
   kernel command line (with the initramfs rebuild) so boot unlocks then
   activates. The full-screen partition editor offers it as the
   `lvm-encrypted` type; `demo/vm/config-lvm-luks.yaml` is a worked example.
+- `pkg/mdadm` — **software RAID** (0, 1, 5, 6, 10) with mdadm, clr-installer's
+  RAID levels. This brings **multi-disk layouts**: `targetMedia` may list
+  several disks, each partitioned, and a partition typed `raid` with a
+  `raid: <name>` tag is a member of the array named in the config's new
+  top-level `raid` list (`{name, level, fstype, mountpoint}`). The array
+  carries the filesystem at `/dev/md/<name>`: parted cuts and flags the
+  members, `mdadm --create` assembles the array before mkfs, and for boot the
+  controller writes `/etc/mdadm.conf` (from `mdadm --detail --scan`) and
+  rebuilds the initramfs so the array assembles at boot. The ESP stays a
+  plain partition on one disk (firmware reads one disk, not an array).
+  `Validate` checks the level, the member count per level and that the ESP is
+  not on RAID; the full `--apply` preflight confirms every target disk and
+  pulls in `mdadm`, and the confirmation lists all disks to be erased.
+  `demo/vm/config-raid1.yaml` is a RAID1 example (`demo/vm/run.sh
+  --two-disks` boots a second disk for it). RAID is config-file-driven; the
+  full-screen editor stays single-disk for now.
 - `pkg/xbps` — the base-system install, the counterpart to clr-installer's
   swupd step, following how Void bootstraps a rootfs: seed the repository
   signing keys into the target, `xbps-install` from the repository, then a

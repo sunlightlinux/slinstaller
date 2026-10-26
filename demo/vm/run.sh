@@ -14,7 +14,8 @@
 #                         #   registered is still there.
 #
 # Options:
-#   --fresh        # recreate the target disk blank before booting
+#   --fresh        # recreate the target disk(s) blank before booting
+#   --two-disks    # add a second disk (/dev/vdb) for a RAID install
 #   --mem=N        # guest memory in MB (default 2048)
 #   --vnc          # show the guest over VNC on :0 (connect with a VNC
 #                  #   viewer to localhost:5900); works headless
@@ -45,11 +46,14 @@ MEMORY="${MEMORY:-2048}"
 
 INSTALLED=0
 FRESH=0
+TWO_DISKS=0
 DISPLAY_MODE="${DISPLAY_MODE:-auto}"
+TARGET2="${OUTPUT_DIR}/target2.qcow2"
 for arg in "$@"; do
     case "$arg" in
         --installed)  INSTALLED=1 ;;
         --fresh)      FRESH=1 ;;
+        --two-disks)  TWO_DISKS=1 ;;  # add a second disk (/dev/vdb) for RAID
         --mem)        echo "use --mem=N" >&2; exit 1 ;;
         --mem=*)      MEMORY="${arg#--mem=}" ;;
         --vnc)        DISPLAY_MODE=vnc ;;
@@ -155,6 +159,18 @@ COMMON=(
     -drive "file=${TARGET},format=qcow2,if=virtio"
     "${DISPLAY_ARGS[@]}"
 )
+
+# A second disk (/dev/vdb) for a RAID install. Created to match the first
+# disk's size, and recreated blank with --fresh.
+if [ "${TWO_DISKS}" -eq 1 ]; then
+    if [ "${FRESH}" -eq 1 ] || [ ! -f "${TARGET2}" ]; then
+        size="$(qemu-img info --output=json "${TARGET}" | grep -oE '"virtual-size": [0-9]+' | grep -oE '[0-9]+')"
+        rm -f "${TARGET2}"
+        qemu-img create -f qcow2 "${TARGET2}" "${size}" >/dev/null
+        echo "→ second disk: ${TARGET2}"
+    fi
+    COMMON+=(-drive "file=${TARGET2},format=qcow2,if=virtio")
+fi
 
 if [ "${INSTALLED}" -eq 1 ]; then
     echo "Booting the installed target disk (exit: ${EXIT_HINT})"

@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sunlightlinux/slinstaller/pkg/mdadm"
 	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"gopkg.in/yaml.v3"
@@ -57,6 +58,11 @@ type Config struct {
 	// swapFileSize. A human size such as "2G".
 	SwapFileSize string `yaml:"swapFileSize,omitempty"`
 
+	// Raid declares software RAID arrays. Each array's members are the
+	// `type: raid` partitions (across the disks) that carry its name; the
+	// array holds a filesystem at /dev/md/<name>, like any other mount.
+	Raid []*RaidArray `yaml:"raid,omitempty"`
+
 	PreInstall  []*Hook `yaml:"pre-install,omitempty"`
 	PostInstall []*Hook `yaml:"post-install,omitempty"`
 
@@ -85,6 +91,22 @@ type Media struct {
 	// uses `type: crypt` instead; this is for the LVM case, where the type
 	// is already taken by `lvm`.
 	Encrypted bool `yaml:"encrypted,omitempty"`
+
+	// Raid names the RAID array a `type: raid` partition is a member of.
+	// The array itself is declared in the config's top-level raid list;
+	// several partitions, usually on different disks, carry the same name.
+	Raid string `yaml:"raid,omitempty"`
+}
+
+// RaidArray is one software RAID array: a name (its device is /dev/md/<name>,
+// or /dev/mdN for an "mdN" name), a level (0, 1, 5, 6 or 10, with or without
+// a "raid" prefix), and the filesystem it carries. Its members are the
+// `type: raid` partitions whose `raid` field is this name.
+type RaidArray struct {
+	Name       string `yaml:"name"`
+	Level      string `yaml:"level"`
+	FsType     string `yaml:"fstype,omitempty"`
+	Mountpoint string `yaml:"mountpoint,omitempty"`
 }
 
 // User is an account to create, in clr-installer's shape.
@@ -172,7 +194,7 @@ func looksHashed(s string) bool {
 // a valid clr config may omit (a login account, a hostname), only
 // rejects layouts that cannot install or boot.
 func (c *Config) Validate() error {
-	disk, err := c.installDisk()
+	disks, err := c.installDisks()
 	if err != nil {
 		return err
 	}
@@ -182,10 +204,11 @@ func (c *Config) Validate() error {
 
 	roots, esps := 0, 0
 	seen := map[string]bool{}
+	raidMembers := map[string]int{} // members declared per array name
 
-	// checkFS validates a filesystem-bearing entry (a plain partition or a
-	// logical volume): the filesystem is known, the mountpoint is absolute
-	// and unique, and a root mount is counted.
+	// checkFS validates a filesystem-bearing entry (a plain partition, a
+	// logical volume or a RAID array): the filesystem is known, the
+	// mountpoint is absolute and unique, and a root mount is counted.
 	checkFS := func(where, fsType, mnt string) {
 		switch {
 		case fsType == "":
@@ -207,48 +230,92 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	for i, ch := range disk.Children {
-		if ch == nil {
+	for _, disk := range disks {
+		for i, ch := range disk.Children {
+			if ch == nil {
+				continue
+			}
+			where := ch.Name
+			if where == "" {
+				where = fmt.Sprintf("partition %d", i+1)
+			}
+
+			// An lvm partition carries no filesystem itself; its logical
+			// volumes do. Validate those, and the group it names.
+			if ch.Type == "lvm" {
+				if ch.VolumeGroup == "" {
+					add("%s: lvm partition has no volumeGroup", where)
+				}
+				fills := 0
+				for j, lv := range ch.Children {
+					if lv == nil {
+						continue
+					}
+					lvWhere := fmt.Sprintf("%s/%s", where, lv.Name)
+					if lv.Name == "" {
+						lvWhere = fmt.Sprintf("%s/lv%d", where, j+1)
+					}
+					checkFS(lvWhere, lv.FsType, lv.Mountpoint)
+					if s := strings.TrimSpace(lv.Size); s == "" || s == "0" || strings.EqualFold(s, "rest") {
+						fills++
+					}
+				}
+				if fills > 1 {
+					add("%s: more than one logical volume fills the group", where)
+				}
+				continue
+			}
+
+			// A RAID member carries no filesystem — the array does. Record
+			// it against its array; the arrays are validated below.
+			if ch.Type == "raid" {
+				if ch.Raid == "" {
+					add("%s: raid member names no array (raid:)", where)
+				} else {
+					raidMembers[ch.Raid]++
+				}
+				continue
+			}
+
+			checkFS(where, ch.FsType, ch.Mountpoint)
+
+			if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
+				esps++
+				if ch.Type == "crypt" {
+					add("%s: the EFI System Partition cannot be encrypted", where)
+				}
+			}
+		}
+	}
+
+	// RAID arrays: a known level with enough members, a supported
+	// filesystem, and not the ESP (firmware reads a plain partition).
+	declared := map[string]bool{}
+	for i, a := range c.Raid {
+		if a == nil {
 			continue
 		}
-		where := ch.Name
+		where := a.Name
 		if where == "" {
-			where = fmt.Sprintf("partition %d", i+1)
+			where = fmt.Sprintf("raid[%d]", i)
+			add("%s: array has no name", where)
 		}
-
-		// An lvm partition carries no filesystem itself; its logical
-		// volumes do. Validate those, and the group it names.
-		if ch.Type == "lvm" {
-			if ch.VolumeGroup == "" {
-				add("%s: lvm partition has no volumeGroup", where)
-			}
-			fills := 0
-			for j, lv := range ch.Children {
-				if lv == nil {
-					continue
-				}
-				lvWhere := fmt.Sprintf("%s/%s", where, lv.Name)
-				if lv.Name == "" {
-					lvWhere = fmt.Sprintf("%s/lv%d", where, j+1)
-				}
-				checkFS(lvWhere, lv.FsType, lv.Mountpoint)
-				if s := strings.TrimSpace(lv.Size); s == "" || s == "0" || strings.EqualFold(s, "rest") {
-					fills++
-				}
-			}
-			if fills > 1 {
-				add("%s: more than one logical volume fills the group", where)
-			}
-			continue
+		declared[a.Name] = true
+		if !mdadm.KnownLevel(a.Level) {
+			add("raid %s: level %q is not supported (use 0, 1, 5, 6 or 10)", where, a.Level)
+		} else if n := raidMembers[a.Name]; n < mdadm.MinMembers(a.Level) {
+			add("raid %s: level %s needs at least %d members, has %d",
+				where, a.Level, mdadm.MinMembers(a.Level), n)
 		}
-
-		checkFS(where, ch.FsType, ch.Mountpoint)
-
-		if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
-			esps++
-			if ch.Type == "crypt" {
-				add("%s: the EFI System Partition cannot be encrypted", where)
-			}
+		if a.FsType == "vfat" && (a.Mountpoint == "/boot" || a.Mountpoint == "/boot/efi") {
+			add("raid %s: the EFI System Partition cannot be on RAID", where)
+		} else {
+			checkFS("raid "+where, a.FsType, a.Mountpoint)
+		}
+	}
+	for name := range raidMembers {
+		if !declared[name] {
+			add("raid member references undeclared array %q", name)
 		}
 	}
 
@@ -340,81 +407,141 @@ func (c *Config) Validate() error {
 // child names a clr-installer config carries (sda1, nvme0n1p2); sizes
 // are resolved to bytes here so the storage layer sees one form.
 func (c *Config) Plan() (*storage.Plan, error) {
-	disk, err := c.installDisk()
+	disks, err := c.installDisks()
 	if err != nil {
 		return nil, err
 	}
 
-	device := "/dev/" + disk.Name
-	pl := &storage.Plan{Disk: device, Wipe: true}
+	pl := &storage.Plan{Wipe: true}
+	for _, d := range disks {
+		pl.Disks = append(pl.Disks, "/dev/"+d.Name)
+	}
 
-	for i, ch := range disk.Children {
-		if ch == nil {
-			continue
-		}
-
-		// An lvm partition is a physical volume: it is cut like any other,
-		// and its children become logical volumes on top.
-		if ch.Type == "lvm" {
-			pv, lvs, err := lvmParts(device, i, ch)
-			if err != nil {
-				return nil, err
+	for _, disk := range disks {
+		device := "/dev/" + disk.Name
+		for i, ch := range disk.Children {
+			if ch == nil {
+				continue
 			}
-			pl.Parts = append(pl.Parts, pv)
-			pl.Parts = append(pl.Parts, lvs...)
+
+			// An lvm partition is a physical volume: it is cut like any
+			// other, and its children become logical volumes on top.
+			if ch.Type == "lvm" {
+				pv, lvs, err := lvmParts(device, i, ch)
+				if err != nil {
+					return nil, err
+				}
+				pv.Disk = device
+				pl.Parts = append(pl.Parts, pv)
+				pl.Parts = append(pl.Parts, lvs...)
+				continue
+			}
+
+			// A child is a plain partition ("part"/unset), an encrypted one
+			// ("crypt", clr's LUKS marker), or a RAID member ("raid").
+			var encrypted, raidMember bool
+			switch ch.Type {
+			case "", "part":
+			case "crypt":
+				encrypted = true
+			case "raid":
+				raidMember = true
+			default:
+				return nil, fmt.Errorf("config: %s child %q has type %q; expected part, crypt, lvm or raid",
+					disk.Name, ch.Name, ch.Type)
+			}
+
+			size, err := physSize(ch.Size)
+			if err != nil {
+				return nil, fmt.Errorf("config: %s/%s: %w", disk.Name, ch.Name, err)
+			}
+			dev, num := partDev(device, i, ch.Name)
+
+			p := storage.Partition{
+				Number:     num,
+				Device:     dev,
+				Disk:       device,
+				Mountpoint: ch.Mountpoint,
+				Filesystem: ch.FsType,
+				Size:       size,
+				Encrypted:  encrypted,
+			}
+			if encrypted {
+				p.MapName = cryptMapName(ch)
+			}
+			if raidMember {
+				p.IsRaidMember = true
+				p.RaidName = ch.Raid
+				p.Mountpoint, p.Filesystem = "", "" // the array carries those
+			}
+			pl.Parts = append(pl.Parts, p)
+		}
+	}
+
+	// RAID arrays: gather each array's member devices (in plan order) and
+	// append the array as a pseudo-partition carrying the filesystem, the
+	// way an LV is appended for LVM.
+	for _, a := range c.Raid {
+		if a == nil {
 			continue
 		}
-
-		// A child is a partition ("part" or unset) or an encrypted
-		// partition ("crypt"), the way clr-installer marks LUKS.
-		var encrypted bool
-		switch ch.Type {
-		case "", "part":
-		case "crypt":
-			encrypted = true
-		default:
-			return nil, fmt.Errorf("config: %s child %q has type %q; expected part, crypt or lvm",
-				disk.Name, ch.Name, ch.Type)
+		var members []string
+		for _, p := range pl.Parts {
+			if p.IsRaidMember && p.RaidName == a.Name {
+				members = append(members, p.Device)
+			}
 		}
-
-		size, err := physSize(ch.Size)
-		if err != nil {
-			return nil, fmt.Errorf("config: %s/%s: %w", disk.Name, ch.Name, err)
-		}
-		dev, num := partDev(device, i, ch.Name)
-
-		p := storage.Partition{
-			Number:     num,
-			Device:     dev,
-			Mountpoint: ch.Mountpoint,
-			Filesystem: ch.FsType,
-			Size:       size,
-			Encrypted:  encrypted,
-		}
-		if encrypted {
-			p.MapName = cryptMapName(ch)
-		}
-		pl.Parts = append(pl.Parts, p)
+		pl.Parts = append(pl.Parts, storage.Partition{
+			Raid:        true,
+			RaidName:    a.Name,
+			RaidLevel:   a.Level,
+			RaidMembers: members,
+			Mountpoint:  a.Mountpoint,
+			Filesystem:  a.FsType,
+		})
 	}
 
 	if len(pl.Parts) == 0 {
-		return nil, fmt.Errorf("config: target disk %s declares no partitions", disk.Name)
+		return nil, fmt.Errorf("config: targetMedia declares no partitions")
 	}
 
-	// A fill physical partition must be the last physical one; logical
-	// volumes (which fill the group, not the disk) are exempt.
-	lastPhys := -1
-	for i, p := range pl.Parts {
-		if !p.LV {
-			lastPhys = i
+	// The primary disk — where the bootloader and ESP go — is the disk that
+	// holds the ESP; the first disk otherwise.
+	pl.Disk = pl.Disks[0]
+	for _, p := range pl.Parts {
+		if p.Filesystem == "vfat" && (p.Mountpoint == "/boot" || p.Mountpoint == "/boot/efi") && p.Disk != "" {
+			pl.Disk = p.Disk
+			break
 		}
 	}
-	for i, p := range pl.Parts {
-		if !p.LV && p.Size == storage.SizeRest && i != lastPhys {
-			return nil, fmt.Errorf("config: %s fills the disk but is not the last partition", p.Device)
+
+	// A fill physical partition must be the last physical one on its disk;
+	// logical volumes and RAID arrays (which are not cut by parted) are
+	// exempt.
+	for _, disk := range pl.Disks {
+		lastPhys := -1
+		for i, p := range pl.Parts {
+			if !p.LV && !p.Raid && planDiskOf(p, pl.Disk) == disk {
+				lastPhys = i
+			}
+		}
+		for i, p := range pl.Parts {
+			if !p.LV && !p.Raid && planDiskOf(p, pl.Disk) == disk &&
+				p.Size == storage.SizeRest && i != lastPhys {
+				return nil, fmt.Errorf("config: %s fills its disk but is not the last partition on it", p.Device)
+			}
 		}
 	}
 	return pl, nil
+}
+
+// planDiskOf is the disk a physical partition sits on, defaulting to the
+// plan's primary disk when the partition does not name one.
+func planDiskOf(p storage.Partition, primary string) string {
+	if p.Disk != "" {
+		return p.Disk
+	}
+	return primary
 }
 
 // physSize resolves a physical partition's size to a byte count, or
@@ -496,24 +623,21 @@ func cryptMapName(ch *Media) string {
 	}
 }
 
-// installDisk finds the disk to install to: the one disk-type media that
-// carries a partition layout. slinstaller installs to a single disk, so
-// more than one is an error rather than a silent choice.
-func (c *Config) installDisk() (*Media, error) {
-	var found *Media
+// installDisks finds the disks to install to: the disk-type media that
+// carry a partition layout. One disk is the common case; several are a
+// RAID (or otherwise multi-disk) layout.
+func (c *Config) installDisks() ([]*Media, error) {
+	var disks []*Media
 	for _, m := range c.TargetMedia {
 		if m == nil || (m.Type != "" && m.Type != "disk") || len(m.Children) == 0 {
 			continue
 		}
-		if found != nil {
-			return nil, fmt.Errorf("config: targetMedia has more than one disk with a layout; slinstaller installs to a single disk")
-		}
-		found = m
+		disks = append(disks, m)
 	}
-	if found == nil {
+	if len(disks) == 0 {
 		return nil, fmt.Errorf("config: targetMedia has no disk with a partition layout")
 	}
-	return found, nil
+	return disks, nil
 }
 
 // parseSize parses a clr-installer size to bytes. It appears three ways:

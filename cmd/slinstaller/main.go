@@ -20,6 +20,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
 	"github.com/sunlightlinux/slinstaller/pkg/lvm"
+	"github.com/sunlightlinux/slinstaller/pkg/mdadm"
 	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/tui"
@@ -227,23 +228,28 @@ func run(args []string) error {
 		if lvm.Used(plan) {
 			required = append(required, "pvcreate", "vgcreate", "lvcreate")
 		}
+		if mdadm.Used(plan) {
+			required = append(required, "mdadm")
+		}
 		if missing := storage.MissingTools(required); len(missing) > 0 {
 			return fmt.Errorf("missing tools on the live system: %s — install them and retry",
 				strings.Join(missing, ", "))
 		}
 
-		// Confirm the target disk exists and is a whole disk before we
+		// Confirm each target disk exists and is a whole disk before we
 		// wipe it — a config written for another machine must not
 		// silently repartition the wrong thing (or a partition).
 		devs, err := blockdev.List()
 		if err != nil {
 			return err
 		}
-		switch d := blockdev.FindByPath(devs, plan.Disk); {
-		case d == nil:
-			return fmt.Errorf("target disk %s is not among the machine's block devices", plan.Disk)
-		case d.Type != "disk" && d.Type != "loop":
-			return fmt.Errorf("target %s is a %s, not a whole disk", plan.Disk, d.Type)
+		for _, disk := range plan.DiskList() {
+			switch d := blockdev.FindByPath(devs, disk); {
+			case d == nil:
+				return fmt.Errorf("target disk %s is not among the machine's block devices", disk)
+			case d.Type != "disk" && d.Type != "loop":
+				return fmt.Errorf("target %s is a %s, not a whole disk", disk, d.Type)
+			}
 		}
 
 		// Fetching the base system needs the repository; check it is
@@ -282,7 +288,7 @@ func run(args []string) error {
 		return tui.RunInstall(cfg, opts, plan)
 	}
 
-	if !confirm(stdin, plan.Disk) {
+	if !confirm(stdin, plan.DiskList()) {
 		return fmt.Errorf("aborted")
 	}
 	if err := controller.Install(cfg, opts); err != nil {
@@ -355,6 +361,9 @@ func layoutPackages(plan *storage.Plan) []string {
 		if p.IsPV || p.LV {
 			add("lvm2")
 		}
+		if p.Raid || p.IsRaidMember {
+			add("mdadm")
+		}
 	}
 	return out
 }
@@ -396,12 +405,21 @@ func terminalSize(f *os.File) (cols, rows int, ok bool) {
 
 // confirm requires the operator to retype the target disk. A yes/no
 // prompt is too easy to answer on the wrong machine; retyping the path
-// makes the operator look at which disk they are about to erase.
-func confirm(in *bufio.Reader, disk string) bool {
-	fmt.Fprintf(os.Stderr, "\nAbout to PARTITION and ERASE %s.\nType the disk path to confirm: ", disk)
+// makes the operator look at which disk they are about to erase. With
+// several disks (a RAID layout) all are listed and the first is retyped.
+func confirm(in *bufio.Reader, disks []string) bool {
+	if len(disks) == 1 {
+		fmt.Fprintf(os.Stderr, "\nAbout to PARTITION and ERASE %s.\nType the disk path to confirm: ", disks[0])
+	} else {
+		fmt.Fprintln(os.Stderr, "\nAbout to PARTITION and ERASE these disks:")
+		for _, d := range disks {
+			fmt.Fprintf(os.Stderr, "  %s\n", d)
+		}
+		fmt.Fprintf(os.Stderr, "Type the first disk path (%s) to confirm: ", disks[0])
+	}
 	line, err := in.ReadString('\n')
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(line) == disk
+	return strings.TrimSpace(line) == disks[0]
 }

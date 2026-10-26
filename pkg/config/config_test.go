@@ -4,6 +4,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
 // These fixtures are real clr-installer config files, copied unchanged
@@ -445,5 +447,103 @@ func TestPlanEncryptedLVM(t *testing.T) {
 	// The raw partition is still what gets luksFormat'd.
 	if pv.Device != "/dev/vda2" {
 		t.Errorf("PV Device = %q, want /dev/vda2", pv.Device)
+	}
+}
+
+func raidConfig() *Config {
+	return &Config{
+		Hostname: "box",
+		Users:    []*User{{Login: "me", Password: "$6$a$b", Admin: true}},
+		TargetMedia: []*Media{
+			{Name: "vda", Type: "disk", Children: []*Media{
+				{Name: "vda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
+				{Name: "vda2", Type: "raid", Raid: "root", Size: "rest"},
+			}},
+			{Name: "vdb", Type: "disk", Children: []*Media{
+				{Name: "vdb1", Type: "raid", Raid: "root", Size: "rest"},
+			}},
+		},
+		Raid: []*RaidArray{{Name: "root", Level: "1", FsType: "ext4", Mountpoint: "/"}},
+	}
+}
+
+func TestPlanRaid(t *testing.T) {
+	c := raidConfig()
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	plan, err := c.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	// Both disks are partitioned, and the ESP disk (vda) is primary.
+	if len(plan.Disks) != 2 || plan.Disk != "/dev/vda" {
+		t.Fatalf("Disks=%v Disk=%q, want [vda vdb], /dev/vda", plan.Disks, plan.Disk)
+	}
+
+	var members, array *storage.Partition
+	for i := range plan.Parts {
+		p := &plan.Parts[i]
+		if p.IsRaidMember && p.Device == "/dev/vdb1" {
+			members = p
+		}
+		if p.Raid {
+			array = p
+		}
+	}
+	if members == nil || members.Disk != "/dev/vdb" {
+		t.Errorf("vdb1 member not mapped to its disk: %+v", members)
+	}
+	if array == nil {
+		t.Fatal("no RAID array pseudo-partition in the plan")
+	}
+	if array.RaidLevel != "1" || array.Mountpoint != "/" || array.Filesystem != "ext4" {
+		t.Errorf("array = %+v", array)
+	}
+	if len(array.RaidMembers) != 2 || array.RaidMembers[0] != "/dev/vda2" || array.RaidMembers[1] != "/dev/vdb1" {
+		t.Errorf("array members = %v, want [/dev/vda2 /dev/vdb1]", array.RaidMembers)
+	}
+	if array.EffectiveDevice() != "/dev/md/root" {
+		t.Errorf("array device = %q", array.EffectiveDevice())
+	}
+}
+
+func TestValidateRaid(t *testing.T) {
+	// Unknown level, too few members, undeclared array, ESP on RAID.
+	c := &Config{
+		TargetMedia: []*Media{
+			{Name: "vda", Type: "disk", Children: []*Media{
+				{Name: "vda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
+				{Name: "vda2", Type: "raid", Raid: "root", Size: "rest"},  // only one member for raid1
+				{Name: "vda3", Type: "raid", Raid: "stray", Size: "100M"}, // undeclared array
+			}},
+		},
+		Raid: []*RaidArray{
+			{Name: "root", Level: "9", FsType: "ext4", Mountpoint: "/"}, // bad level
+		},
+	}
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("Validate = nil, want RAID problems")
+	}
+	for _, want := range []string{
+		"level \"9\" is not supported",
+		"undeclared array \"stray\"",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q:\n%s", want, err.Error())
+		}
+	}
+
+	// A valid raid1 across two disks passes.
+	if err := raidConfig().Validate(); err != nil {
+		t.Errorf("valid raid1 rejected: %v", err)
+	}
+
+	// raid1 with only one member fails on the member count.
+	one := raidConfig()
+	one.TargetMedia = one.TargetMedia[:1] // drop vdb, so root has one member
+	if err := one.Validate(); err == nil || !strings.Contains(err.Error(), "at least 2 members") {
+		t.Errorf("one-member raid1 should fail on member count, got: %v", err)
 	}
 }

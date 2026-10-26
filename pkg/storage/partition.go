@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 )
 
@@ -20,27 +21,36 @@ func (pl *Plan) Commands() ([][]string, error) {
 	return append(pl.TableCommands(), mkfs...), nil
 }
 
-// TableCommands returns the commands that lay down the partition table:
-// label the disk (only when wiping), cut the partitions, mark the ESP,
-// and re-read the table. No filesystem is made here — on an encrypted
-// disk, cryptsetup runs between this and the mkfs.
+// TableCommands returns the commands that lay down the partition tables:
+// for each disk, label it (only when wiping), cut its partitions, mark the
+// ESP and RAID members, and re-read the table. No filesystem is made here
+// — on an encrypted disk, cryptsetup runs between this and the mkfs, and
+// for RAID mdadm assembles the members.
 func (pl *Plan) TableCommands() [][]string {
+	var cmds [][]string
+	for _, disk := range pl.DiskList() {
+		cmds = append(cmds, pl.diskTableCommands(disk)...)
+	}
+	return cmds
+}
+
+// diskTableCommands lays down one disk's partition table.
+func (pl *Plan) diskTableCommands(disk string) [][]string {
 	var cmds [][]string
 
 	// mklabel destroys the existing partition table, so it is gated on
 	// Wipe — the config's explicit authorisation to repartition.
 	if pl.Wipe {
-		cmds = append(cmds, []string{"parted", "-s", pl.Disk, "mklabel", "gpt"})
+		cmds = append(cmds, []string{"parted", "-s", disk, "mklabel", "gpt"})
 	}
+
+	parts := pl.physOn(disk)
 
 	// Partitions are cut front to back. The first starts at 0% so parted
 	// aligns it; each subsequent one starts where the last ended; the
 	// "rest" partition runs to 100%.
 	cursorMiB := uint64(0)
-	for i, p := range pl.Parts {
-		if p.LV {
-			continue // logical volumes are not cut by parted
-		}
+	for i, p := range parts {
 		start := fmt.Sprintf("%dMiB", cursorMiB)
 		if i == 0 {
 			start = "0%"
@@ -59,33 +69,56 @@ func (pl *Plan) TableCommands() [][]string {
 			}
 		}
 
-		cmds = append(cmds, partedMkpart(pl.Disk, p, start, end))
+		cmds = append(cmds, partedMkpart(disk, p, start, end))
 	}
 
-	// Mark the EFI System Partition so firmware recognises it. parted's
-	// esp flag sets the right GPT type; the other partitions are mounted
-	// by UUID from fstab, so their GPT type is left at parted's default.
-	// That keeps the whole partition step on one tool — no sgdisk to
-	// install on the live medium.
-	for _, p := range pl.Parts {
-		if p.isESP() {
-			cmds = append(cmds, []string{"parted", "-s", pl.Disk, "set",
+	// Flag the EFI System Partition (so firmware recognises it) and RAID
+	// members (so the raid type is set). Other partitions are referenced by
+	// UUID from fstab, so their GPT type is left at parted's default — which
+	// keeps the whole partition step on one tool, no sgdisk needed.
+	for _, p := range parts {
+		switch {
+		case p.isESP():
+			cmds = append(cmds, []string{"parted", "-s", disk, "set",
 				fmt.Sprintf("%d", p.Number), "esp", "on"})
-			break
+		case p.IsRaidMember:
+			cmds = append(cmds, []string{"parted", "-s", disk, "set",
+				fmt.Sprintf("%d", p.Number), "raid", "on"})
 		}
 	}
 
-	return append(cmds, []string{"partprobe", pl.Disk})
+	return append(cmds, []string{"partprobe", disk})
 }
 
-// MkfsCommands returns the mkfs command for each partition, on its
-// effective device — the LUKS mapper for an encrypted partition, the raw
-// partition otherwise.
+// physOn returns the physical partitions on disk (not logical volumes or
+// RAID arrays), in on-disk (Number) order.
+func (pl *Plan) physOn(disk string) []Partition {
+	var out []Partition
+	for _, p := range pl.Parts {
+		if p.LV || p.Raid {
+			continue
+		}
+		pdisk := p.Disk
+		if pdisk == "" {
+			pdisk = pl.Disk
+		}
+		if pdisk == disk {
+			out = append(out, p)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Number < out[j].Number })
+	return out
+}
+
+// MkfsCommands returns the mkfs command for each filesystem-bearing entry,
+// on its effective device — the RAID array, the LUKS mapper for an
+// encrypted partition, or the raw partition. A physical volume and a RAID
+// member carry no filesystem and are skipped.
 func (pl *Plan) MkfsCommands() ([][]string, error) {
 	var cmds [][]string
 	for _, p := range pl.Parts {
-		if p.IsPV {
-			continue // a physical volume has no filesystem
+		if p.IsPV || p.IsRaidMember {
+			continue
 		}
 		mkfs, err := mkfsCommand(p)
 		if err != nil {
@@ -109,6 +142,8 @@ func partedMkpart(disk string, p Partition, start, end string) []string {
 	switch {
 	case p.isESP():
 		cmd = append(cmd, "EFI", "fat32")
+	case p.IsRaidMember:
+		cmd = append(cmd, "raid")
 	case p.Filesystem == "swap":
 		cmd = append(cmd, "linux-swap")
 	default:

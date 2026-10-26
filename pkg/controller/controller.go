@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/grub"
 	"github.com/sunlightlinux/slinstaller/pkg/luks"
 	"github.com/sunlightlinux/slinstaller/pkg/lvm"
+	"github.com/sunlightlinux/slinstaller/pkg/mdadm"
 	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
@@ -182,6 +184,14 @@ func (in *installer) partition() error {
 			return err
 		}
 		if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase); err != nil {
+			return err
+		}
+	}
+
+	// RAID, on top of the (partitioned, possibly encrypted) members, so the
+	// array device exists before its filesystem is made.
+	if mdadm.Used(in.plan) {
+		if err := storage.RunCommands(mdadm.Commands(in.plan), in.opts.Runner); err != nil {
 			return err
 		}
 	}
@@ -405,14 +415,43 @@ func (in *installer) bootloader() error {
 		return err
 	}
 
-	// Rebuild the initramfs now that /etc/crypttab and the rd.luks /
-	// rd.lvm command line exist, so dracut includes the crypt and lvm
-	// modules and the system can assemble the root at boot. The one built
-	// during base-install predates them.
-	if encrypted || lvm.Used(in.plan) {
+	// On a RAID install, record the arrays in /etc/mdadm.conf so the
+	// initramfs (and the booted system) assemble them by UUID. This must be
+	// written before the initramfs is rebuilt below.
+	if mdadm.Used(in.plan) {
+		if err := in.writeMdadmConf(); err != nil {
+			return err
+		}
+	}
+
+	// Rebuild the initramfs now that /etc/crypttab, /etc/mdadm.conf and the
+	// rd.luks / rd.lvm command line exist, so dracut includes the crypt,
+	// lvm and mdraid modules and the system can assemble the root at boot.
+	// The one built during base-install predates them.
+	if encrypted || lvm.Used(in.plan) || mdadm.Used(in.plan) {
 		return storage.RunCommands(
 			[][]string{{"chroot", in.opts.Root, "xbps-reconfigure", "-fa"}},
 			in.opts.Runner)
+	}
+	return nil
+}
+
+// writeMdadmConf records the assembled arrays in the target's
+// /etc/mdadm.conf, so dracut assembles them in the initramfs and the
+// booted system knows them. It reads the live array details (the arrays
+// were just created, so they are running) with `mdadm --detail --scan`.
+func (in *installer) writeMdadmConf() error {
+	out, err := exec.Command("mdadm", "--detail", "--scan").Output()
+	if err != nil {
+		return fmt.Errorf("mdadm --detail --scan: %w", err)
+	}
+	dir := filepath.Join(in.opts.Root, "etc")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	header := "# Written by slinstaller — the RAID arrays this system assembles at boot.\n"
+	if err := os.WriteFile(filepath.Join(dir, "mdadm.conf"), append([]byte(header), out...), 0o644); err != nil {
+		return fmt.Errorf("write mdadm.conf: %w", err)
 	}
 	return nil
 }

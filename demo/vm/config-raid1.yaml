@@ -1,0 +1,24 @@
+#clear-linux-config
+# RAID1 (mirror): the root filesystem lives on an mdadm array built from a
+# partition on each of two disks (/dev/vda and /dev/vdb). The ESP stays a
+# plain partition on the first disk (firmware reads one disk). Boot the VM
+# with two disks (demo/vm/run.sh grows a second one). Password is "demo".
+targetMedia:
+- name: vda
+  type: disk
+  children:
+  - { name: vda1, type: part, fstype: vfat, mountpoint: /boot/efi, size: 512M }
+  - { name: vda2, type: raid, raid: root, size: rest }
+- name: vdb
+  type: disk
+  children:
+  - { name: vdb1, type: raid, raid: root, size: rest }
+raid:
+- { name: root, level: 1, fstype: ext4, mountpoint: / }
+hostname: sunlight-raid1
+keyboard: us
+language: en_US.UTF-8
+users:
+- login: demo
+  password: "$6$VSGJJlJ4HsRjJiL0$iOD.YPsE3bTdnzcjVnRcTiskHk8Qi3H2s9H6.p.b7N9n/OTajSFtM1B1j46w5L6wZiLyAmxmyXTzILnIvhetM0"
+  admin: true

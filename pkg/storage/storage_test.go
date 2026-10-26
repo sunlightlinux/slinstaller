@@ -193,3 +193,81 @@ func TestSwapFileCommands(t *testing.T) {
 		t.Errorf("fstab line = %q", SwapFileFstab)
 	}
 }
+
+func TestRaidDevice(t *testing.T) {
+	cases := map[string]string{
+		"root": "/dev/md/root",
+		"data": "/dev/md/data",
+		"md0":  "/dev/md0",
+		"md12": "/dev/md12",
+		"md":   "/dev/md/md", // not an mdN name
+	}
+	for name, want := range cases {
+		if got := RaidDevice(name); got != want {
+			t.Errorf("RaidDevice(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestEffectiveDeviceRaid(t *testing.T) {
+	member := Partition{Device: "/dev/vda2", IsRaidMember: true, RaidName: "root"}
+	if member.EffectiveDevice() != "/dev/vda2" {
+		t.Errorf("a raid member's effective device is the raw partition, got %q", member.EffectiveDevice())
+	}
+	array := Partition{Raid: true, RaidName: "root"}
+	if array.EffectiveDevice() != "/dev/md/root" {
+		t.Errorf("the array's effective device = %q, want /dev/md/root", array.EffectiveDevice())
+	}
+}
+
+// raidPlan mirrors demo/vm/config-raid1.yaml: an ESP on vda, a raid member
+// on each of vda and vdb, and the root array over them.
+func raidPlan() *Plan {
+	return &Plan{
+		Disk:  "/dev/vda",
+		Disks: []string{"/dev/vda", "/dev/vdb"},
+		Wipe:  true,
+		Parts: []Partition{
+			{Number: 1, Device: "/dev/vda1", Disk: "/dev/vda", Mountpoint: "/boot/efi", Filesystem: "vfat", Size: "512M"},
+			{Number: 2, Device: "/dev/vda2", Disk: "/dev/vda", IsRaidMember: true, RaidName: "root", Size: SizeRest},
+			{Number: 1, Device: "/dev/vdb1", Disk: "/dev/vdb", IsRaidMember: true, RaidName: "root", Size: SizeRest},
+			{Raid: true, RaidName: "root", RaidLevel: "1", RaidMembers: []string{"/dev/vda2", "/dev/vdb1"},
+				Mountpoint: "/", Filesystem: "ext4"},
+		},
+	}
+}
+
+func TestTableCommandsMultiDisk(t *testing.T) {
+	got := FormatCommands(raidPlan().TableCommands())
+	for _, line := range []string{
+		"parted -s /dev/vda mklabel gpt",
+		"parted -a optimal --script /dev/vda mkpart EFI fat32 0% 512MiB",
+		"parted -a optimal --script /dev/vda mkpart raid 512MiB 100%",
+		"parted -s /dev/vda set 1 esp on",
+		"parted -s /dev/vda set 2 raid on",
+		"partprobe /dev/vda",
+		"parted -s /dev/vdb mklabel gpt",
+		"parted -a optimal --script /dev/vdb mkpart raid 0% 100%",
+		"parted -s /dev/vdb set 1 raid on",
+		"partprobe /dev/vdb",
+	} {
+		if !strings.Contains(got, line) {
+			t.Errorf("table commands missing:\n  %s\nfull:\n%s", line, got)
+		}
+	}
+}
+
+func TestMkfsSkipsRaidMembers(t *testing.T) {
+	cmds, err := raidPlan().MkfsCommands()
+	if err != nil {
+		t.Fatalf("MkfsCommands: %v", err)
+	}
+	flat := FormatCommands(cmds)
+	// The ESP and the array get a filesystem; the members do not.
+	if !strings.Contains(flat, "mkfs.vfat") || !strings.Contains(flat, "/dev/md/root") {
+		t.Errorf("expected mkfs for the ESP and the array:\n%s", flat)
+	}
+	if strings.Contains(flat, "/dev/vda2") || strings.Contains(flat, "/dev/vdb1") {
+		t.Errorf("raid members should not be formatted:\n%s", flat)
+	}
+}
