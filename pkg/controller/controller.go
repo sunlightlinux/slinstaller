@@ -396,28 +396,21 @@ func (in *installer) bootloader() error {
 	// command line for dracut's rd.luks to pick up. A root on LVM needs its
 	// group activated the same way — rd.lvm.lv.
 	//
-	// The root's path may be: an encrypted root partition directly; or (for
-	// LVM-on-LUKS) the encrypted physical volume of the group that holds the
-	// root logical volume — found by matching the root LV's group.
-	rootVG := ""
-	for _, p := range in.plan.Parts {
-		if p.LV && p.Mountpoint == "/" {
-			rootVG = p.VGName
-		}
-	}
-
+	// Every LUKS volume is named, not just the root's: dracut unlocks the
+	// root itself from the filesystem path, but Sunlight's runit base has no
+	// service to process /etc/crypttab for the others (a crypt /home, /data,
+	// or an encrypted LVM physical volume), so they are unlocked up front in
+	// the initramfs too. With one passphrase, dracut prompts once and reuses
+	// it for the rest.
 	encrypted := false
 	for _, p := range in.plan.Parts {
 		if p.Encrypted {
 			encrypted = true
-			onRootPath := p.Mountpoint == "/" || (p.IsPV && rootVG != "" && p.VGName == rootVG)
-			if onRootPath {
-				uuid, err := luks.UUID(p.Device)
-				if err != nil {
-					return err
-				}
-				kargs = append(kargs, "rd.luks.uuid="+uuid)
+			uuid, err := luks.UUID(p.Device)
+			if err != nil {
+				return err
 			}
+			kargs = append(kargs, "rd.luks.uuid="+uuid)
 		}
 		if p.LV && p.Mountpoint == "/" {
 			kargs = append(kargs, "rd.lvm.lv="+p.VGName+"/"+p.LVName)

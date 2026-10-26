@@ -14,6 +14,7 @@ xbps-install -Sy parted cryptsetup lvm2 mdadm
 echo "Ready. Now, e.g.:"
 echo "  /mnt/share/slinstaller --apply /mnt/share/config.yaml           # basic"
 echo "  /mnt/share/slinstaller --apply /mnt/share/config-luks.yaml      # encrypted root"
+echo "  /mnt/share/slinstaller --apply /mnt/share/config-luks-split.yaml # crypt / + crypt /home"
 echo "  /mnt/share/slinstaller --apply /mnt/share/config-lvm.yaml       # LVM"
 echo "  /mnt/share/slinstaller --apply /mnt/share/config-lvm-luks.yaml  # LVM-on-LUKS"
 echo "  /mnt/share/slinstaller --apply /mnt/share/config-raid1.yaml     # RAID1 (two disks)"
