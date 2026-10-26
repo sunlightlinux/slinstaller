@@ -439,13 +439,25 @@ func (in *installer) bootloader() error {
 
 	g := grub.Options{Root: in.opts.Root, ESPDir: esp, KernelArgs: kargs}
 
+	// Extra /etc/default/grub lines, written before grub-install and
+	// grub-mkconfig both read it: the kernel command line, and — when /boot
+	// is on an encrypted device (no unencrypted ESP mounted at /boot) —
+	// GRUB_ENABLE_CRYPTODISK=y, without which grub-install refuses to set up
+	// a loader that must unlock LUKS to read the kernel.
+	var grubDefault strings.Builder
 	if line := g.CmdlineConfig(); line != "" {
+		grubDefault.WriteString("\n# kernel command line set by slinstaller\n" + line)
+	}
+	if in.bootOnEncrypted() {
+		grubDefault.WriteString("\n# /boot is encrypted — let GRUB unlock it\nGRUB_ENABLE_CRYPTODISK=y\n")
+	}
+	if grubDefault.Len() > 0 {
 		path := filepath.Join(in.opts.Root, "etc", "default", "grub")
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", path, err)
 		}
-		_, werr := f.WriteString("\n# kernel command line set by slinstaller\n" + line)
+		_, werr := f.WriteString(grubDefault.String())
 		cerr := f.Close()
 		if werr != nil {
 			return werr
@@ -488,6 +500,41 @@ func (in *installer) bootloader() error {
 			in.opts.Runner)
 	}
 	return nil
+}
+
+// bootOnEncrypted reports whether /boot lives on an encrypted device, so
+// GRUB itself must unlock it to read the kernel. /boot is on its own mount
+// when one exists (e.g. an unencrypted ESP at /boot), otherwise it is part
+// of the root filesystem.
+func (in *installer) bootOnEncrypted() bool {
+	var boot *storage.Partition
+	for i := range in.plan.Parts {
+		if in.plan.Parts[i].Mountpoint == "/boot" {
+			boot = &in.plan.Parts[i]
+		}
+	}
+	if boot == nil {
+		for i := range in.plan.Parts {
+			if in.plan.Parts[i].Mountpoint == "/" {
+				boot = &in.plan.Parts[i]
+			}
+		}
+	}
+	if boot == nil {
+		return false
+	}
+	if boot.Encrypted {
+		return true
+	}
+	// LVM-on-LUKS: /boot on a logical volume whose group's PV is encrypted.
+	if boot.LV {
+		for _, p := range in.plan.Parts {
+			if p.IsPV && p.Encrypted && p.VGName == boot.VGName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // writeMdadmConf records the assembled arrays in the target's

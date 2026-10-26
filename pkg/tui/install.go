@@ -275,6 +275,19 @@ func (m installModel) doneView() string {
 		for _, l := range wrapErr(m.err.Error(), w-4) {
 			body = append(body, lineBG.Width(w).Render("  "+l))
 		}
+		// Show the tail of the command output — the failing command's own
+		// error is usually the last thing it printed.
+		if n := len(m.logs); n > 0 {
+			body = append(body, lineBG.Width(w).Render(""), rule(w),
+				footer.Width(w).Render("  last output:"))
+			start := n - 8
+			if start < 0 {
+				start = 0
+			}
+			for _, l := range m.logs[start:] {
+				body = append(body, footer.Width(w).Render("  "+clip(l, w-3)))
+			}
+		}
 	}
 	return frameScreen(m.width, m.height, body, "[Enter] exit")
 }

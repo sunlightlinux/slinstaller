@@ -100,7 +100,12 @@ for what will and will not be allowed to change once releases begin.
   writes the loader to the ESP and registers the firmware boot entry) and
   `grub-mkconfig`. Kernel arguments from the config are rendered into
   `/etc/default/grub`. clr-installer uses clr-boot-manager, which is
-  Clear-specific; GRUB is Sunlight's choice, as it is Void's.
+  Clear-specific; GRUB is Sunlight's choice, as it is Void's. When `/boot`
+  is on an encrypted device (the ESP is at `/boot/efi` and the kernel lives
+  on the encrypted root), the controller sets `GRUB_ENABLE_CRYPTODISK=y`
+  before `grub-install`, so GRUB can unlock LUKS to read the kernel
+  (otherwise `grub-install` refuses). Putting the ESP at `/boot` keeps the
+  kernel unencrypted and avoids the extra GRUB-stage passphrase prompt.
 - `pkg/system` — first-boot config: hostname (`/etc/hostname`), timezone
   (the `/etc/localtime` symlink), console keymap (`KEYMAP` in
   `/etc/rc.conf`, which Void's core services and slinit's OpenRC
