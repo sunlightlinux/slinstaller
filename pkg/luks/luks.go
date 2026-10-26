@@ -22,8 +22,17 @@ import (
 
 // FormatArgs and OpenArgs build the cryptsetup commands. The trailing
 // "-" tells cryptsetup to read the passphrase from stdin.
-func FormatArgs(device string) []string {
-	return []string{"cryptsetup", "--batch-mode", "luksFormat", device, "-"}
+//
+// grubCompat formats with pbkdf2 instead of the LUKS2 argon2id default:
+// GRUB can only unlock a container whose key derivation is pbkdf2, so the
+// volume GRUB itself must open to read the kernel (an encrypted /boot) is
+// formatted that way. Other volumes keep the stronger argon2id default.
+func FormatArgs(device string, grubCompat bool) []string {
+	args := []string{"cryptsetup", "--batch-mode", "luksFormat"}
+	if grubCompat {
+		args = append(args, "--pbkdf", "pbkdf2")
+	}
+	return append(args, device, "-")
 }
 
 func OpenArgs(device, name string) []string {
@@ -33,9 +42,10 @@ func OpenArgs(device, name string) []string {
 // Format creates a LUKS volume on device with the given passphrase. out
 // receives the command echo and cryptsetup's output (nil means stderr); a
 // front-end that renders the install itself passes its own writer so the
-// output does not leak onto the terminal.
-func Format(device, passphrase string, out io.Writer) error {
-	return run(FormatArgs(device), passphrase, out)
+// output does not leak onto the terminal. grubCompat selects a GRUB-
+// readable key derivation (see FormatArgs).
+func Format(device, passphrase string, out io.Writer, grubCompat bool) error {
+	return run(FormatArgs(device, grubCompat), passphrase, out)
 }
 
 // Open unlocks device to /dev/mapper/<name> with the passphrase. See

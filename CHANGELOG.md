@@ -103,9 +103,11 @@ for what will and will not be allowed to change once releases begin.
   Clear-specific; GRUB is Sunlight's choice, as it is Void's. When `/boot`
   is on an encrypted device (the ESP is at `/boot/efi` and the kernel lives
   on the encrypted root), the controller sets `GRUB_ENABLE_CRYPTODISK=y`
-  before `grub-install`, so GRUB can unlock LUKS to read the kernel
-  (otherwise `grub-install` refuses). Putting the ESP at `/boot` keeps the
-  kernel unencrypted and avoids the extra GRUB-stage passphrase prompt.
+  before `grub-install` and formats that one LUKS volume with `pbkdf2`
+  instead of the LUKS2 argon2id default, since GRUB can only unlock a
+  pbkdf2 container — without it GRUB rejects the right passphrase as
+  invalid. Putting the ESP at `/boot` keeps the kernel unencrypted, avoids
+  the extra GRUB-stage passphrase prompt, and keeps argon2id everywhere.
 - `pkg/system` — first-boot config: hostname (`/etc/hostname`), timezone
   (the `/etc/localtime` symlink), console keymap (`KEYMAP` in
   `/etc/rc.conf`, which Void's core services and slinit's OpenRC

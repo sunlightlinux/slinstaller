@@ -185,6 +185,10 @@ func (in *installer) partition() error {
 	// before LUKS, RAID and LVM, which open partitions by path.
 	in.settle()
 
+	// The LUKS volume GRUB must open itself (an encrypted /boot) is formatted
+	// with a GRUB-readable key derivation; the rest keep cryptsetup's
+	// stronger argon2id default.
+	grubBoot := in.bootCryptDevice()
 	for _, p := range in.plan.Parts {
 		if !p.Encrypted {
 			continue
@@ -192,7 +196,7 @@ func (in *installer) partition() error {
 		if in.opts.Passphrase == "" {
 			return fmt.Errorf("%s is encrypted but no passphrase was given", p.Device)
 		}
-		if err := luks.Format(p.Device, in.opts.Passphrase, in.output()); err != nil {
+		if err := luks.Format(p.Device, in.opts.Passphrase, in.output(), p.Device == grubBoot); err != nil {
 			return err
 		}
 		if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase, in.output()); err != nil {
@@ -496,10 +500,15 @@ func (in *installer) bootloader() error {
 }
 
 // bootOnEncrypted reports whether /boot lives on an encrypted device, so
-// GRUB itself must unlock it to read the kernel. /boot is on its own mount
-// when one exists (e.g. an unencrypted ESP at /boot), otherwise it is part
-// of the root filesystem.
-func (in *installer) bootOnEncrypted() bool {
+// GRUB itself must unlock it to read the kernel.
+func (in *installer) bootOnEncrypted() bool { return in.bootCryptDevice() != "" }
+
+// bootCryptDevice returns the raw partition of the LUKS volume GRUB must
+// open to read /boot, or "" when /boot is not encrypted. /boot is on its
+// own mount when one exists (e.g. an unencrypted ESP at /boot), otherwise
+// it is part of the root filesystem; for LVM-on-LUKS it is the group's
+// encrypted physical volume.
+func (in *installer) bootCryptDevice() string {
 	var boot *storage.Partition
 	for i := range in.plan.Parts {
 		if in.plan.Parts[i].Mountpoint == "/boot" {
@@ -514,20 +523,19 @@ func (in *installer) bootOnEncrypted() bool {
 		}
 	}
 	if boot == nil {
-		return false
+		return ""
 	}
 	if boot.Encrypted {
-		return true
+		return boot.Device
 	}
-	// LVM-on-LUKS: /boot on a logical volume whose group's PV is encrypted.
 	if boot.LV {
 		for _, p := range in.plan.Parts {
 			if p.IsPV && p.Encrypted && p.VGName == boot.VGName {
-				return true
+				return p.Device
 			}
 		}
 	}
-	return false
+	return ""
 }
 
 // writeMdadmConf records the assembled arrays in the target's
