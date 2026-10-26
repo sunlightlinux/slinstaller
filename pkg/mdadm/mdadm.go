@@ -10,10 +10,28 @@ package mdadm
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
+
+// UUID reads an assembled array's RAID UUID (the md metadata UUID, not its
+// filesystem's) with mdadm, for the rd.md.uuid= kernel argument that tells
+// the initramfs to assemble it at boot. The array must already exist, so
+// this runs after Commands.
+func UUID(device string) (string, error) {
+	out, err := exec.Command("mdadm", "--detail", "--export", device).Output()
+	if err != nil {
+		return "", fmt.Errorf("mdadm: --detail --export %s: %w", device, err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if v, ok := strings.CutPrefix(line, "MD_UUID="); ok {
+			return strings.TrimSpace(v), nil
+		}
+	}
+	return "", fmt.Errorf("mdadm: no MD_UUID for %s", device)
+}
 
 // normalizeLevel turns "raid1"/"RAID1"/"1" into mdadm's "1" form.
 func normalizeLevel(level string) string {

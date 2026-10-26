@@ -389,6 +389,19 @@ func (in *installer) bootloader() error {
 		}
 	}
 
+	// A root on a RAID array must have the array assembled by the initramfs
+	// before it can be mounted — rd.md.uuid points dracut at it (alongside
+	// the /etc/mdadm.conf written below).
+	for _, p := range in.plan.Parts {
+		if p.Raid && p.Mountpoint == "/" {
+			uuid, err := mdadm.UUID(p.EffectiveDevice())
+			if err != nil {
+				return err
+			}
+			kargs = append(kargs, "rd.md.uuid="+uuid)
+		}
+	}
+
 	g := grub.Options{Root: in.opts.Root, ESPDir: esp, KernelArgs: kargs}
 
 	if line := g.CmdlineConfig(); line != "" {
@@ -416,10 +429,16 @@ func (in *installer) bootloader() error {
 	}
 
 	// On a RAID install, record the arrays in /etc/mdadm.conf so the
-	// initramfs (and the booted system) assemble them by UUID. This must be
+	// initramfs (and the booted system) assemble them by UUID, and force
+	// dracut to include its mdraid module — in the chroot dracut cannot see
+	// that the target boots from an array, so it would otherwise leave the
+	// module out and the system would hang unable to find root. Both must be
 	// written before the initramfs is rebuilt below.
 	if mdadm.Used(in.plan) {
 		if err := in.writeMdadmConf(); err != nil {
+			return err
+		}
+		if err := in.forceDracutModule("mdraid"); err != nil {
 			return err
 		}
 	}
@@ -452,6 +471,23 @@ func (in *installer) writeMdadmConf() error {
 	header := "# Written by slinstaller — the RAID arrays this system assembles at boot.\n"
 	if err := os.WriteFile(filepath.Join(dir, "mdadm.conf"), append([]byte(header), out...), 0o644); err != nil {
 		return fmt.Errorf("write mdadm.conf: %w", err)
+	}
+	return nil
+}
+
+// forceDracutModule tells dracut to include a module in the initramfs it
+// builds, with a /etc/dracut.conf.d drop-in. It is for modules dracut
+// cannot infer in the chroot (it inspects the live system, not the target),
+// such as mdraid for a root on RAID.
+func (in *installer) forceDracutModule(module string) error {
+	dir := filepath.Join(in.opts.Root, "etc", "dracut.conf.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	content := fmt.Sprintf("# Written by slinstaller.\nadd_dracutmodules+=\" %s \"\n", module)
+	path := filepath.Join(dir, "10-slinstaller-"+module+".conf")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }

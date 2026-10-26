@@ -79,9 +79,12 @@ for what will and will not be allowed to change once releases begin.
   top-level `raid` list (`{name, level, fstype, mountpoint}`). The array
   carries the filesystem at `/dev/md/<name>`: parted cuts and flags the
   members, `mdadm --create` assembles the array before mkfs, and for boot the
-  controller writes `/etc/mdadm.conf` (from `mdadm --detail --scan`) and
-  rebuilds the initramfs so the array assembles at boot. The ESP stays a
-  plain partition on one disk (firmware reads one disk, not an array).
+  controller writes `/etc/mdadm.conf` (from `mdadm --detail --scan`), forces
+  dracut's `mdraid` module (a `/etc/dracut.conf.d` drop-in — in the chroot
+  dracut cannot tell the target boots from an array), adds `rd.md.uuid` for a
+  root on RAID, and rebuilds the initramfs, so the array assembles at boot.
+  The ESP stays a plain partition on one disk (firmware reads one disk, not
+  an array).
   `Validate` checks the level, the member count per level and that the ESP is
   not on RAID; the full `--apply` preflight confirms every target disk and
   pulls in `mdadm`, and the confirmation lists all disks to be erased.
