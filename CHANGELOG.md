@@ -109,8 +109,9 @@ for what will and will not be allowed to change once releases begin.
   account (password hashed with openssl, confirmed), shows a summary to
   confirm, and installs through the same path as a config file. On a real
   terminal it runs as a **full-screen menu styled after the Clear Linux
-  minimal-ISO installer** (bubbletea/bubbles/lipgloss): a blue panel filling
-  the screen, a title bar, `[R] Required options` / `[A] Advanced options`
+  minimal-ISO installer** (bubbletea/bubbles/lipgloss): a bordered dialog
+  centred on a blue screen that fills the terminal, with a title bar and
+  `[R] Required options` / `[A] Advanced options`
   tabs, and each section shown as a bold label over a `» value` line with a
   teal bar on the selected row and separator rules between them. Required
   holds disk, the **manual partition editor**, keyboard, language, timezone

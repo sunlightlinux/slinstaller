@@ -202,6 +202,12 @@ var (
 	clrRule  = lipgloss.Color("66")  // separator rules
 	clrInk   = lipgloss.Color("16")  // text on a teal bar
 
+	// The dialog frame, centred on the blue screen.
+	boxStyle = lipgloss.NewStyle().Background(clrBlue).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(clrTeal).BorderBackground(clrBlue).
+			Padding(0, 1)
+
 	// Full-width line backgrounds.
 	lineBG = lipgloss.NewStyle().Foreground(clrWhite).Background(clrBlue)
 	selBG  = lipgloss.NewStyle().Foreground(clrInk).Background(clrTeal)
@@ -629,39 +635,45 @@ func (m model) commitFormField(v string) (tea.Model, tea.Cmd) {
 
 // --- views ---
 
-// panelWidth is the width every line is rendered to, so the blue panel fills
-// the terminal. It is capped so the UI stays readable on a very wide screen.
+// panelWidth is the width every content line is rendered to: the inner width
+// of the centred dialog, not the terminal. Capped so the UI stays readable on
+// a wide screen and bounded so it fits a small one.
 func (m model) panelWidth() int {
 	w := m.width
 	if w <= 0 {
 		w = 80
 	}
-	if w > 100 {
-		w = 100
+	cw := w - 10 // leave room for the border, padding and margins
+	if cw > 86 {
+		cw = 86
 	}
-	return w
+	if cw < 40 {
+		cw = 40
+	}
+	return cw
 }
 
-// screen frames a view the way clr-installer does: a title bar, the body
-// filling the blue panel, and a footer of navigation hints — the whole thing
-// sized to the terminal so the background spans it.
+// screen frames a view the way clr-installer does: a bordered dialog — title
+// bar, the body, a rule and the footer hint — centred on a blue background
+// that fills the whole terminal.
 func (m model) screen(body []string, foot string) string {
-	w := m.panelWidth()
-	h := m.height
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
 	if h <= 0 {
 		h = 24
 	}
-	lines := make([]string, 0, h)
-	lines = append(lines,
-		titleBar.Width(w).Render("  slinstaller  —  Install Sunlight Linux"),
-		rule(w),
-	)
-	lines = append(lines, body...)
-	for len(lines) < h-1 {
-		lines = append(lines, lineBG.Width(w).Render(""))
+	cw := m.panelWidth()
+	lines := []string{
+		titleBar.Width(cw).Render("  slinstaller  —  Install Sunlight Linux"),
+		rule(cw),
 	}
-	lines = append(lines, footer.Width(w).Render("  "+foot))
-	return strings.Join(lines, "\n")
+	lines = append(lines, body...)
+	lines = append(lines, rule(cw), footer.Width(cw).Render("  "+foot))
+	box := boxStyle.Render(strings.Join(lines, "\n"))
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box,
+		lipgloss.WithWhitespaceBackground(clrBlue))
 }
 
 func rule(w int) string { return ruleBG.Width(w).Render(strings.Repeat("─", w)) }
@@ -744,7 +756,7 @@ func (m model) hubView() string {
 		body = append(body, warnText.Width(w).Render("  Need: a disk, a /, an ESP, an admin user (+ passphrase if encrypting)."))
 	}
 
-	return m.screen(body, "Use [Tab] or the arrow keys [Up and Down] to navigate · [Enter] select · [Esc] cancel")
+	return m.screen(body, "Use [Tab] or the arrow keys [Up and Down] to navigate")
 }
 
 func (m model) diskChoiceView() string {
