@@ -64,13 +64,20 @@ for arg in "$@"; do
     esac
 done
 
+# disk_bytes prints a qcow2's virtual size in bytes. It reads the plain
+# `qemu-img info` text (the "virtual size: ... (N bytes)" line) rather than
+# the JSON, whose newer output carries more than one "virtual-size" field.
+disk_bytes() {
+    qemu-img info "$1" | sed -n 's/.*(\([0-9][0-9]*\) bytes).*/\1/p' | head -1
+}
+
 if [ ! -f "${TARGET}" ]; then
     echo "Error: ${TARGET} not found. Run ./build.sh first." >&2
     exit 1
 fi
 if [ "${FRESH}" -eq 1 ]; then
     echo "→ recreating blank target disk"
-    size="$(qemu-img info --output=json "${TARGET}" | grep -oE '"virtual-size": [0-9]+' | grep -oE '[0-9]+')"
+    size="$(disk_bytes "${TARGET}")"
     rm -f "${TARGET}"
     qemu-img create -f qcow2 "${TARGET}" "${size}" >/dev/null
 fi
@@ -164,7 +171,7 @@ COMMON=(
 # disk's size, and recreated blank with --fresh.
 if [ "${TWO_DISKS}" -eq 1 ]; then
     if [ "${FRESH}" -eq 1 ] || [ ! -f "${TARGET2}" ]; then
-        size="$(qemu-img info --output=json "${TARGET}" | grep -oE '"virtual-size": [0-9]+' | grep -oE '[0-9]+')"
+        size="$(disk_bytes "${TARGET}")"
         rm -f "${TARGET2}"
         qemu-img create -f qcow2 "${TARGET2}" "${size}" >/dev/null
         echo "→ second disk: ${TARGET2}"
