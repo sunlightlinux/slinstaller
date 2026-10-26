@@ -108,13 +108,18 @@ for what will and will not be allowed to change once releases begin.
   partition, a file, or none) and its size, a hostname and an admin
   account (password hashed with openssl, confirmed), shows a summary to
   confirm, and installs through the same path as a config file. On a real
-  terminal it runs as a **full-screen clr-installer-style menu**
-  (bubbletea/bubbles/lipgloss): a hub of sections — disk, a **manual
-  partition editor**, passphrase, keyboard, language, timezone, hostname,
-  admin user — each showing its value and a ✓/✗, edited in any order, with
-  an Install button that lights up only once the layout is complete
-  (a disk, a root, an ESP, a user, and a passphrase if encrypting), beside
-  Cancel. The partition editor adds, deletes and nests entries: plain,
+  terminal it runs as a **full-screen menu styled after the Clear Linux
+  minimal-ISO installer** (bubbletea/bubbles/lipgloss): a blue panel filling
+  the screen, a title bar, `[R] Required options` / `[A] Advanced options`
+  tabs, and each section shown as a bold label over a `» value` line with a
+  teal bar on the selected row and separator rules between them. Required
+  holds disk, the **manual partition editor**, keyboard, language, timezone
+  and the admin user; Advanced holds passphrase and hostname — edited in any
+  order, `[Tab]` switches tabs. `Cancel` and `Install` sit at the foot, with
+  Install lit only once the layout is complete (a disk, a root, an ESP, a
+  user, and a passphrase if encrypting), over the footer hint
+  "Use [Tab] or the arrow keys [Up and Down] to navigate". The partition
+  editor adds, deletes and nests entries: plain,
   encrypted (`crypt`) or LVM partitions, with logical volumes under an
   LVM group — the full layout the config file can express. Over a serial
   console or a pipe it falls back to the plain prompt flow; both build the

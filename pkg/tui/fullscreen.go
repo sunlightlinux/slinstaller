@@ -12,12 +12,14 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 )
 
-// RunFullscreen drives the install as a full-screen, clr-installer-style
-// menu: a hub of sections configured in any order, including a manual
-// partition editor (plain, encrypted and LVM), with an Install button
-// that lights up once the layout is complete. It returns the config and
-// the LUKS passphrase; cmd uses it on a real terminal, the prompt flow
-// otherwise.
+// RunFullscreen drives the install as a full-screen menu styled after the
+// Clear Linux minimal-ISO installer: a blue panel with [R] Required / [A]
+// Advanced tabs, each section a label over a "» value" line with a teal
+// selection bar, and Cancel/Install buttons at the foot. Sections are
+// configured in any order and include a manual partition editor (plain,
+// encrypted and LVM); Install lights up once the layout is complete. It
+// returns the config and the LUKS passphrase; cmd uses it on a real
+// terminal, the prompt flow otherwise.
 func RunFullscreen() (*config.Config, string, error) {
 	devs, err := blockdev.List()
 	if err != nil {
@@ -161,8 +163,10 @@ type model struct {
 	login, password, passphrase string
 	parts                       []partEntry
 
-	view      view
-	hubCursor int
+	view          view
+	tab           int // 0 = Required options, 1 = Advanced options
+	hubCursor     int
+	width, height int
 
 	// simple section editors
 	editing  section
@@ -186,24 +190,50 @@ func newModel(disks []blockdev.Device) model {
 	}
 }
 
+// The Clear Linux minimal-ISO installer palette: a blue panel filling the
+// screen, white text, a teal bar on the selected row, Cancel/Install at the
+// foot. Every line is rendered at the panel width so its background spans the
+// whole screen the way clr-installer's does.
 var (
-	appStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("27")).Padding(0, 1)
-	rowCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("45")).Bold(true)
-	valStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	needStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	okStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("78"))
-	btnOn     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("45")).Padding(0, 2)
-	btnOff    = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("240")).Padding(0, 2)
-	btnGrey   = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Padding(0, 2)
-	pick      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("45")).Padding(0, 1)
-	plain     = lipgloss.NewStyle().Padding(0, 1)
-	help      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	danger    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("203"))
+	clrBlue  = lipgloss.Color("25")  // panel background
+	clrTeal  = lipgloss.Color("37")  // selection / active tab
+	clrWhite = lipgloss.Color("231") // primary text
+	clrDim   = lipgloss.Color("152") // secondary text (values)
+	clrRule  = lipgloss.Color("66")  // separator rules
+	clrInk   = lipgloss.Color("16")  // text on a teal bar
+
+	// Full-width line backgrounds.
+	lineBG = lipgloss.NewStyle().Foreground(clrWhite).Background(clrBlue)
+	selBG  = lipgloss.NewStyle().Foreground(clrInk).Background(clrTeal)
+
+	titleBar = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrBlue)
+	footer   = lipgloss.NewStyle().Foreground(clrDim).Background(clrBlue)
+	ruleBG   = lipgloss.NewStyle().Foreground(clrRule).Background(clrBlue)
+
+	// Tabs.
+	tabActive   = lipgloss.NewStyle().Bold(true).Foreground(clrInk).Background(clrTeal)
+	tabInactive = lipgloss.NewStyle().Foreground(clrWhite).Background(clrBlue)
+
+	// Hub items: a bold label then a "» value" line, highlighted when selected.
+	itemLabel    = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrBlue)
+	itemValue    = lipgloss.NewStyle().Foreground(clrDim).Background(clrBlue)
+	itemSelLabel = lipgloss.NewStyle().Bold(true).Foreground(clrInk).Background(clrTeal)
+	itemSelValue = lipgloss.NewStyle().Foreground(clrInk).Background(clrTeal)
+
+	// Buttons.
+	btnSel   = lipgloss.NewStyle().Bold(true).Foreground(clrInk).Background(clrTeal).Padding(0, 2)
+	btnIdle  = lipgloss.NewStyle().Foreground(clrInk).Background(lipgloss.Color("250")).Padding(0, 2)
+	btnOff   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Background(lipgloss.Color("238")).Padding(0, 2)
+	warnText = lipgloss.NewStyle().Foreground(lipgloss.Color("221")).Background(clrBlue)
 )
 
 func (m model) Init() tea.Cmd { return textinput.Blink }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if ws, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width, m.height = ws.Width, ws.Height
+		return m, nil
+	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		var cmd tea.Cmd
@@ -235,8 +265,19 @@ func (m model) canInstall() bool {
 		(!hasCrypt(m.parts) || m.passphrase != "")
 }
 
+// visibleSections lists the sections shown under a tab. Required holds the
+// everyday choices; Advanced the ones most installs leave at their defaults —
+// mirroring clr-installer's [R] Required / [A] Advanced split.
+func visibleSections(tab int) []section {
+	if tab == 1 {
+		return []section{secPassphrase, secHostname}
+	}
+	return []section{secDisk, secParts, secKeyboard, secLanguage, secTimezone, secUser}
+}
+
 func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	last := int(sectionCount) + 1 // Install, Cancel
+	vis := visibleSections(m.tab)
+	last := len(vis) + 1 // Install at len(vis), Cancel at len(vis)+1
 	switch key.String() {
 	case "up", "k":
 		if m.hubCursor > 0 {
@@ -246,13 +287,20 @@ func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.hubCursor < last {
 			m.hubCursor++
 		}
+	case "tab", "right", "shift+tab", "left", "h", "l":
+		m.tab = (m.tab + 1) % 2
+		m.hubCursor = 0
+	case "r":
+		m.tab, m.hubCursor = 0, 0
+	case "A":
+		m.tab, m.hubCursor = 1, 0
 	case "esc":
 		return m, tea.Quit
 	case "enter":
 		switch {
-		case m.hubCursor < int(sectionCount):
-			return m.openSection(section(m.hubCursor))
-		case m.hubCursor == int(sectionCount):
+		case m.hubCursor < len(vis):
+			return m.openSection(vis[m.hubCursor])
+		case m.hubCursor == len(vis):
 			if m.canInstall() {
 				m.confirmed = true
 				return m, tea.Quit
@@ -334,21 +382,6 @@ func (m model) sectionValue(s section) string {
 		return "— not set —"
 	}
 	return ""
-}
-
-func (m model) sectionOK(s section) bool {
-	switch s {
-	case secDisk:
-		return m.diskSet
-	case secParts:
-		return hasRoot(m.parts) && hasESP(m.parts)
-	case secPassphrase:
-		return !hasCrypt(m.parts) || m.passphrase != ""
-	case secUser:
-		return m.userSet
-	default:
-		return true
-	}
 }
 
 // --- simple section editors ---
@@ -596,73 +629,138 @@ func (m model) commitFormField(v string) (tea.Model, tea.Cmd) {
 
 // --- views ---
 
+// panelWidth is the width every line is rendered to, so the blue panel fills
+// the terminal. It is capped so the UI stays readable on a very wide screen.
+func (m model) panelWidth() int {
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+	if w > 100 {
+		w = 100
+	}
+	return w
+}
+
+// screen frames a view the way clr-installer does: a title bar, the body
+// filling the blue panel, and a footer of navigation hints — the whole thing
+// sized to the terminal so the background spans it.
+func (m model) screen(body []string, foot string) string {
+	w := m.panelWidth()
+	h := m.height
+	if h <= 0 {
+		h = 24
+	}
+	lines := make([]string, 0, h)
+	lines = append(lines,
+		titleBar.Width(w).Render("  slinstaller  —  Install Sunlight Linux"),
+		rule(w),
+	)
+	lines = append(lines, body...)
+	for len(lines) < h-1 {
+		lines = append(lines, lineBG.Width(w).Render(""))
+	}
+	lines = append(lines, footer.Width(w).Render("  "+foot))
+	return strings.Join(lines, "\n")
+}
+
+func rule(w int) string { return ruleBG.Width(w).Render(strings.Repeat("─", w)) }
+
+// row renders a plain full-width line, highlighted as a teal bar when selected.
+func row(w int, selected bool, text string) string {
+	if selected {
+		return selBG.Width(w).Render("  " + text)
+	}
+	return lineBG.Width(w).Render("  " + text)
+}
+
+// item renders a hub entry: a bold label line and a "» value" line, both
+// highlighted together when selected.
+func item(w int, selected bool, label, value string) []string {
+	if selected {
+		return []string{
+			itemSelLabel.Width(w).Render("  " + label),
+			itemSelValue.Width(w).Render("    » " + value),
+		}
+	}
+	return []string{
+		itemLabel.Width(w).Render("  " + label),
+		itemValue.Width(w).Render("    » " + value),
+	}
+}
+
 func (m model) View() string {
-	header := "\n" + appStyle.Render(" slinstaller ") + "  Install Sunlight Linux\n\n"
 	switch m.view {
 	case viewHub:
-		return header + m.hubView()
+		return m.hubView()
 	case viewSectionChoice:
-		return header + m.diskChoiceView()
+		return m.diskChoiceView()
 	case viewSectionText:
-		return header + m.textView()
+		return m.textView()
 	case viewPartList:
-		return header + m.partListView()
+		return m.partListView()
 	case viewPartForm:
-		return header + m.partFormView()
+		return m.partFormView()
 	}
-	return header
+	return ""
 }
 
 func (m model) hubView() string {
-	var b strings.Builder
-	for s := section(0); s < sectionCount; s++ {
-		mark := okStyle.Render("✓")
-		if !m.sectionOK(s) {
-			mark = needStyle.Render("✗")
-		}
-		label := fmt.Sprintf("%-12s", sectionLabels[s])
-		if m.hubCursor == int(s) {
-			label = rowCursor.Render("▸ " + label)
-		} else {
-			label = "  " + label
-		}
-		fmt.Fprintf(&b, "%s %s  %s\n", mark, label, valStyle.Render(m.sectionValue(s)))
+	w := m.panelWidth()
+	var body []string
+
+	// Tab row: [R] Required options   [A] Advanced options.
+	req, adv := tabInactive, tabInactive
+	if m.tab == 0 {
+		req = tabActive
+	} else {
+		adv = tabActive
+	}
+	tabs := req.Render(" [R] Required options ") + tabInactive.Render("  ") + adv.Render(" [A] Advanced options ")
+	body = append(body, tabInactive.Width(w).Render("  "+tabs), rule(w))
+
+	vis := visibleSections(m.tab)
+	for i, s := range vis {
+		body = append(body, item(w, m.hubCursor == i, sectionLabels[s], m.sectionValue(s))...)
+		body = append(body, rule(w))
 	}
 
-	install := btnGrey.Render("Install")
+	body = append(body, lineBG.Width(w).Render(""))
+
+	// Cancel / Install buttons.
+	cancel := btnIdle.Render("Cancel")
+	if m.hubCursor == len(vis)+1 {
+		cancel = btnSel.Render("Cancel")
+	}
+	install := btnOff.Render("Install")
 	if m.canInstall() {
-		install = btnOff.Render("Install")
-		if m.hubCursor == int(sectionCount) {
-			install = btnOn.Render("Install")
+		install = btnIdle.Render("Install")
+		if m.hubCursor == len(vis) {
+			install = btnSel.Render("Install")
 		}
 	}
-	cancel := btnOff.Render("Cancel")
-	if m.hubCursor == int(sectionCount)+1 {
-		cancel = btnOn.Render("Cancel")
-	}
-	b.WriteString("\n    " + install + "   " + cancel + "\n")
+	body = append(body, lineBG.Width(w).Render("  "+cancel+"   "+install))
 	if !m.canInstall() {
-		b.WriteString("\n  " + needStyle.Render("Need: a disk, a / and an ESP, an admin user (and a passphrase if encrypting).") + "\n")
+		body = append(body, warnText.Width(w).Render("  Need: a disk, a /, an ESP, an admin user (+ passphrase if encrypting)."))
 	}
-	b.WriteString("\n" + help.Render("↑/↓ move · enter select · esc cancel"))
-	return b.String()
+
+	return m.screen(body, "Use [Tab] or the arrow keys [Up and Down] to navigate · [Enter] select · [Esc] cancel")
 }
 
 func (m model) diskChoiceView() string {
-	var b strings.Builder
-	b.WriteString(danger.Render("  the chosen disk will be ERASED") + "\n\n")
-	for i, d := range m.disks {
-		line := fmt.Sprintf("%-14s %s", d.Path, d.Model)
-		if i == m.edCursor {
-			b.WriteString(pick.Render("▸ "+line) + "\n")
-		} else {
-			b.WriteString(plain.Render("  "+line) + "\n")
-		}
+	w := m.panelWidth()
+	body := []string{
+		warnText.Width(w).Render("  Select a target disk — it will be ERASED."),
+		lineBG.Width(w).Render(""),
 	}
-	return b.String() + "\n" + help.Render("↑/↓ move · enter select · esc back")
+	for i, d := range m.disks {
+		body = append(body, row(w, i == m.edCursor, fmt.Sprintf("%-14s %s", d.Path, d.Model)))
+	}
+	return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
 }
 
 func (m model) textView() string {
+	w := m.panelWidth()
 	title := sectionLabels[m.editing]
 	if m.editing == secUser {
 		if m.formStep == 0 {
@@ -671,29 +769,30 @@ func (m model) textView() string {
 			title = "Password for " + m.login
 		}
 	}
-	return "  " + lipgloss.NewStyle().Bold(true).Render(title) + "\n\n" + m.input.View() +
-		"\n\n" + help.Render("type · enter confirm · esc back")
+	body := []string{
+		itemLabel.Width(w).Render("  " + title),
+		lineBG.Width(w).Render(""),
+		lineBG.Width(w).Render("  " + m.input.View()),
+	}
+	return m.screen(body, "type · [Enter] confirm · [Esc] back")
 }
 
 func (m model) partListView() string {
-	var b strings.Builder
-	b.WriteString("  " + lipgloss.NewStyle().Bold(true).Render("Partitions") + "\n\n")
+	w := m.panelWidth()
+	body := []string{
+		itemLabel.Width(w).Render("  Partitions"),
+		rule(w),
+	}
 	if len(m.parts) == 0 {
-		b.WriteString("  " + help.Render("none yet — press 'a' to add") + "\n")
+		body = append(body, footer.Width(w).Render("  none yet — press [a] to add"))
 	}
 	for i, p := range m.parts {
-		line := partSummary(p)
-		if i == m.partCursor {
-			b.WriteString(pick.Render("▸ "+line) + "\n")
-		} else {
-			b.WriteString(plain.Render("  "+line) + "\n")
-		}
+		body = append(body, row(w, i == m.partCursor, partSummary(p)))
 		for _, lv := range p.LVs {
-			b.WriteString(plain.Render("      lv "+lvSummary(lv)) + "\n")
+			body = append(body, lineBG.Width(w).Render("      lv "+lvSummary(lv)))
 		}
 	}
-	b.WriteString("\n" + help.Render("a add · l add LV (on lvm) · d delete · esc back"))
-	return b.String()
+	return m.screen(body, "[a] add · [l] add LV (on lvm) · [d] delete · [Esc] back")
 }
 
 func partSummary(p partEntry) string {
@@ -725,49 +824,49 @@ func orFill(s string) string {
 }
 
 func (m model) partFormView() string {
-	var title, body string
+	w := m.panelWidth()
+	var title string
+	var isChoice bool
 	if m.formIsLV {
 		switch m.formStep {
 		case 0:
-			title, body = "LV name", m.input.View()
+			title = "LV name"
 		case 1:
-			title, body = "LV filesystem", m.choiceBody()
+			title, isChoice = "LV filesystem", true
 		case 2:
-			title, body = "LV mountpoint (blank for none)", m.input.View()
+			title = "LV mountpoint (blank for none)"
 		case 3:
-			title, body = "LV size (blank = fill the group)", m.input.View()
+			title = "LV size (blank = fill the group)"
 		}
 	} else {
 		switch m.formStep {
 		case 0:
-			title, body = "Partition type", m.choiceBody()
+			title, isChoice = "Partition type", true
 		case 1:
 			if m.form.Type == "lvm" {
-				title, body = "Volume group name", m.input.View()
+				title = "Volume group name"
 			} else {
-				title, body = "Filesystem", m.choiceBody()
+				title, isChoice = "Filesystem", true
 			}
 		case 2:
-			title, body = "Mountpoint (e.g. / or /boot)", m.input.View()
+			title = "Mountpoint (e.g. / or /boot)"
 		case 3:
-			title, body = "Size (e.g. 512M, 30G; blank = fill)", m.input.View()
+			title = "Size (e.g. 512M, 30G; blank = fill)"
 		}
 	}
-	h := "type · enter next · esc cancel"
-	if m.formChoices() != nil {
-		h = "↑/↓ move · enter next · esc cancel"
-	}
-	return "  " + lipgloss.NewStyle().Bold(true).Render(title) + "\n\n" + body + "\n" + help.Render(h)
-}
 
-func (m model) choiceBody() string {
-	var b strings.Builder
-	for i, c := range m.formChoices() {
-		if i == m.edCursor {
-			b.WriteString(pick.Render("▸ "+c) + "\n")
-		} else {
-			b.WriteString(plain.Render("  "+c) + "\n")
-		}
+	body := []string{
+		itemLabel.Width(w).Render("  " + title),
+		lineBG.Width(w).Render(""),
 	}
-	return b.String()
+	foot := "type · [Enter] next · [Esc] cancel"
+	if isChoice {
+		for i, c := range m.formChoices() {
+			body = append(body, row(w, i == m.edCursor, c))
+		}
+		foot = "[Up/Down] move · [Enter] next · [Esc] cancel"
+	} else {
+		body = append(body, lineBG.Width(w).Render("  "+m.input.View()))
+	}
+	return m.screen(body, foot)
 }
