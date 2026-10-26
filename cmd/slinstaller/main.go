@@ -14,6 +14,8 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
@@ -72,6 +74,9 @@ func run(args []string) error {
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	var listDisks bool
 	fs.BoolVar(&listDisks, "list-disks", false, "list the machine's disks and exit")
+	var textUI bool
+	fs.BoolVar(&textUI, "text", false,
+		"use the plain text prompt installer instead of the full-screen TUI (for serial consoles)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] [config.yaml]\n\n")
 		fmt.Fprintf(os.Stderr, "With a config file, reads a clr-installer-format config and prints its plan;\n")
@@ -111,10 +116,13 @@ func run(args []string) error {
 		}
 		// Full-screen wizard on a real terminal; the plain prompt flow
 		// over a serial console or a pipe, where it would not render.
-		if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
+		if !textUI && fullScreenCapable() {
 			cfg, interactivePass, err = tui.RunFullscreen()
 			fullscreen = true
 		} else {
+			// --text, a pipe/file, a dumb/unset TERM, or a terminal that
+			// cannot report its size (typically a serial console): drive the
+			// plain prompt flow, which needs none of that.
 			cfg, interactivePass, err = tui.Run(stdin, os.Stderr)
 		}
 		apply = true
@@ -351,11 +359,39 @@ func layoutPackages(plan *storage.Plan) []string {
 	return out
 }
 
-// isTerminal reports whether f is a terminal (not a pipe or file), so
-// the full-screen wizard is used only where it can render.
+// isTerminal reports whether f is a terminal (not a pipe or file).
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
 	return err == nil && (fi.Mode()&os.ModeCharDevice) != 0
+}
+
+// fullScreenCapable reports whether the full-screen TUI should be used.
+// It is not enough that stdin/stdout are terminals: a serial console is a
+// terminal too, and clr-installer's own TUI crashes on one. The reliable
+// signal is whether the terminal can report a window size — a local
+// terminal does, a serial console usually reports 0x0 — so here the
+// full-screen UI is used only when there is a real size (and TERM is set
+// and not "dumb"); everything else falls back to the prompt flow.
+func fullScreenCapable() bool {
+	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+		return false
+	}
+	if t := os.Getenv("TERM"); t == "" || t == "dumb" {
+		return false
+	}
+	w, h, ok := terminalSize(os.Stdout)
+	return ok && w > 0 && h > 0
+}
+
+// terminalSize returns the terminal's columns and rows, and whether they
+// could be read. A serial console that never negotiated a size returns
+// 0x0, which the caller treats as "no size".
+func terminalSize(f *os.File) (cols, rows int, ok bool) {
+	ws, err := unix.IoctlGetWinsize(int(f.Fd()), unix.TIOCGWINSZ)
+	if err != nil {
+		return 0, 0, false
+	}
+	return int(ws.Col), int(ws.Row), true
 }
 
 // confirm requires the operator to retype the target disk. A yes/no

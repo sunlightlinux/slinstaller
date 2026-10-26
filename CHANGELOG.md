@@ -142,6 +142,10 @@ for what will and will not be allowed to change once releases begin.
   stderr), ending on a success or failure screen — no more plain-text scroll
   after the styled menu. Over a serial console or a pipe it falls back to the
   plain prompt flow and streamed-text install; both build the same config.
+  The full-screen UI is chosen only when the terminal can report a window
+  size (so a serial console — which usually reports 0x0, and on which
+  clr-installer's own TUI crashes — takes the prompt flow), and `--text`
+  forces the prompt flow regardless.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,
   and prints the partitioning plan. With `--apply` it runs the install
   through the controller, gated on running as root and on the operator
