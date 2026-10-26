@@ -474,27 +474,7 @@ func (in *installer) firstBoot() error {
 // enabled even with no interfaces declared, so a plain install still has
 // network.
 func (in *installer) network() error {
-	var ifaces []network.Interface
-	for _, ni := range in.cfg.NetworkInterfaces {
-		if ni == nil || ni.Name == "" {
-			continue
-		}
-		iface := network.Interface{
-			Name:    ni.Name,
-			Static:  strings.EqualFold(ni.DHCP, "false") && len(ni.Addrs) > 0,
-			Gateway: ni.Gateway,
-			DNS:     ni.DNS,
-		}
-		for _, a := range ni.Addrs {
-			if a == nil {
-				continue
-			}
-			iface.Addrs = append(iface.Addrs, network.Addr{IP: a.IP, Netmask: a.Netmask, V6: a.Version == 1})
-		}
-		ifaces = append(ifaces, iface)
-	}
-
-	conf, err := network.DhcpcdConf(ifaces)
+	conf, err := network.DhcpcdConf(interfacesFromConfig(in.cfg.NetworkInterfaces))
 	if err != nil {
 		return err
 	}
@@ -515,6 +495,35 @@ func (in *installer) network() error {
 	}
 
 	return system.EnableService(in.opts.Root, "dhcpcd")
+}
+
+// interfacesFromConfig maps the config's network interfaces to
+// network.Interface. An interface is static when it has addresses and is
+// not explicitly DHCP (config.Interface.Static); a DHCP interface produces
+// no stanza and is left to dhcpcd's default. Nameless interfaces are
+// skipped — Validate has already reported them.
+func interfacesFromConfig(cfgIfaces []*config.Interface) []network.Interface {
+	var ifaces []network.Interface
+	for _, ni := range cfgIfaces {
+		if ni == nil || ni.Name == "" {
+			continue
+		}
+		iface := network.Interface{
+			Name:    ni.Name,
+			Static:  ni.Static(),
+			Gateway: ni.Gateway,
+			DNS:     ni.DNS,
+			Domain:  ni.Domain,
+		}
+		for _, a := range ni.Addrs {
+			if a == nil {
+				continue
+			}
+			iface.Addrs = append(iface.Addrs, network.Addr{IP: a.IP, Netmask: a.Netmask, V6: a.Version == 1})
+		}
+		ifaces = append(ifaces, iface)
+	}
+	return ifaces
 }
 
 func (in *installer) preHooks() error  { return in.runHooks(in.cfg.PreInstall) }

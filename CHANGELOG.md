@@ -86,11 +86,20 @@ for what will and will not be allowed to change once releases begin.
   so `admin: true` means sudo, not just group membership.
 - `pkg/network` — the installed system's networking, via dhcpcd rather
   than clr-installer's systemd-networkd/NetworkManager (Sunlight has no
-  systemd). Static interfaces from the config become `/etc/dhcpcd.conf`
-  stanzas; dhcpcd is enabled so DHCP covers the rest, and so a plain
-  install still comes up with network. `VerifyConnectivity` checks the
-  repository is reachable before a disk is wiped, so an offline install
-  fails early rather than partway through the base download.
+  systemd). Each `networkInterfaces` entry from the config is mapped to a
+  `/etc/dhcpcd.conf` stanza: its addresses (IPv4 and IPv6), gateway
+  (`routers`), DNS servers (`domain_name_servers`, space-separated) and
+  search `domain` (`domain_search` — clr's interface `domain`, now parsed).
+  An interface counts as static when it has addresses and is not explicitly
+  `dhcp: "true"` (clr's rule), so an unset `dhcp` with addresses is still
+  static; a DHCP interface produces no stanza and is left to dhcpcd's
+  default, which is enabled so a plain install still comes up with network.
+  A static interface's addresses and gateway are validated by
+  `config.Validate` (via `network.ValidAddr`) before any disk is touched,
+  so a bad IP or netmask fails up front rather than partway through the
+  install. `VerifyConnectivity` checks the repository is reachable before a
+  disk is wiped, so an offline install fails early rather than partway
+  through the base download.
 - Three smaller clr-installer parities: install hooks get `$chrootDir`
   and `$chrooted` in their environment, as clr expands them; the config's
   `httpsProxy` is passed to `xbps-install` for the download; and

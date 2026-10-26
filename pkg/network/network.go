@@ -51,7 +51,22 @@ type Interface struct {
 	Static  bool
 	Addrs   []Addr
 	Gateway string
-	DNS     string
+	DNS     string // one or more servers, space-separated
+	Domain  string // search domain (clr-installer's interface "domain")
+}
+
+// ValidAddr reports whether ip and netmask form a usable static address
+// (v6 selects IPv6). It is the validation behind DhcpcdConf, exposed so a
+// config can be rejected before any disk is touched rather than failing
+// partway through an install.
+func ValidAddr(ip, netmask string, v6 bool) error {
+	if net.ParseIP(ip) == nil {
+		return fmt.Errorf("invalid IP %q", ip)
+	}
+	if _, err := maskToCIDR(netmask, v6); err != nil {
+		return err
+	}
+	return nil
 }
 
 // DhcpcdConf renders the /etc/dhcpcd.conf stanzas for the static
@@ -82,6 +97,9 @@ func DhcpcdConf(ifaces []Interface) (string, error) {
 		}
 		if iface.DNS != "" {
 			fmt.Fprintf(&b, "static domain_name_servers=%s\n", iface.DNS)
+		}
+		if iface.Domain != "" {
+			fmt.Fprintf(&b, "static domain_search=%s\n", iface.Domain)
 		}
 	}
 	if b.Len() == 0 {

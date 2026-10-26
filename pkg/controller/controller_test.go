@@ -88,3 +88,58 @@ func TestInstallThroughPreInstallRunsHooks(t *testing.T) {
 		t.Error("pre-install stage reached partition")
 	}
 }
+
+func TestInterfacesFromConfig(t *testing.T) {
+	ifaces := interfacesFromConfig([]*config.Interface{
+		nil,                          // skipped
+		{Name: ""},                   // skipped (no name)
+		{Name: "eth0", DHCP: "true"}, // DHCP, not static
+		{ // addresses, no dhcp field -> static (clr: static unless dhcp:true)
+			Name:    "eth1",
+			Addrs:   []*config.Address{{IP: "10.0.0.5", Netmask: "255.255.255.0"}},
+			Gateway: "10.0.0.1",
+			DNS:     "10.0.0.1",
+			Domain:  "lan",
+		},
+		{ // addresses but dhcp:true -> not static
+			Name:  "eth2",
+			DHCP:  "true",
+			Addrs: []*config.Address{{IP: "10.0.0.6", Netmask: "24"}},
+		},
+	})
+
+	if len(ifaces) != 3 {
+		t.Fatalf("got %d interfaces, want 3 (eth0, eth1, eth2)", len(ifaces))
+	}
+	byName := map[string]bool{}
+	for _, i := range ifaces {
+		byName[i.Name] = i.Static
+	}
+	if byName["eth0"] {
+		t.Error("eth0 (dhcp:true, no addrs) should not be static")
+	}
+	if !byName["eth1"] {
+		t.Error("eth1 (addrs, no dhcp) should be static")
+	}
+	if byName["eth2"] {
+		t.Error("eth2 (dhcp:true with addrs) should not be static")
+	}
+
+	// eth1 carries its address, gateway, dns and domain through.
+	found := false
+	for _, i := range ifaces {
+		if i.Name != "eth1" {
+			continue
+		}
+		found = true
+		if len(i.Addrs) != 1 || i.Addrs[0].IP != "10.0.0.5" {
+			t.Errorf("eth1 address not mapped: %+v", i.Addrs)
+		}
+		if i.Gateway != "10.0.0.1" || i.DNS != "10.0.0.1" || i.Domain != "lan" {
+			t.Errorf("eth1 gateway/dns/domain not mapped: %+v", i)
+		}
+	}
+	if !found {
+		t.Error("eth1 missing from result")
+	}
+}

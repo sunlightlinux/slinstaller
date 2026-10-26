@@ -329,6 +329,45 @@ func TestValidateUsers(t *testing.T) {
 	}
 }
 
+func TestValidateNetwork(t *testing.T) {
+	base := func(ifaces []*Interface) *Config {
+		return &Config{
+			TargetMedia: []*Media{{
+				Name: "sda", Type: "disk",
+				Children: []*Media{
+					{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot"},
+					{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+				},
+			}},
+			NetworkInterfaces: ifaces,
+		}
+	}
+
+	// A static interface with a bad IP, a bad netmask and a bad gateway.
+	err := base([]*Interface{{
+		Name:    "eth0",
+		Addrs:   []*Address{{IP: "nope", Netmask: "255.255.255.0"}, {IP: "10.0.0.5", Netmask: "junk"}},
+		Gateway: "not-an-ip",
+	}}).Validate()
+	if err == nil {
+		t.Fatal("Validate = nil, want network problems")
+	}
+	for _, want := range []string{"invalid IP", "invalid netmask", "gateway"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q:\n%s", want, err.Error())
+		}
+	}
+
+	// A DHCP interface (dhcp:true) with no addresses is fine, and so is a
+	// clean static one.
+	if err := base([]*Interface{
+		{Name: "eth0", DHCP: "true"},
+		{Name: "eth1", Addrs: []*Address{{IP: "192.168.0.2", Netmask: "255.255.255.0"}}, Gateway: "192.168.0.1"},
+	}).Validate(); err != nil {
+		t.Errorf("valid interfaces rejected: %v", err)
+	}
+}
+
 func TestPlanLVM(t *testing.T) {
 	c := &Config{
 		Hostname: "box",

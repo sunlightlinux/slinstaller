@@ -18,11 +18,13 @@ package config
 import (
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"gopkg.in/yaml.v3"
 )
@@ -95,6 +97,7 @@ type Interface struct {
 	DHCP    string     `yaml:"dhcp,omitempty"`
 	Gateway string     `yaml:"gateway,omitempty"`
 	DNS     string     `yaml:"dns,omitempty"`
+	Domain  string     `yaml:"domain,omitempty"`
 }
 
 // Address is one IP on an interface. version is 0 for IPv4, 1 for IPv6,
@@ -103,6 +106,14 @@ type Address struct {
 	IP      string `yaml:"ip"`
 	Netmask string `yaml:"netmask,omitempty"`
 	Version int    `yaml:"version,omitempty"`
+}
+
+// Static reports whether the interface is statically configured: it has
+// addresses and is not explicitly DHCP. clr-installer marks DHCP with
+// dhcp:"true" and treats an interface with addresses as static otherwise,
+// so an unset dhcp alongside addresses still means static.
+func (i *Interface) Static() bool {
+	return len(i.Addrs) > 0 && !strings.EqualFold(i.DHCP, "true")
 }
 
 // KernelArguments are command-line arguments to add or remove.
@@ -273,6 +284,34 @@ func (c *Config) Validate() error {
 	if c.SwapFileSize != "" {
 		if _, err := parseSize(c.SwapFileSize); err != nil {
 			add("swapFileSize: %v", err)
+		}
+	}
+
+	// Network interfaces: a statically configured one must carry usable
+	// addresses (and a valid gateway, if any), checked here so a typo fails
+	// before any disk is touched rather than partway through the install.
+	for i, ni := range c.NetworkInterfaces {
+		if ni == nil {
+			continue
+		}
+		who := ni.Name
+		if who == "" {
+			who = fmt.Sprintf("networkInterfaces[%d]", i)
+			add("%s: no name", who)
+		}
+		if !ni.Static() {
+			continue
+		}
+		for j, a := range ni.Addrs {
+			if a == nil {
+				continue
+			}
+			if err := network.ValidAddr(a.IP, a.Netmask, a.Version == 1); err != nil {
+				add("%s: address %d: %v", who, j+1, err)
+			}
+		}
+		if ni.Gateway != "" && net.ParseIP(ni.Gateway) == nil {
+			add("%s: gateway %q is not a valid IP", who, ni.Gateway)
 		}
 	}
 

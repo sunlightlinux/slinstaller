@@ -58,6 +58,45 @@ func TestDhcpcdConfIPv6(t *testing.T) {
 	}
 }
 
+func TestDhcpcdConfDomainAndMultiDNS(t *testing.T) {
+	conf, err := DhcpcdConf([]Interface{{
+		Name:   "eth0",
+		Static: true,
+		Addrs:  []Addr{{IP: "192.168.1.50", Netmask: "255.255.255.0"}},
+		DNS:    "10.0.0.1 10.0.0.2",
+		Domain: "example.com",
+	}})
+	if err != nil {
+		t.Fatalf("DhcpcdConf: %v", err)
+	}
+	for _, want := range []string{
+		"static domain_name_servers=10.0.0.1 10.0.0.2",
+		"static domain_search=example.com",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("conf missing %q:\n%s", want, conf)
+		}
+	}
+}
+
+func TestValidAddr(t *testing.T) {
+	if err := ValidAddr("192.168.1.10", "255.255.255.0", false); err != nil {
+		t.Errorf("good v4 address rejected: %v", err)
+	}
+	if err := ValidAddr("fe80::1", "64", true); err != nil {
+		t.Errorf("good v6 address rejected: %v", err)
+	}
+	if err := ValidAddr("", "255.255.255.0", false); err == nil {
+		t.Error("empty IP accepted")
+	}
+	if err := ValidAddr("not-an-ip", "255.255.255.0", false); err == nil {
+		t.Error("bad IP accepted")
+	}
+	if err := ValidAddr("192.168.1.10", "not-a-mask", false); err == nil {
+		t.Error("bad netmask accepted")
+	}
+}
+
 func TestMaskToCIDR(t *testing.T) {
 	cases := []struct {
 		mask string
