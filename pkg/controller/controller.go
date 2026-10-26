@@ -172,6 +172,11 @@ func (in *installer) partition() error {
 	if err := storage.RunCommands(in.plan.TableCommands(), in.opts.Runner); err != nil {
 		return err
 	}
+	// Wait for udev to create the new partition device nodes before anything
+	// opens them. Right after partprobe a device may not exist yet — e.g.
+	// mdadm opening /dev/vdb1 the instant it was partitioned — so settle
+	// before LUKS, RAID and LVM, which open partitions by path.
+	in.settle()
 
 	for _, p := range in.plan.Parts {
 		if !p.Encrypted {
@@ -186,6 +191,7 @@ func (in *installer) partition() error {
 		if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase); err != nil {
 			return err
 		}
+		in.settle()
 	}
 
 	// RAID, on top of the (partitioned, possibly encrypted) members, so the
@@ -194,6 +200,7 @@ func (in *installer) partition() error {
 		if err := storage.RunCommands(mdadm.Commands(in.plan), in.opts.Runner); err != nil {
 			return err
 		}
+		in.settle()
 	}
 
 	// LVM, on top of the (possibly encrypted) physical volumes, before
@@ -202,6 +209,7 @@ func (in *installer) partition() error {
 		if err := storage.RunCommands(lvm.Commands(in.plan), in.opts.Runner); err != nil {
 			return err
 		}
+		in.settle()
 	}
 
 	mkfs, err := in.plan.MkfsCommands()
@@ -209,6 +217,17 @@ func (in *installer) partition() error {
 		return err
 	}
 	return storage.RunCommands(mkfs, in.opts.Runner)
+}
+
+// settle waits for udev to finish creating device nodes, so a device that
+// was just partitioned or assembled exists before the next step opens it.
+// Best-effort: a live system without udevadm just skips it (and relies on
+// the kernel having created the nodes synchronously).
+func (in *installer) settle() {
+	if _, err := exec.LookPath("udevadm"); err != nil {
+		return
+	}
+	_ = in.opts.Runner([]string{"udevadm", "settle"})
 }
 
 func (in *installer) mount() error { return in.mnt.MountAll(in.plan) }
