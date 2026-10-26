@@ -27,7 +27,9 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 	m := installModel{
 		cfg: cfg, opts: opts, disk: plan.Disk, ch: ch,
 		total: 12, // the controller's stage count; the first update corrects it
-		bar:   progress.New(progress.WithDefaultGradient()),
+		// Solid teal, to match the menu's selection bar rather than the
+		// default blue→pink gradient.
+		bar: progress.New(progress.WithSolidFill("#00afaf")),
 	}
 	final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	if err != nil {
