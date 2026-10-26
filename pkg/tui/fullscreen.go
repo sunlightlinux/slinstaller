@@ -635,15 +635,14 @@ func (m model) commitFormField(v string) (tea.Model, tea.Cmd) {
 
 // --- views ---
 
-// panelWidth is the width every content line is rendered to: the inner width
-// of the centred dialog, not the terminal. Capped so the UI stays readable on
-// a wide screen and bounded so it fits a small one.
-func (m model) panelWidth() int {
-	w := m.width
-	if w <= 0 {
-		w = 80
+// contentWidth is the width every content line is rendered to: the inner
+// width of the centred dialog, not the terminal. Capped so the UI stays
+// readable on a wide screen and bounded so it fits a small one.
+func contentWidth(width int) int {
+	if width <= 0 {
+		width = 80
 	}
-	cw := w - 10 // leave room for the border, padding and margins
+	cw := width - 10 // leave room for the border, padding and margins
 	if cw > 86 {
 		cw = 86
 	}
@@ -653,18 +652,18 @@ func (m model) panelWidth() int {
 	return cw
 }
 
-// screen frames a view the way clr-installer does: a bordered dialog — title
-// bar, the body, a rule and the footer hint — centred on a blue background
-// that fills the whole terminal.
-func (m model) screen(body []string, foot string) string {
-	w, h := m.width, m.height
-	if w <= 0 {
-		w = 80
+// frameScreen frames a view the way clr-installer does: a bordered dialog —
+// title bar, the body, a rule and the footer hint — centred on a blue
+// background that fills the whole terminal. Both front-ends (the hub and the
+// install progress view) render through it, so they match.
+func frameScreen(width, height int, body []string, foot string) string {
+	if width <= 0 {
+		width = 80
 	}
-	if h <= 0 {
-		h = 24
+	if height <= 0 {
+		height = 24
 	}
-	cw := m.panelWidth()
+	cw := contentWidth(width)
 	lines := []string{
 		titleBar.Width(cw).Render("  slinstaller  —  Install Sunlight Linux"),
 		rule(cw),
@@ -672,8 +671,14 @@ func (m model) screen(body []string, foot string) string {
 	lines = append(lines, body...)
 	lines = append(lines, rule(cw), footer.Width(cw).Render("  "+foot))
 	box := boxStyle.Render(strings.Join(lines, "\n"))
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box,
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box,
 		lipgloss.WithWhitespaceBackground(clrBlue))
+}
+
+func (m model) panelWidth() int { return contentWidth(m.width) }
+
+func (m model) screen(body []string, foot string) string {
+	return frameScreen(m.width, m.height, body, foot)
 }
 
 func rule(w int) string { return ruleBG.Width(w).Render(strings.Repeat("─", w)) }

@@ -98,6 +98,7 @@ func run(args []string) error {
 	rest := fs.Args()
 	var cfg *config.Config
 	var interactivePass string
+	var fullscreen bool
 	var err error
 	switch len(rest) {
 	case 1:
@@ -112,6 +113,7 @@ func run(args []string) error {
 		// over a serial console or a pipe, where it would not render.
 		if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
 			cfg, interactivePass, err = tui.RunFullscreen()
+			fullscreen = true
 		} else {
 			cfg, interactivePass, err = tui.Run(stdin, os.Stderr)
 		}
@@ -140,8 +142,11 @@ func run(args []string) error {
 	}
 
 	// The plan is shown whether or not it will run, so --apply executes
-	// exactly what a dry run printed.
-	fmt.Print(storage.FormatCommands(cmds))
+	// exactly what a dry run printed. The full-screen front-end shows its
+	// own progress view instead, so the plain command list is skipped there.
+	if !fullscreen {
+		fmt.Print(storage.FormatCommands(cmds))
+	}
 
 	if !apply {
 		fmt.Fprintf(os.Stderr,
@@ -259,6 +264,14 @@ func run(args []string) error {
 		if opts.Passphrase == "" {
 			return fmt.Errorf("the layout is encrypted but no passphrase was given")
 		}
+	}
+
+	// The full-screen front-end confirms and installs inside the interface,
+	// with its own progress bar and a live command trace. The file and
+	// serial paths confirm by retyping the disk path and install over plain
+	// streamed text.
+	if fullscreen {
+		return tui.RunInstall(cfg, opts, plan)
 	}
 
 	if !confirm(stdin, plan.Disk) {

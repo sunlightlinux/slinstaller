@@ -101,7 +101,9 @@ for what will and will not be allowed to change once releases begin.
   base-system install → fstab → bootloader → first-boot → network →
   post-install hooks. A full install runs end to end (gated by the front-end on root
   and disk confirmation); `Options.Through` stops after a named stage for
-  a staged VM run, and a failure unmounts what it mounted.
+  a staged VM run, and a failure unmounts what it mounted. `Options.Progress`
+  reports each stage as it starts (completed/total + name), so a front-end
+  can drive a progress bar without the controller knowing about any UI.
 - `pkg/tui` — an interactive front-end: with no config file,
   `cmd/slinstaller` asks for a target disk, the root filesystem, whether
   to encrypt the root (with a LUKS passphrase, confirmed), swap (a
@@ -122,9 +124,14 @@ for what will and will not be allowed to change once releases begin.
   "Use [Tab] or the arrow keys [Up and Down] to navigate". The partition
   editor adds, deletes and nests entries: plain,
   encrypted (`crypt`) or LVM partitions, with logical volumes under an
-  LVM group — the full layout the config file can express. Over a serial
-  console or a pipe it falls back to the plain prompt flow; both build the
-  same config.
+  LVM group — the full layout the config file can express. Pressing Install
+  runs the install **inside the interface**: a final "this will ERASE
+  &lt;disk&gt;" confirmation, then a **progress bar** with the current stage
+  (driven by the controller's `Progress` callback) and a live tail of the
+  command output (`storage.SinkRunner` streams it into the view instead of to
+  stderr), ending on a success or failure screen — no more plain-text scroll
+  after the styled menu. Over a serial console or a pipe it falls back to the
+  plain prompt flow and streamed-text install; both build the same config.
 - `cmd/slinstaller` — the file front-end: reads a config, validates it,
   and prints the partitioning plan. With `--apply` it runs the install
   through the controller, gated on running as root and on the operator

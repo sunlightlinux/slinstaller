@@ -62,6 +62,12 @@ type Options struct {
 	// Log, if set, receives a line announcing each stage as it starts, so
 	// an operator can see progress. nil is silent.
 	Log io.Writer
+
+	// Progress, if set, is called as each stage starts with the number of
+	// stages already completed, the total to run, and the stage's name —
+	// and once more with done == total and stage "complete" after the last
+	// one — so a front-end can drive a progress bar. nil disables it.
+	Progress func(done, total int, stage string)
 }
 
 // Install carries out the config, to the end or as far as
@@ -131,7 +137,10 @@ func (in *installer) run() error {
 		}
 	}
 
-	for _, s := range stages[:limit] {
+	for i, s := range stages[:limit] {
+		if in.opts.Progress != nil {
+			in.opts.Progress(i, limit, s.name)
+		}
 		if in.opts.Log != nil {
 			fmt.Fprintf(in.opts.Log, "==> %s\n", s.name)
 		}
@@ -141,6 +150,9 @@ func (in *installer) run() error {
 			_ = in.mnt.UnmountAll()
 			return fmt.Errorf("controller: %s: %w", s.name, err)
 		}
+	}
+	if in.opts.Progress != nil {
+		in.opts.Progress(limit, limit, "complete")
 	}
 
 	// A full run unmounts the finished target; a staged run leaves it
