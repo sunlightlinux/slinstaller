@@ -111,11 +111,12 @@ for what will and will not be allowed to change once releases begin.
   account (password hashed with openssl, confirmed), shows a summary to
   confirm, and installs through the same path as a config file. On a real
   terminal it runs as a **full-screen menu styled after the Clear Linux
-  minimal-ISO installer** (bubbletea/bubbles/lipgloss): a bordered dialog
-  centred on a blue screen that fills the terminal, with a title bar and
-  `[R] Required options` / `[A] Advanced options`
-  tabs, and each section shown as a bold label over a `» value` line with a
-  teal bar on the selected row and separator rules between them. Required
+  minimal-ISO installer** (bubbletea/bubbles/lipgloss): a filled royal-blue
+  dialog centred on a black screen, a bracketed title, a black tab strip with
+  `[R] Required options` / `[A] Advanced options` (the active one a teal
+  block), and each section shown as a bold white label over a cyan `» value`
+  line, separated by rules, with a tall teal bar (magenta label) on the
+  selected row. Required
   holds disk, the **manual partition editor**, keyboard, language, timezone
   and the admin user; Advanced holds passphrase and hostname — edited in any
   order, `[Tab]` switches tabs. `Cancel` and `Install` sit at the foot, with
