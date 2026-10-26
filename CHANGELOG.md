@@ -61,8 +61,17 @@ for what will and will not be allowed to change once releases begin.
   filesystems are made and mounted on the logical volumes
   (`storage.Partition.EffectiveDevice`), an LV may fill the group, and a
   root on LVM gets `rd.lvm.lv` on the kernel command line with an
-  initramfs rebuild so it assembles at boot. (v1 is LVM on plain
-  partitions; LVM-on-LUKS is a later step.)
+  initramfs rebuild so it assembles at boot.
+- **LVM-on-LUKS** — an `lvm` partition with `encrypted: true` puts the
+  whole group inside one LUKS container: the partition is luksFormat'd, and
+  `pvcreate`/`vgcreate` (and so every logical volume and filesystem) run on
+  the mapper rather than the raw partition — the common "encrypted LVM"
+  layout, one passphrase for root, home and swap. The controller unlocks
+  the container before LVM assembly and, for a root on an encrypted group,
+  puts the container's `rd.luks.uuid` beside the group's `rd.lvm.lv` on the
+  kernel command line (with the initramfs rebuild) so boot unlocks then
+  activates. The full-screen partition editor offers it as the
+  `lvm-encrypted` type; `demo/vm/config-lvm-luks.yaml` is a worked example.
 - `pkg/xbps` — the base-system install, the counterpart to clr-installer's
   swupd step, following how Void bootstraps a rootfs: seed the repository
   signing keys into the target, `xbps-install` from the repository, then a

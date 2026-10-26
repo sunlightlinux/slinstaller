@@ -406,3 +406,44 @@ func TestPlanLVM(t *testing.T) {
 		t.Errorf("home LV size = %q, want rest", plan.Parts[3].Size)
 	}
 }
+
+func TestPlanEncryptedLVM(t *testing.T) {
+	// LVM-on-LUKS: the lvm partition is encrypted, so its PV is a LUKS
+	// container and pvcreate/mkfs target the mapper.
+	c := &Config{
+		Hostname: "box",
+		Users:    []*User{{Login: "me", Password: "$6$a$b", Admin: true}},
+		TargetMedia: []*Media{{
+			Name: "vda", Type: "disk",
+			Children: []*Media{
+				{Name: "vda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
+				{Name: "vda2", Type: "lvm", Encrypted: true, Size: "rest", VolumeGroup: "vg0", Children: []*Media{
+					{Name: "root", FsType: "ext4", Mountpoint: "/", Size: "20G"},
+					{Name: "home", FsType: "xfs", Mountpoint: "/home"}, // fill
+				}},
+			},
+		}},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	plan, err := c.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	pv := plan.Parts[1]
+	if !pv.IsPV || !pv.Encrypted {
+		t.Fatalf("PV should be an encrypted physical volume: %+v", pv)
+	}
+	if pv.MapName != "cryptvg0" {
+		t.Errorf("PV MapName = %q, want cryptvg0", pv.MapName)
+	}
+	// The PV's effective device (what pvcreate uses) is the LUKS mapper.
+	if pv.EffectiveDevice() != "/dev/mapper/cryptvg0" {
+		t.Errorf("PV EffectiveDevice = %q, want /dev/mapper/cryptvg0", pv.EffectiveDevice())
+	}
+	// The raw partition is still what gets luksFormat'd.
+	if pv.Device != "/dev/vda2" {
+		t.Errorf("PV Device = %q, want /dev/vda2", pv.Device)
+	}
+}

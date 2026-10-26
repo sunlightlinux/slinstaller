@@ -53,3 +53,27 @@ func TestCommandsAndUsed(t *testing.T) {
 		t.Error("Used = true for a plain plan")
 	}
 }
+
+func TestCommandsEncryptedPV(t *testing.T) {
+	// LVM-on-LUKS: the PV is a LUKS container, so pvcreate/vgcreate must
+	// target the mapper, not the raw partition.
+	pl := &storage.Plan{Parts: []storage.Partition{
+		{Device: "/dev/sda2", IsPV: true, Encrypted: true, MapName: "cryptvg0", VGName: "vg0"},
+		{LV: true, VGName: "vg0", LVName: "root", Mountpoint: "/", Filesystem: "ext4", Size: "20G"},
+	}}
+	flat := ""
+	for _, c := range Commands(pl) {
+		flat += strings.Join(c, " ") + "\n"
+	}
+	for _, want := range []string{
+		"pvcreate -ff -y /dev/mapper/cryptvg0",
+		"vgcreate vg0 /dev/mapper/cryptvg0",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("missing %q:\n%s", want, flat)
+		}
+	}
+	if strings.Contains(flat, "/dev/sda2") {
+		t.Errorf("pvcreate/vgcreate should use the mapper, not the raw partition:\n%s", flat)
+	}
+}

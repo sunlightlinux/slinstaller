@@ -1,0 +1,26 @@
+#clear-linux-config
+# LVM-on-LUKS: a plain ESP, then one LUKS container holding an LVM group
+# with root and home as logical volumes on /dev/vda. The ESP stays
+# unencrypted (firmware must read it); everything else is encrypted.
+# User password is "demo"; the LUKS passphrase is prompted (or set
+# SLINSTALLER_LUKS_PASSPHRASE).
+targetMedia:
+- name: vda
+  type: disk
+  children:
+  - { name: vda1, type: part, fstype: vfat, mountpoint: /boot/efi, size: 512M }
+  - name: vda2
+    type: lvm
+    encrypted: true
+    size: rest
+    volumeGroup: vg0
+    children:
+    - { name: root, fstype: ext4, mountpoint: /,     size: 4G }
+    - { name: home, fstype: ext4, mountpoint: /home }
+hostname: sunlight-lvmluks
+keyboard: us
+language: en_US.UTF-8
+users:
+- login: demo
+  password: "$6$VSGJJlJ4HsRjJiL0$iOD.YPsE3bTdnzcjVnRcTiskHk8Qi3H2s9H6.p.b7N9n/OTajSFtM1B1j46w5L6wZiLyAmxmyXTzILnIvhetM0"
+  admin: true

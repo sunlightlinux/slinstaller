@@ -78,6 +78,13 @@ type Media struct {
 	// VolumeGroup names the LVM volume group a `type: lvm` partition
 	// hosts; its children are the logical volumes.
 	VolumeGroup string `yaml:"volumeGroup,omitempty"`
+
+	// Encrypted puts a `type: lvm` partition's physical volume inside a
+	// LUKS container (LVM-on-LUKS): the partition is luksFormat'd and the
+	// PV, group and logical volumes live on the mapper. A plain partition
+	// uses `type: crypt` instead; this is for the LVM case, where the type
+	// is already taken by `lvm`.
+	Encrypted bool `yaml:"encrypted,omitempty"`
 }
 
 // User is an account to create, in clr-installer's shape.
@@ -445,6 +452,13 @@ func lvmParts(disk string, i int, ch *Media) (storage.Partition, []storage.Parti
 	}
 	dev, num := partDev(disk, i, ch.Name)
 	pv := storage.Partition{Number: num, Device: dev, Size: size, IsPV: true, VGName: ch.VolumeGroup}
+	// LVM-on-LUKS: the physical volume is a LUKS container. pvcreate then
+	// targets the mapper (storage.Partition.EffectiveDevice), not the raw
+	// partition; the controller luksFormat/luksOpens it before lvm runs.
+	if ch.Encrypted {
+		pv.Encrypted = true
+		pv.MapName = cryptMapName(ch)
+	}
 
 	var lvs []storage.Partition
 	for _, lv := range ch.Children {
@@ -467,6 +481,10 @@ func lvmParts(disk string, i int, ch *Media) (storage.Partition, []storage.Parti
 // derived from its role so it reads clearly in /dev/mapper and crypttab.
 func cryptMapName(ch *Media) string {
 	switch {
+	case ch.Type == "lvm" && ch.VolumeGroup != "":
+		// LVM-on-LUKS: the container holds the whole group, so name it
+		// after the group (cryptvg0), not a mountpoint it has none of.
+		return "crypt" + ch.VolumeGroup
 	case ch.Mountpoint == "/":
 		return "cryptroot"
 	case ch.FsType == "swap":

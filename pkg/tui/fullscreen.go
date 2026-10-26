@@ -61,12 +61,13 @@ type lvEntry struct {
 }
 
 type partEntry struct {
-	Type  string // "part", "crypt", "lvm"
-	FS    string
-	Mount string
-	Size  string
-	VG    string // for lvm
-	LVs   []lvEntry
+	Type      string // "part", "crypt", "lvm"
+	FS        string
+	Mount     string
+	Size      string
+	VG        string // for lvm
+	Encrypted bool   // for lvm: the PV is a LUKS container (LVM-on-LUKS)
+	LVs       []lvEntry
 }
 
 // layoutToMedia turns the editor's partition list into config children,
@@ -80,6 +81,7 @@ func layoutToMedia(disk string, parts []partEntry) []*config.Media {
 		if p.Type == "lvm" {
 			m.FsType, m.Mountpoint = "", ""
 			m.VolumeGroup = p.VG
+			m.Encrypted = p.Encrypted
 			for _, lv := range p.LVs {
 				m.Children = append(m.Children, &config.Media{
 					Name: lv.Name, FsType: lv.FS, Mountpoint: lv.Mount, Size: lv.Size,
@@ -116,7 +118,7 @@ func hasESP(parts []partEntry) bool {
 
 func hasCrypt(parts []partEntry) bool {
 	for _, p := range parts {
-		if p.Type == "crypt" {
+		if p.Type == "crypt" || p.Encrypted {
 			return true
 		}
 	}
@@ -521,7 +523,7 @@ func (m model) formChoices() []string {
 	}
 	switch m.formStep {
 	case 0:
-		return []string{"part", "crypt", "lvm"}
+		return []string{"part", "crypt", "lvm", "lvm-encrypted"}
 	case 1:
 		if m.form.Type == "lvm" {
 			return nil // volumeGroup is text
@@ -604,7 +606,11 @@ func (m model) commitFormField(v string) (tea.Model, tea.Cmd) {
 
 	switch m.formStep {
 	case 0: // type
-		m.form.Type = v
+		if v == "lvm-encrypted" {
+			m.form.Type, m.form.Encrypted = "lvm", true
+		} else {
+			m.form.Type = v
+		}
 	case 1: // fs or vg
 		if m.form.Type == "lvm" {
 			if v == "" {
@@ -821,7 +827,11 @@ func (m model) partListView() string {
 func partSummary(p partEntry) string {
 	switch p.Type {
 	case "lvm":
-		return fmt.Sprintf("lvm  group=%s  %s", p.VG, orFill(p.Size))
+		enc := ""
+		if p.Encrypted {
+			enc = " (encrypted)"
+		}
+		return fmt.Sprintf("lvm  group=%s%s  %s", p.VG, enc, orFill(p.Size))
 	case "crypt":
 		return fmt.Sprintf("crypt %s  %s  %s", p.FS, orNone(p.Mount), orFill(p.Size))
 	default:

@@ -43,7 +43,11 @@ func Commands(pl *storage.Plan) [][]string {
 	var cmds [][]string
 	for _, p := range pl.Parts {
 		if p.IsPV {
-			cmds = append(cmds, PVCreate(p.Device), VGCreate(p.VGName, p.Device))
+			// EffectiveDevice is the mapper for an encrypted PV
+			// (LVM-on-LUKS) and the raw partition otherwise, so pvcreate
+			// targets the LUKS container when there is one.
+			dev := p.EffectiveDevice()
+			cmds = append(cmds, PVCreate(dev), VGCreate(p.VGName, dev))
 		}
 	}
 	for _, p := range pl.Parts {

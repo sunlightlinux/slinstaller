@@ -81,6 +81,32 @@ func TestLayoutToMediaLVM(t *testing.T) {
 	}
 }
 
+func TestLayoutToMediaEncryptedLVM(t *testing.T) {
+	parts := []partEntry{
+		{Type: "part", FS: "vfat", Mount: "/boot/efi", Size: "512M"},
+		{Type: "lvm", VG: "vg0", Encrypted: true, Size: "rest", LVs: []lvEntry{
+			{Name: "root", FS: "ext4", Mount: "/", Size: "4G"},
+		}},
+	}
+	// The editor flags encryption, so the layout needs a passphrase.
+	if !hasCrypt(parts) {
+		t.Error("encrypted lvm should count as crypt (needs passphrase)")
+	}
+
+	cfg := planOf(t, parts)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	plan, err := cfg.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	pv := plan.Parts[1]
+	if !pv.IsPV || !pv.Encrypted || pv.EffectiveDevice() != "/dev/mapper/cryptvg0" {
+		t.Errorf("PV should be an encrypted container on the mapper: %+v", pv)
+	}
+}
+
 func TestCanInstall(t *testing.T) {
 	m := newModel(oneDisk())
 	if m.canInstall() {

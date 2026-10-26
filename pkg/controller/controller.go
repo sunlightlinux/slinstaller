@@ -347,14 +347,26 @@ func (in *installer) bootloader() error {
 	}
 
 	// An encrypted root must be unlocked by the initramfs before the
-	// kernel can mount it, so the root's LUKS UUID goes on the command
-	// line for dracut's rd.luks to pick up. A root on LVM needs its group
-	// activated the same way — rd.lvm.lv.
+	// kernel can mount it, so the LUKS UUID on the root's path goes on the
+	// command line for dracut's rd.luks to pick up. A root on LVM needs its
+	// group activated the same way — rd.lvm.lv.
+	//
+	// The root's path may be: an encrypted root partition directly; or (for
+	// LVM-on-LUKS) the encrypted physical volume of the group that holds the
+	// root logical volume — found by matching the root LV's group.
+	rootVG := ""
+	for _, p := range in.plan.Parts {
+		if p.LV && p.Mountpoint == "/" {
+			rootVG = p.VGName
+		}
+	}
+
 	encrypted := false
 	for _, p := range in.plan.Parts {
 		if p.Encrypted {
 			encrypted = true
-			if p.Mountpoint == "/" {
+			onRootPath := p.Mountpoint == "/" || (p.IsPV && rootVG != "" && p.VGName == rootVG)
+			if onRootPath {
 				uuid, err := luks.UUID(p.Device)
 				if err != nil {
 					return err
