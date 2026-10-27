@@ -26,8 +26,10 @@ func contains(ss []string, want string) bool {
 }
 
 func TestCrypttabLine(t *testing.T) {
-	got := CrypttabLine("cryptroot", "1111-2222")
-	if got != "cryptroot UUID=1111-2222 none luks\n" {
-		t.Errorf("CrypttabLine = %q", got)
+	if got := CrypttabLine("cryptroot", "1111-2222", ""); got != "cryptroot UUID=1111-2222 none luks\n" {
+		t.Errorf("CrypttabLine (no keyfile) = %q", got)
+	}
+	if got := CrypttabLine("cryptroot", "1111-2222", "/crypto_keyfile.bin"); got != "cryptroot UUID=1111-2222 /crypto_keyfile.bin luks\n" {
+		t.Errorf("CrypttabLine (keyfile) = %q", got)
 	}
 }

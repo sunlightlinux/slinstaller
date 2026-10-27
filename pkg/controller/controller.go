@@ -16,6 +16,7 @@
 package controller
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io"
 	"os"
@@ -103,6 +104,11 @@ type installer struct {
 	plan *storage.Plan
 	opts Options
 	mnt  *storage.Mounter
+
+	// keyfile is the initramfs LUKS keyfile path, set by the crypttab stage
+	// when /boot is encrypted and read by the bootloader stage; empty means
+	// the passphrase is entered at boot.
+	keyfile string
 }
 
 type stage struct {
@@ -322,25 +328,81 @@ func (in *installer) fstab() error {
 
 // crypttab writes /etc/crypttab for the encrypted partitions, so the
 // installed system unlocks them at boot by their LUKS UUID.
+//
+// When /boot is encrypted, GRUB already prompts for the passphrase to read
+// the kernel, so a second prompt in the initramfs is redundant: a keyfile
+// is embedded in the (encrypted, GRUB-protected) initramfs and crypttab
+// references it, so the volumes unlock without re-asking. On an unencrypted
+// /boot no keyfile is used — it would sit in the clear.
 func (in *installer) crypttab() error {
-	var tab strings.Builder
+	var enc []storage.Partition
 	for _, p := range in.plan.Parts {
-		if !p.Encrypted {
-			continue
+		if p.Encrypted {
+			enc = append(enc, p)
 		}
+	}
+	if len(enc) == 0 {
+		return nil
+	}
+
+	if in.bootOnEncrypted() {
+		if err := in.setupKeyfile(enc); err != nil {
+			return err
+		}
+	}
+
+	var tab strings.Builder
+	for _, p := range enc {
 		uuid, err := luks.UUID(p.Device)
 		if err != nil {
 			return err
 		}
-		tab.WriteString(luks.CrypttabLine(p.MapName, uuid))
-	}
-	if tab.Len() == 0 {
-		return nil
+		tab.WriteString(luks.CrypttabLine(p.MapName, uuid, in.keyfile))
 	}
 	path := filepath.Join(in.opts.Root, "etc", "crypttab")
 	if err := os.WriteFile(path, []byte(tab.String()), 0o600); err != nil {
 		return fmt.Errorf("write crypttab: %w", err)
 	}
+	return nil
+}
+
+// keyfilePath is where the initramfs keyfile lives, on the (encrypted)
+// target root.
+const keyfilePath = "/crypto_keyfile.bin"
+
+// setupKeyfile creates a random keyfile on the target, adds it as a second
+// key slot to every encrypted volume, and tells dracut to embed it in the
+// initramfs — so the initramfs unlocks the volumes with the keyfile rather
+// than a second passphrase prompt. It sets in.keyfile, read by crypttab and
+// the bootloader stage. Only called when /boot is encrypted, so the keyfile
+// (and the initramfs holding it) is itself on encrypted, GRUB-locked storage.
+func (in *installer) setupKeyfile(enc []storage.Partition) error {
+	key := make([]byte, 2048)
+	if _, err := rand.Read(key); err != nil {
+		return fmt.Errorf("generate keyfile: %w", err)
+	}
+	full := filepath.Join(in.opts.Root, keyfilePath)
+	if err := os.WriteFile(full, key, 0o400); err != nil {
+		return fmt.Errorf("write keyfile: %w", err)
+	}
+
+	for _, p := range enc {
+		if err := luks.AddKey(p.Device, full, in.opts.Passphrase, in.output()); err != nil {
+			return err
+		}
+	}
+
+	// Embed the keyfile in the initramfs dracut builds later.
+	dir := filepath.Join(in.opts.Root, "etc", "dracut.conf.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	conf := "# Written by slinstaller.\ninstall_items+=\" " + keyfilePath + " \"\n"
+	if err := os.WriteFile(filepath.Join(dir, "10-slinstaller-keyfile.conf"), []byte(conf), 0o644); err != nil {
+		return fmt.Errorf("write dracut keyfile conf: %w", err)
+	}
+
+	in.keyfile = keyfilePath
 	return nil
 }
 
@@ -419,6 +481,11 @@ func (in *installer) bootloader() error {
 		if p.LV && p.Mountpoint == "/" {
 			kargs = append(kargs, "rd.lvm.lv="+p.VGName+"/"+p.LVName)
 		}
+	}
+	// When a keyfile was embedded (encrypted /boot), point the initramfs at
+	// it so it unlocks the volumes without a second passphrase prompt.
+	if in.keyfile != "" {
+		kargs = append(kargs, "rd.luks.key="+in.keyfile)
 	}
 
 	// A root on a RAID array must have the array assembled by the initramfs

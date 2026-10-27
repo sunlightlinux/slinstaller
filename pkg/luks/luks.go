@@ -54,6 +54,15 @@ func Open(device, name, passphrase string, out io.Writer) error {
 	return run(OpenArgs(device, name), passphrase, out)
 }
 
+// AddKey adds keyfile as a second key slot on device, authenticating with
+// the existing passphrase (read from stdin). It lets the initramfs unlock
+// the volume with the keyfile instead of a second passphrase prompt, when
+// /boot is encrypted and the keyfile rides inside the (encrypted) initramfs.
+func AddKey(device, keyfile, passphrase string, out io.Writer) error {
+	args := []string{"cryptsetup", "--batch-mode", "--key-file=-", "luksAddKey", device, keyfile}
+	return run(args, passphrase, out)
+}
+
 func run(args []string, passphrase string, out io.Writer) error {
 	if out == nil {
 		out = os.Stderr
@@ -80,7 +89,13 @@ func UUID(device string) (string, error) {
 }
 
 // CrypttabLine renders an /etc/crypttab entry that unlocks the volume at
-// boot by its LUKS UUID.
-func CrypttabLine(name, uuid string) string {
-	return fmt.Sprintf("%s UUID=%s none luks\n", name, uuid)
+// boot by its LUKS UUID. keyfile is the key source: a path when a keyfile
+// unlocks it (an encrypted /boot, so the initramfs does not re-prompt), or
+// empty for "none" (the passphrase is entered at boot).
+func CrypttabLine(name, uuid, keyfile string) string {
+	key := "none"
+	if keyfile != "" {
+		key = keyfile
+	}
+	return fmt.Sprintf("%s UUID=%s %s luks\n", name, uuid, key)
 }

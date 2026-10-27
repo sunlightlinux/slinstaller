@@ -51,10 +51,16 @@ for what will and will not be allowed to change once releases begin.
   in the config (clr-installer's marker) is luksFormat'd and opened to a
   mapper, and its filesystem is made and mounted there
   (`storage.Partition.EffectiveDevice`). The controller writes
-  `/etc/crypttab` by LUKS UUID, adds `rd.luks.uuid=` to the kernel command
-  line for an encrypted root, and rebuilds the initramfs so the system
-  unlocks at boot. The passphrase comes from `SLINSTALLER_LUKS_PASSPHRASE`
-  or a prompt — never from the config, and never in a process's argv.
+  `/etc/crypttab` by LUKS UUID, adds `rd.luks.uuid=` for *every* encrypted
+  volume (Sunlight's runit base has no service to process crypttab for the
+  non-root ones, so they are all unlocked in the initramfs), and rebuilds the
+  initramfs so the system unlocks at boot. The passphrase comes from
+  `SLINSTALLER_LUKS_PASSPHRASE` or a prompt — never from the config, and
+  never in a process's argv. When `/boot` is encrypted (so GRUB already
+  prompts once), a random keyfile is added as a second key slot, embedded in
+  the encrypted initramfs and referenced by crypttab and `rd.luks.key`, so
+  the initramfs unlocks without a second prompt — one passphrase to boot. On
+  an unencrypted `/boot` no keyfile is used (it would sit in the clear).
 - `pkg/lvm` — LVM: a partition typed `lvm` is a physical volume carrying
   a `volumeGroup`, and its children are logical volumes. The controller
   runs `pvcreate`/`vgcreate`/`lvcreate` between partitioning and mkfs, the
