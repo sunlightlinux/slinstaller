@@ -37,6 +37,32 @@ func VerifyConnectivity(url string) error {
 	return nil
 }
 
+// WaitForConnectivity retries VerifyConnectivity until url answers or
+// wait has passed. Just after boot the network is usually still coming
+// up -- dhcpcd backgrounds at once, then spends seconds probing its
+// address before applying it -- so one attempt fails installs that a
+// short wait would let through. notify, if set, is called once, before
+// the first retry, so the operator knows why nothing is happening.
+func WaitForConnectivity(url string, wait time.Duration, notify func()) error {
+	return retry(func() error { return VerifyConnectivity(url) }, wait, 3*time.Second, notify)
+}
+
+// retry calls check until it succeeds or wait has passed, sleeping every
+// between attempts, and returns the last error.
+func retry(check func() error, wait, every time.Duration, notify func()) error {
+	deadline := time.Now().Add(wait)
+	err := check()
+	for err != nil && time.Now().Add(every).Before(deadline) {
+		if notify != nil {
+			notify()
+			notify = nil
+		}
+		time.Sleep(every)
+		err = check()
+	}
+	return err
+}
+
 // Addr is one static address on an interface.
 type Addr struct {
 	IP      string

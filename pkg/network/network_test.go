@@ -1,10 +1,12 @@
 package network
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDhcpcdConfStatic(t *testing.T) {
@@ -138,5 +140,40 @@ func TestVerifyConnectivity(t *testing.T) {
 	// A port nothing listens on is unreachable.
 	if err := VerifyConnectivity("http://127.0.0.1:1"); err == nil {
 		t.Error("unreachable URL reported reachable")
+	}
+}
+
+func TestRetry(t *testing.T) {
+	// Network comes up on the third attempt: retry gets there, and
+	// says once that it is waiting.
+	calls, notified := 0, 0
+	err := retry(func() error {
+		calls++
+		if calls < 3 {
+			return errors.New("no route")
+		}
+		return nil
+	}, time.Second, time.Millisecond, func() { notified++ })
+	if err != nil {
+		t.Fatalf("retry = %v, want success on the third attempt", err)
+	}
+	if calls != 3 || notified != 1 {
+		t.Errorf("calls = %d, notified = %d; want 3 and 1", calls, notified)
+	}
+
+	// Never comes up: the last error comes back once the wait is spent.
+	start := time.Now()
+	err = retry(func() error { return errors.New("no route") }, 30*time.Millisecond, 5*time.Millisecond, nil)
+	if err == nil || err.Error() != "no route" {
+		t.Errorf("retry = %v, want the last error", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Errorf("retry ran %v, far past its 30ms wait", time.Since(start))
+	}
+
+	// Up at once: no wait, no notice.
+	notified = 0
+	if err := retry(func() error { return nil }, time.Second, time.Millisecond, func() { notified++ }); err != nil || notified != 0 {
+		t.Errorf("immediate success: err = %v, notified = %d", err, notified)
 	}
 }

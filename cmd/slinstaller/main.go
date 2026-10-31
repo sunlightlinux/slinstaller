@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -278,7 +279,8 @@ func run(args []string) error {
 		// reachable before wiping, not after. Local (non-http) repos are
 		// skipped.
 		if strings.HasPrefix(repo, "http") {
-			if err := network.VerifyConnectivity(repo); err != nil {
+			waiting := func() { fmt.Fprintln(os.Stderr, "waiting for the network...") }
+			if err := network.WaitForConnectivity(repo, time.Minute, waiting); err != nil {
 				return fmt.Errorf("%w — check the network/proxy, or pass --repo", err)
 			}
 		}
