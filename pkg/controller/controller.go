@@ -326,33 +326,52 @@ func (in *installer) fstab() error {
 	return in.crypttab()
 }
 
-// crypttab writes /etc/crypttab for the encrypted partitions, so the
-// installed system unlocks them at boot by their LUKS UUID.
+// crypttab arranges the LUKS unlocks so the whole install takes one
+// passphrase, splitting the work between the two things that unlock at
+// boot: the dracut initramfs and Void's runit crypttab service.
 //
-// When /boot is encrypted, GRUB already prompts for the passphrase to read
-// the kernel, so a second prompt in the initramfs is redundant: a keyfile
-// is embedded in the (encrypted, GRUB-protected) initramfs and crypttab
-// references it, so the volumes unlock without re-asking. On an unencrypted
-// /boot no keyfile is used — it would sit in the clear.
+//   - The ROOT volume is unlocked by the initramfs (rd.luks.uuid, set in the
+//     bootloader stage). dracut asks for the passphrase — unless /boot is
+//     encrypted, in which case GRUB already asked and a keyfile embedded in
+//     the (encrypted) initramfs unlocks it instead.
+//   - The NON-root volumes (a crypt /home, /data, …) are unlocked after root
+//     is mounted, by runit reading /etc/crypttab, with a keyfile that lives
+//     on the (now-unlocked) encrypted root — so no prompt, and the keyfile is
+//     never on unencrypted storage.
+//
+// So /etc/crypttab lists only the non-root volumes: listing root would make
+// the runit service ask for its passphrase a second time (dracut already
+// opened it).
 func (in *installer) crypttab() error {
-	var enc []storage.Partition
+	var enc, nonRoot []storage.Partition
 	for _, p := range in.plan.Parts {
-		if p.Encrypted {
-			enc = append(enc, p)
+		if !p.Encrypted {
+			continue
+		}
+		enc = append(enc, p)
+		if !in.isRootCrypt(p) {
+			nonRoot = append(nonRoot, p)
 		}
 	}
 	if len(enc) == 0 {
 		return nil
 	}
 
-	if in.bootOnEncrypted() {
+	// A keyfile is needed when there are non-root volumes (for the runit
+	// service) or when /boot is encrypted (for the initramfs to open root
+	// without re-prompting). A lone crypt root on an unencrypted /boot needs
+	// none — dracut just asks once.
+	if len(nonRoot) > 0 || in.bootOnEncrypted() {
 		if err := in.setupKeyfile(enc); err != nil {
 			return err
 		}
 	}
 
+	if len(nonRoot) == 0 {
+		return nil
+	}
 	var tab strings.Builder
-	for _, p := range enc {
+	for _, p := range nonRoot {
 		uuid, err := luks.UUID(p.Device)
 		if err != nil {
 			return err
@@ -366,22 +385,52 @@ func (in *installer) crypttab() error {
 	return nil
 }
 
-// keyfilePath is where the initramfs keyfile lives, on the (encrypted)
-// target root.
-const keyfilePath = "/crypto_keyfile.bin"
+// rootVGName is the LVM volume group that holds the root logical volume, or
+// "" when root is not on LVM.
+func (in *installer) rootVGName() string {
+	for _, p := range in.plan.Parts {
+		if p.LV && p.Mountpoint == "/" {
+			return p.VGName
+		}
+	}
+	return ""
+}
 
-// setupKeyfile creates a random keyfile on the target, adds it as a second
-// key slot to every encrypted volume, and tells dracut to embed it in the
-// initramfs — so the initramfs unlocks the volumes with the keyfile rather
-// than a second passphrase prompt. It sets in.keyfile, read by crypttab and
-// the bootloader stage. Only called when /boot is encrypted, so the keyfile
-// (and the initramfs holding it) is itself on encrypted, GRUB-locked storage.
+// isRootCrypt reports whether an encrypted partition is on the root's path,
+// so the initramfs must open it to mount root: the crypt root itself, or
+// the encrypted physical volume of root's group (LVM-on-LUKS).
+func (in *installer) isRootCrypt(p storage.Partition) bool {
+	if !p.Encrypted {
+		return false
+	}
+	if p.Mountpoint == "/" {
+		return true
+	}
+	vg := in.rootVGName()
+	return p.IsPV && vg != "" && p.VGName == vg
+}
+
+// keyfilePath is where the LUKS keyfile lives on the (encrypted) target
+// root: the runit service reads it there to open the non-root volumes, and
+// for an encrypted /boot it is also embedded in the initramfs for dracut.
+const keyfilePath = "/etc/cryptkeys/slinstaller.key"
+
+// setupKeyfile creates a random keyfile on the encrypted root and adds it as
+// a second key slot to every encrypted volume, so the volumes can be opened
+// without the passphrase. It sets in.keyfile (used by crypttab and, for an
+// encrypted /boot, the bootloader). The keyfile is embedded in the initramfs
+// only when /boot is encrypted — there the initramfs is itself on encrypted,
+// GRUB-locked storage; on an unencrypted /boot it must not ride in the
+// initramfs, so it stays on the root for the post-boot runit service alone.
 func (in *installer) setupKeyfile(enc []storage.Partition) error {
 	key := make([]byte, 2048)
 	if _, err := rand.Read(key); err != nil {
 		return fmt.Errorf("generate keyfile: %w", err)
 	}
 	full := filepath.Join(in.opts.Root, keyfilePath)
+	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(full), err)
+	}
 	if err := os.WriteFile(full, key, 0o400); err != nil {
 		return fmt.Errorf("write keyfile: %w", err)
 	}
@@ -392,14 +441,17 @@ func (in *installer) setupKeyfile(enc []storage.Partition) error {
 		}
 	}
 
-	// Embed the keyfile in the initramfs dracut builds later.
-	dir := filepath.Join(in.opts.Root, "etc", "dracut.conf.d")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
-	}
-	conf := "# Written by slinstaller.\ninstall_items+=\" " + keyfilePath + " \"\n"
-	if err := os.WriteFile(filepath.Join(dir, "10-slinstaller-keyfile.conf"), []byte(conf), 0o644); err != nil {
-		return fmt.Errorf("write dracut keyfile conf: %w", err)
+	if in.bootOnEncrypted() {
+		// Embed the keyfile in the initramfs dracut builds later, so it can
+		// open the root without re-prompting after GRUB.
+		dir := filepath.Join(in.opts.Root, "etc", "dracut.conf.d")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", dir, err)
+		}
+		conf := "# Written by slinstaller.\ninstall_items+=\" " + keyfilePath + " \"\n"
+		if err := os.WriteFile(filepath.Join(dir, "10-slinstaller-keyfile.conf"), []byte(conf), 0o644); err != nil {
+			return fmt.Errorf("write dracut keyfile conf: %w", err)
+		}
 	}
 
 	in.keyfile = keyfilePath
@@ -457,39 +509,35 @@ func (in *installer) bootloader() error {
 		}
 	}
 
-	// An encrypted volume must be unlocked by the initramfs before it can be
-	// mounted, so each LUKS UUID goes on the command line for dracut's
-	// rd.luks to pick up — every volume, not just the root's: dracut unlocks
-	// the root from the filesystem path, but Sunlight's runit base has no
-	// service to process /etc/crypttab for the others (a crypt /home, /data,
-	// or an encrypted LVM physical volume). A root on LVM also needs its
-	// group activated — rd.lvm.lv.
+	// The initramfs unlocks only the ROOT LUKS volume (rd.luks.uuid) — the
+	// non-root ones are opened after boot by the runit crypttab service, so
+	// naming them here too would make dracut prompt for them as well. A root
+	// on LVM also needs its group activated — rd.lvm.lv.
 	encrypted := false
 	for _, p := range in.plan.Parts {
 		if p.Encrypted {
 			encrypted = true
-			uuid, err := luks.UUID(p.Device)
-			if err != nil {
-				return err
+			if in.isRootCrypt(p) {
+				uuid, err := luks.UUID(p.Device)
+				if err != nil {
+					return err
+				}
+				kargs = append(kargs, "rd.luks.uuid="+uuid)
 			}
-			kargs = append(kargs, "rd.luks.uuid="+uuid)
 		}
 		if p.LV && p.Mountpoint == "/" {
 			kargs = append(kargs, "rd.lvm.lv="+p.VGName+"/"+p.LVName)
 		}
 	}
 	if encrypted {
-		// Tell dracut to drive the unlock from rd.luks.uuid alone and ignore
-		// /etc/crypttab. dracut would otherwise process BOTH — once per
-		// rd.luks.uuid and once per crypttab entry — asking for the
-		// passphrase twice for every volume. With this, each volume is asked
-		// once (and dracut reuses an entered passphrase for the rest).
+		// Drive the initramfs unlock from rd.luks.uuid alone and ignore the
+		// embedded /etc/crypttab: dracut would otherwise process both and ask
+		// for the passphrase twice for the root volume.
 		kargs = append(kargs, "rd.luks.crypttab=0")
 	}
-	// When a keyfile was embedded (encrypted /boot), point the initramfs at
-	// it so it unlocks the volumes without any passphrase prompt (GRUB
-	// already asked once to read the kernel).
-	if in.keyfile != "" {
+	// When /boot is encrypted the keyfile is in the initramfs; point dracut
+	// at it so it opens root without a prompt (GRUB already asked once).
+	if in.keyfile != "" && in.bootOnEncrypted() {
 		kargs = append(kargs, "rd.luks.key="+in.keyfile)
 	}
 

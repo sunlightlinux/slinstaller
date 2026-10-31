@@ -50,17 +50,19 @@ for what will and will not be allowed to change once releases begin.
 - `pkg/luks` — LUKS encryption with cryptsetup. A partition typed `crypt`
   in the config (clr-installer's marker) is luksFormat'd and opened to a
   mapper, and its filesystem is made and mounted there
-  (`storage.Partition.EffectiveDevice`). The controller writes
-  `/etc/crypttab` by LUKS UUID, adds `rd.luks.uuid=` for *every* encrypted
-  volume (Sunlight's runit base has no service to process crypttab for the
-  non-root ones, so they are all unlocked in the initramfs), and rebuilds the
-  initramfs so the system unlocks at boot. The passphrase comes from
-  `SLINSTALLER_LUKS_PASSPHRASE` or a prompt — never from the config, and
-  never in a process's argv. When `/boot` is encrypted (so GRUB already
-  prompts once), a random keyfile is added as a second key slot, embedded in
-  the encrypted initramfs and referenced by crypttab and `rd.luks.key`, so
-  the initramfs unlocks without a second prompt — one passphrase to boot. On
-  an unencrypted `/boot` no keyfile is used (it would sit in the clear).
+  (`storage.Partition.EffectiveDevice`). The whole install takes **one
+  passphrase**, splitting the unlock between the two things that run at boot.
+  The **root** volume is opened by the dracut initramfs (`rd.luks.uuid` for
+  the root volume only, `rd.luks.crypttab=0` so dracut does not also walk
+  crypttab and prompt twice); dracut asks for the passphrase, unless `/boot`
+  is encrypted, where GRUB already asked and a keyfile embedded in the
+  encrypted initramfs (`rd.luks.key`) opens it. The **non-root** volumes (a
+  crypt `/home`, `/data`, …) are opened after root is mounted by Void's runit
+  crypttab service, from an `/etc/crypttab` that lists only them, with a
+  random keyfile on the now-unlocked encrypted root (`luks.AddKey` adds it as
+  a second key slot) — so no second prompt, and the keyfile never sits on
+  unencrypted storage. The passphrase comes from `SLINSTALLER_LUKS_PASSPHRASE`
+  or a prompt — never from the config, and never in a process's argv.
 - `pkg/lvm` — LVM: a partition typed `lvm` is a physical volume carrying
   a `volumeGroup`, and its children are logical volumes. The controller
   runs `pvcreate`/`vgcreate`/`lvcreate` between partitioning and mkfs, the
