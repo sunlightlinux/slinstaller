@@ -182,6 +182,38 @@ func EnableService(root, name string) error {
 	return nil
 }
 
+// SlinitServicesDir is where slinit-services installs its service files.
+const SlinitServicesDir = "/usr/lib/slinit.d"
+
+// IsSlinitSystem reports whether the target carries slinit's boot
+// services, i.e. boots slinit rather than runit.
+func IsSlinitSystem(root string) bool {
+	_, err := os.Stat(filepath.Join(root, SlinitServicesDir, "boot"))
+	return err == nil
+}
+
+// EnableSlinitService enables a slinit service in the target by linking
+// it into /etc/slinit.d/boot.d, the directory slinit-services' boot
+// service reads its optional dependencies from. It is what `slinitctl
+// enable` does, without a running slinit. The service file must exist,
+// so a typo cannot leave a dangling link.
+func EnableSlinitService(root, name string) error {
+	target := filepath.Join(SlinitServicesDir, name)
+	if _, err := os.Stat(filepath.Join(root, target)); err != nil {
+		return fmt.Errorf("system: enable slinit service %s: %w", name, err)
+	}
+	dir := filepath.Join(root, "etc", "slinit.d", "boot.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("system: %w", err)
+	}
+	link := filepath.Join(dir, name)
+	_ = os.Remove(link)
+	if err := os.Symlink(target, link); err != nil {
+		return fmt.Errorf("system: enable slinit service %s: %w", name, err)
+	}
+	return nil
+}
+
 // User is an account to create in the target.
 type User struct {
 	Login        string

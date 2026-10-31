@@ -109,6 +109,10 @@ type installer struct {
 	opts Options
 	mnt  *storage.Mounter
 
+	// resolvCopy is the live system's resolv.conf copied into the target
+	// for install-time DNS, removed again when the install completes.
+	resolvCopy string
+
 	// keyfile is the initramfs LUKS keyfile path, set by the crypttab stage
 	// when /boot is encrypted and read by the bootloader stage; empty means
 	// the passphrase is entered at boot.
@@ -177,6 +181,14 @@ func (in *installer) run() error {
 	// A full run unmounts the finished target; a staged run leaves it
 	// mounted so the result can be inspected.
 	if in.opts.Through == "" {
+		// The live system's resolv.conf must not outlive the install. Left
+		// in place it pins the installed system to the live medium's DNS:
+		// dhcpcd hands DNS to resolvconf, and resolvconf will not replace a
+		// resolv.conf it did not write ("signature mismatch"). Removed, it
+		// is written fresh at first boot.
+		if err := removeIfPresent(in.resolvCopy); err != nil {
+			return err
+		}
 		return in.mnt.UnmountAll()
 	}
 	return nil
@@ -267,8 +279,8 @@ func (in *installer) mountMeta() error {
 		return err
 	}
 	// Give chrooted commands (and hooks) working DNS during the install.
-	// The installed system gets its own resolv.conf from dhcpcd at boot,
-	// so this is only for install time; a missing host file is not fatal.
+	// It is only for install time: run removes it once the install is
+	// done (see resolvCopy). A missing host file is not fatal.
 	if data, err := os.ReadFile("/etc/resolv.conf"); err == nil {
 		dst := filepath.Join(in.opts.Root, "etc", "resolv.conf")
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -277,6 +289,7 @@ func (in *installer) mountMeta() error {
 		if err := os.WriteFile(dst, data, 0o644); err != nil {
 			return fmt.Errorf("copy resolv.conf: %w", err)
 		}
+		in.resolvCopy = dst
 	}
 	return nil
 }
@@ -804,6 +817,14 @@ func (in *installer) network() error {
 		}
 	}
 
+	// A slinit system brings DHCP up from slinit-services' network
+	// service, which boot already depends on; runit's dhcpcd service is
+	// for a runit system. It gets sshd enabled too, so a machine
+	// installed for remote use (a VM, a headless box) can be reached
+	// after its first boot without a trip to the console.
+	if system.IsSlinitSystem(in.opts.Root) {
+		return system.EnableSlinitService(in.opts.Root, "sshd")
+	}
 	return system.EnableService(in.opts.Root, "dhcpcd")
 }
 
@@ -882,4 +903,16 @@ func bootsSlinit(root string, remove map[string]bool) bool {
 	}
 	st, err := os.Stat(filepath.Join(root, "usr", "bin", "slinit"))
 	return err == nil && st.Mode().IsRegular()
+}
+
+// removeIfPresent removes path; an empty path or a file already gone is
+// not an error.
+func removeIfPresent(path string) error {
+	if path == "" {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+	return nil
 }

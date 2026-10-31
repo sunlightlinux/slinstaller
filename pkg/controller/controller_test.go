@@ -173,3 +173,23 @@ func TestBootsSlinit(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveIfPresent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "resolv.conf")
+	if err := os.WriteFile(path, []byte("nameserver 192.168.0.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeIfPresent(path); err != nil {
+		t.Fatalf("removeIfPresent: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("%s still exists: the live medium's DNS would outlive the install", path)
+	}
+	// Already gone, or never copied: not an error.
+	if err := removeIfPresent(path); err != nil {
+		t.Errorf("second removal: %v", err)
+	}
+	if err := removeIfPresent(""); err != nil {
+		t.Errorf("empty path: %v", err)
+	}
+}

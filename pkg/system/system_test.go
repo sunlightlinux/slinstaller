@@ -212,3 +212,44 @@ func TestMachineID(t *testing.T) {
 		t.Errorf("machine-id changed from %q to %q; it must stay with the machine", got, again)
 	}
 }
+
+func TestEnableSlinitService(t *testing.T) {
+	root := t.TempDir()
+	svcDir := filepath.Join(root, "usr", "lib", "slinit.d")
+	if err := os.MkdirAll(svcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if IsSlinitSystem(root) {
+		t.Error("IsSlinitSystem with no boot service = true, want false")
+	}
+	for _, f := range []string{"boot", "sshd"} {
+		if err := os.WriteFile(filepath.Join(svcDir, f), []byte("type = internal\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !IsSlinitSystem(root) {
+		t.Error("IsSlinitSystem with slinit-services installed = false, want true")
+	}
+
+	if err := EnableSlinitService(root, "sshd"); err != nil {
+		t.Fatalf("EnableSlinitService: %v", err)
+	}
+	link := filepath.Join(root, "etc", "slinit.d", "boot.d", "sshd")
+	got, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	// An absolute path inside the installed system, as slinitctl enable
+	// writes it, so it resolves once the target is booted.
+	if got != "/usr/lib/slinit.d/sshd" {
+		t.Errorf("link -> %q, want /usr/lib/slinit.d/sshd", got)
+	}
+
+	// A service that does not exist is an error, not a dangling link.
+	if err := EnableSlinitService(root, "no-such-service"); err == nil {
+		t.Error("EnableSlinitService of a missing service: got nil, want an error")
+	}
+	if _, err := os.Lstat(filepath.Join(root, "etc", "slinit.d", "boot.d", "no-such-service")); !os.IsNotExist(err) {
+		t.Error("a link was left for a missing service")
+	}
+}
