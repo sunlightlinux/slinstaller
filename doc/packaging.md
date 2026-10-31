@@ -64,11 +64,12 @@ sunlightlinux repository exists, ship its keys here and point
 
 slinit is not in any remote repository yet, so the ISO carries its own:
 an xbps repository at **`/usr/share/slinstaller/repo`** holding the
-`slinit` and `slinit-services` packages from slpkgs, with its index:
+`slinit`, `slinit-services` and `sunlight-base` packages from slpkgs,
+with its index (`scripts/make-iso.sh` in sunlight-os builds it):
 
 ```sh
 mkdir -p <rootfs>/usr/share/slinstaller/repo
-cp slinit-<ver>_1.x86_64.xbps slinit-services-<ver>_1.x86_64.xbps \
+cp slinit-*.xbps slinit-services-*.xbps sunlight-base-*.xbps \
     <rootfs>/usr/share/slinstaller/repo/
 xbps-rindex -a <rootfs>/usr/share/slinstaller/repo/*.xbps
 ```
@@ -76,9 +77,9 @@ xbps-rindex -a <rootfs>/usr/share/slinstaller/repo/*.xbps
 slinstaller passes it to `xbps-install` ahead of the remote repository
 (`--local-repo` names others; a path without an index is skipped). A
 local repository needs no signing key — xbps verifies signatures only
-for remote ones. If the default package set asks for `slinit-services`
-and no local repository is found, the install stops in preflight,
-before any disk is touched.
+for remote ones. If the package set asks for one of these and no local
+repository is found, the install stops in preflight, before any disk is
+touched.
 
 ## 4. Tools that run in the target, not on the ISO
 
@@ -90,8 +91,8 @@ they come from the *target* packages, not the live ISO:
 - `useradd` — from `shadow`
 - `dracut` — builds the initramfs (crypt/lvm/mdraid modules, keyfile embed)
 
-The default target package set is `base-system, grub-x86_64-efi,
-glibc-locales, slinit-services`; slinstaller adds the filesystem/feature tools the layout
+The default target package set is `sunlight-base, grub-x86_64-efi`;
+slinstaller adds the filesystem/feature tools the layout
 needs (`btrfs-progs`, `xfsprogs`, `f2fs-tools`, `cryptsetup`, `lvm2`,
 `mdadm`) to what the target installs, so the installed system can fsck,
 mount, unlock and assemble its own storage at boot.
@@ -122,27 +123,30 @@ shell available if the operator exits it.
 
 ## 7. Interim vs. target state
 
-The installed system boots **slinit**. Its base is still **Void's
-`base-system`** from Void's official repository, and that pulls
-runit-void, which stays installed beside `slinit-services`: runit-void
-owns `/usr/bin/init`, so slinstaller selects slinit with
-`init=/usr/bin/slinit` on the kernel command line whenever slinit is in
-the target. Removing that argument boots runit again — a fallback, not
-the default. A config can opt out with `kernel-arguments: remove:
-[init=/usr/bin/slinit]`, and `--packages
-base-system,grub-x86_64-efi,glibc-locales` installs a runit system with
-no local repository needed (the demo VMs, which run without the ISO,
-need this).
+The installed system boots **slinit**, and has no runit. Its base is
+**`sunlight-base`**: Void's `base-system` with runit-void taken out and
+`slinit-services` put in. The two cannot share a system — both own
+`/usr/bin/init` and `halt`/`poweroff`/`reboot`/`shutdown` — and
+`slinit-services` declares the conflict, so xbps refuses the pair
+rather than letting one silently overwrite the other. Everything else
+in the base, and the packages themselves, still come from Void's
+official repository; only slinit, its services and the metapackage
+come from the local one.
 
-slinstaller also writes `/etc/machine-id`: slinit reads it as PID 1
-before any service runs, and Void creates none.
+slinstaller also puts `init=/usr/bin/slinit` on the kernel command line
+whenever slinit is in the target (`/usr/bin/init` points at it too), and
+writes `/etc/machine-id`: slinit reads it as PID 1 before any service
+runs, and Void creates none.
+
+`--packages base-system,grub-x86_64-efi,glibc-locales` still installs a
+plain runit system, with no local repository needed — the demo VMs,
+which run without the ISO, need this.
 
 When Sunlight has a remote repository of its own:
 
 - point `--repo` / the config's `swupdMirror` at the sunlightlinux repo and
   ship its keys in `/var/db/xbps/keys`;
-- the local repository becomes unnecessary, and `base-system` can give way
-  to a Sunlight base set without runit-void.
+- the local repository becomes unnecessary.
 
 Nothing in slinstaller's code is Void-specific beyond these defaults (the
 repo URL, the keys path, and the package names in

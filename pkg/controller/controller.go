@@ -514,10 +514,10 @@ func (in *installer) bootloader() error {
 		}
 	}
 
-	// slinit is Sunlight's init. base-system still pulls runit-void, which
-	// owns /usr/bin/init, so when the base install put slinit in the
-	// target it is chosen here, on the kernel command line. Dropping the
-	// argument boots runit again; a config opts out by listing it under
+	// slinit is Sunlight's init. sunlight-base points /usr/bin/init at it
+	// already; naming it on the kernel command line as well makes the
+	// choice explicit and keeps it when a base from elsewhere owns
+	// /usr/bin/init. A config opts out by listing it under
 	// kernel-arguments: remove.
 	if bootsSlinit(in.opts.Root, remove) {
 		kargs = append(kargs, slinitInitArg)

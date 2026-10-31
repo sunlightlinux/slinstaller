@@ -40,18 +40,17 @@ const (
 	// defaultLocalRepo is where the live ISO keeps the packages no remote
 	// repository has yet: slinit and slinit-services.
 	defaultLocalRepo = "/usr/share/slinstaller/repo"
-	// base-system is the Void base (it still pulls runit-void, which
-	// slinit is installed beside); grub-x86_64-efi is the UEFI bootloader
-	// (x86_64 — override --packages for another architecture);
-	// glibc-locales lets the configured locale be generated;
-	// slinit-services is slinit with its boot services, which makes the
-	// installed system boot slinit.
-	defaultPackages = "base-system,grub-x86_64-efi,glibc-locales,slinit-services"
+	// sunlight-base is Void's base-system with slinit in place of runit:
+	// the same packages minus runit-void, plus slinit-services (slinit
+	// and its boot services). It brings glibc-locales, so the configured
+	// locale can be generated. grub-x86_64-efi is the UEFI bootloader
+	// (x86_64 — override --packages for another architecture).
+	defaultPackages = "sunlight-base,grub-x86_64-efi"
 )
 
 // localOnlyPackages exist only in the live medium's repository; asking
 // for one without that repository cannot succeed.
-var localOnlyPackages = []string{"slinit", "slinit-services"}
+var localOnlyPackages = []string{"slinit", "slinit-services", "sunlight-base"}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
