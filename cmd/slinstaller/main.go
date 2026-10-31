@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -29,19 +30,28 @@ import (
 // version is overridden at build time with -ldflags "-X main.version=...".
 var version = "0.0.0-dev"
 
-// Base-system defaults. Sunlight has no package repository of its own
-// yet, so until it does slinstaller installs from Void's official repo
-// with the live medium's keys — swap these for sunlightlinux's when the
-// repo exists. base-system is what void-installer lays down (it still
-// pulls runit; slinit replaces it once it is in a repo we control).
+// Base-system defaults. Sunlight has no remote package repository of its
+// own yet, so the base comes from Void's official repo with the live
+// medium's keys, and slinit from a repository the live medium carries —
+// swap these for sunlightlinux's when that repo exists.
 const (
 	defaultRepo    = "https://repo-default.voidlinux.org/current"
 	defaultKeysDir = "/var/db/xbps/keys"
-	// base-system is the Void base; grub-x86_64-efi is the UEFI
-	// bootloader (x86_64 — override --packages for another architecture);
-	// glibc-locales lets the configured locale be generated.
-	defaultPackages = "base-system,grub-x86_64-efi,glibc-locales"
+	// defaultLocalRepo is where the live ISO keeps the packages no remote
+	// repository has yet: slinit and slinit-services.
+	defaultLocalRepo = "/usr/share/slinstaller/repo"
+	// base-system is the Void base (it still pulls runit-void, which
+	// slinit is installed beside); grub-x86_64-efi is the UEFI bootloader
+	// (x86_64 — override --packages for another architecture);
+	// glibc-locales lets the configured locale be generated;
+	// slinit-services is slinit with its boot services, which makes the
+	// installed system boot slinit.
+	defaultPackages = "base-system,grub-x86_64-efi,glibc-locales,slinit-services"
 )
+
+// localOnlyPackages exist only in the live medium's repository; asking
+// for one without that repository cannot succeed.
+var localOnlyPackages = []string{"slinit", "slinit-services"}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -57,6 +67,7 @@ func run(args []string) error {
 		through     string
 		root        string
 		repo        string
+		localRepo   string
 		keys        string
 		arch        string
 		pkgs        string
@@ -69,6 +80,8 @@ func run(args []string) error {
 	fs.StringVar(&root, "root", "/mnt", "with --apply, the target mount tree")
 	fs.StringVar(&repo, "repo", "",
 		"xbps repository for the base system (default: the config's swupdMirror, else Void's official repo)")
+	fs.StringVar(&localRepo, "local-repo", defaultLocalRepo,
+		"comma-separated xbps repositories on the live medium, searched before --repo (slinit comes from here); paths without a repository index are skipped")
 	fs.StringVar(&keys, "keys", defaultKeysDir, "directory of xbps signing keys to seed into the target")
 	fs.StringVar(&arch, "arch", "", "XBPS_TARGET_ARCH for the base system (default: host architecture)")
 	fs.StringVar(&pkgs, "packages", defaultPackages, "comma-separated base packages to install")
@@ -190,14 +203,16 @@ func run(args []string) error {
 	for _, p := range layoutPackages(plan) {
 		addPkg(p)
 	}
+	localRepos := presentRepos(strings.Split(localRepo, ","))
 
 	opts := controller.Options{
-		Root:     root,
-		Through:  through,
-		Repo:     repo,
-		KeysDir:  keys,
-		Arch:     arch,
-		Packages: packages,
+		Root:       root,
+		Through:    through,
+		LocalRepos: localRepos,
+		Repo:       repo,
+		KeysDir:    keys,
+		Arch:       arch,
+		Packages:   packages,
 		// Stream progress and command output so the operator sees the
 		// install work rather than a silent pause.
 		Runner: storage.VerboseRunner,
@@ -235,6 +250,13 @@ func run(args []string) error {
 		if missing := storage.MissingTools(required); len(missing) > 0 {
 			return fmt.Errorf("missing tools on the live system: %s — install them and retry",
 				strings.Join(missing, ", "))
+		}
+
+		// slinit is not in any remote repository yet. Without the live
+		// medium's repository the install would fail at base-install —
+		// after the disk is wiped — so fail here instead.
+		if err := checkLocalPackages(packages, localRepos, localRepo); err != nil {
+			return err
 		}
 
 		// Confirm each target disk exists and is a whole disk before we
@@ -423,4 +445,39 @@ func confirm(in *bufio.Reader, disks []string) bool {
 		return false
 	}
 	return strings.TrimSpace(line) == disks[0]
+}
+
+// presentRepos keeps the paths that hold an xbps repository index
+// (<arch>-repodata), in order; anything else is skipped, so the default
+// --local-repo is harmless on a system that does not carry one.
+func presentRepos(paths []string) []string {
+	var out []string
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if m, _ := filepath.Glob(filepath.Join(p, "*-repodata")); len(m) > 0 {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// checkLocalPackages fails when a package that only the live medium's
+// repository carries is asked for and no such repository was found.
+// tried is what --local-repo named, for the message.
+func checkLocalPackages(packages, localRepos []string, tried string) error {
+	if len(localRepos) > 0 {
+		return nil
+	}
+	for _, p := range packages {
+		for _, l := range localOnlyPackages {
+			if p == l {
+				return fmt.Errorf("%s is only in the live medium's repository, and none was found at %s — "+
+					"pass --local-repo, or leave it out of --packages to install a runit system", p, tried)
+			}
+		}
+	}
+	return nil
 }

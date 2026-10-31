@@ -10,6 +10,8 @@
 package system
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +29,30 @@ func Hostname(root, name string) error {
 	}
 	if err := os.WriteFile(path, []byte(name+"\n"), 0o644); err != nil {
 		return fmt.Errorf("system: write hostname: %w", err)
+	}
+	return nil
+}
+
+// MachineID writes /etc/machine-id in the target: a random 128-bit ID as
+// 32 lowercase hex digits, the format systemd defines and slinit reads.
+// slinit's journal and slinit-logind key on it, and slinit reads it as
+// PID 1 before any boot service runs, so it must exist when the system
+// first boots — on Void nothing else creates it. An existing non-empty
+// file is kept: the ID is meant to stay with the machine.
+func MachineID(root string) error {
+	path := filepath.Join(root, "etc", "machine-id")
+	if st, err := os.Stat(path); err == nil && st.Size() > 0 {
+		return nil
+	}
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return fmt.Errorf("system: machine-id: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("system: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(hex.EncodeToString(id[:])+"\n"), 0o444); err != nil {
+		return fmt.Errorf("system: write machine-id: %w", err)
 	}
 	return nil
 }

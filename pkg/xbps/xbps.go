@@ -26,6 +26,12 @@ type Options struct {
 	// Repo is the xbps repository URL.
 	Repo string
 
+	// LocalRepos are repositories on the live medium, passed to
+	// xbps-install ahead of Repo. They carry what Repo does not — slinit
+	// and its services, which no remote repository has yet. xbps checks
+	// signatures only for remote repositories, so these need no key.
+	LocalRepos []string
+
 	// KeysDir holds the repository signing keys to seed into the target
 	// before installing; without them xbps cannot verify what it
 	// fetches. On the live medium this is /var/db/xbps/keys. Empty skips
@@ -87,7 +93,11 @@ func (o Options) Commands() ([][]string, error) {
 		install = append(install, "env")
 		install = append(install, envs...)
 	}
-	install = append(install, "xbps-install", "-Sy", "-R", o.Repo, "-r", o.Root)
+	install = append(install, "xbps-install", "-Sy")
+	for _, r := range o.LocalRepos {
+		install = append(install, "-R", r)
+	}
+	install = append(install, "-R", o.Repo, "-r", o.Root)
 	install = append(install, o.Packages...)
 	cmds = append(cmds, install)
 

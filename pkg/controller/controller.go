@@ -54,6 +54,10 @@ type Options struct {
 	Arch     string
 	Packages []string
 
+	// LocalRepos are xbps repositories on the live medium, searched ahead
+	// of Repo — where slinit and slinit-services come from.
+	LocalRepos []string
+
 	// Passphrase unlocks the LUKS partitions. Required when the config
 	// has any encrypted partition; ignored otherwise.
 	Passphrase string
@@ -299,12 +303,13 @@ func (in *installer) saveConfig() error {
 
 func (in *installer) baseInstall() error {
 	cmds, err := xbps.Options{
-		Root:     in.opts.Root,
-		Repo:     in.opts.Repo,
-		KeysDir:  in.opts.KeysDir,
-		Arch:     in.opts.Arch,
-		Proxy:    in.cfg.HTTPSProxy,
-		Packages: in.opts.Packages,
+		Root:       in.opts.Root,
+		Repo:       in.opts.Repo,
+		LocalRepos: in.opts.LocalRepos,
+		KeysDir:    in.opts.KeysDir,
+		Arch:       in.opts.Arch,
+		Proxy:      in.cfg.HTTPSProxy,
+		Packages:   in.opts.Packages,
 	}.Commands()
 	if err != nil {
 		return err
@@ -497,8 +502,8 @@ func (in *installer) bootloader() error {
 	// whole default command line itself, so a removed argument is simply
 	// one slinstaller does not write.
 	var kargs []string
+	remove := map[string]bool{}
 	if in.cfg.KernelArguments != nil {
-		remove := map[string]bool{}
 		for _, r := range in.cfg.KernelArguments.Remove {
 			remove[r] = true
 		}
@@ -509,8 +514,18 @@ func (in *installer) bootloader() error {
 		}
 	}
 
+	// slinit is Sunlight's init. base-system still pulls runit-void, which
+	// owns /usr/bin/init, so when the base install put slinit in the
+	// target it is chosen here, on the kernel command line. Dropping the
+	// argument boots runit again; a config opts out by listing it under
+	// kernel-arguments: remove.
+	if bootsSlinit(in.opts.Root, remove) {
+		kargs = append(kargs, slinitInitArg)
+	}
+
 	// The initramfs unlocks only the ROOT LUKS volume (rd.luks.uuid) — the
-	// non-root ones are opened after boot by the runit crypttab service, so
+	// non-root ones are opened after boot from /etc/crypttab (by
+	// slinit-services' filesystems step, or runit's core services), so
 	// naming them here too would make dracut prompt for them as well. A root
 	// on LVM also needs its group activated — rd.lvm.lv.
 	encrypted := false
@@ -702,6 +717,11 @@ func (in *installer) firstBoot() error {
 	if err := system.Hostname(root, in.cfg.Hostname); err != nil {
 		return err
 	}
+	// slinit reads the machine ID as PID 1 before any service runs, so it
+	// has to exist before the first boot, not be made during it.
+	if err := system.MachineID(root); err != nil {
+		return err
+	}
 	if err := system.Timezone(root, in.cfg.Timezone); err != nil {
 		return err
 	}
@@ -848,4 +868,18 @@ func stageNames(stages []stage) string {
 		names[i] = s.name
 	}
 	return strings.Join(names, ", ")
+}
+
+// slinitInitArg makes slinit PID 1.
+const slinitInitArg = "init=/usr/bin/slinit"
+
+// bootsSlinit reports whether the installed system should boot slinit:
+// the base install put it in the target, and the config did not remove
+// the argument.
+func bootsSlinit(root string, remove map[string]bool) bool {
+	if remove[slinitInitArg] {
+		return false
+	}
+	st, err := os.Stat(filepath.Join(root, "usr", "bin", "slinit"))
+	return err == nil && st.Mode().IsRegular()
 }

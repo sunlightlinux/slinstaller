@@ -74,3 +74,22 @@ func TestCommandsProxy(t *testing.T) {
 		t.Errorf("install command missing proxy env: %s", install)
 	}
 }
+
+func TestCommandsLocalRepos(t *testing.T) {
+	// The live medium's own repositories come first, so a package only
+	// they carry (slinit-services) is found, and the remote one last.
+	cmds, err := Options{
+		Root:       "/mnt",
+		Repo:       "https://repo-default.voidlinux.org/current",
+		LocalRepos: []string{"/usr/share/slinstaller/repo", "/media/extra"},
+		Packages:   []string{"base-system", "slinit-services"},
+	}.Commands()
+	if err != nil {
+		t.Fatalf("Commands: %v", err)
+	}
+	want := "xbps-install -Sy -R /usr/share/slinstaller/repo -R /media/extra " +
+		"-R https://repo-default.voidlinux.org/current -r /mnt base-system slinit-services"
+	if got := strings.Join(cmds[0], " "); got != want {
+		t.Errorf("install =\n  %s\nwant\n  %s", got, want)
+	}
+}

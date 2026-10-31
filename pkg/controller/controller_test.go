@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -141,5 +143,33 @@ func TestInterfacesFromConfig(t *testing.T) {
 	}
 	if !found {
 		t.Error("eth1 missing from result")
+	}
+}
+
+func TestBootsSlinit(t *testing.T) {
+	withSlinit := t.TempDir()
+	bin := filepath.Join(withSlinit, "usr", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "slinit"), []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name   string
+		root   string
+		remove map[string]bool
+		want   bool
+	}{
+		{"slinit installed", withSlinit, nil, true},
+		{"slinit not installed (runit-only base)", t.TempDir(), nil, false},
+		{"config removes init=", withSlinit, map[string]bool{slinitInitArg: true}, false},
+		{"unrelated removal", withSlinit, map[string]bool{"quiet": true}, true},
+	}
+	for _, c := range cases {
+		if got := bootsSlinit(c.root, c.remove); got != c.want {
+			t.Errorf("%s: bootsSlinit = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

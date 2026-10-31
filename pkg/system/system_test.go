@@ -187,3 +187,28 @@ func TestWheelSudo(t *testing.T) {
 		t.Errorf("mode = %o, want 440", info.Mode().Perm())
 	}
 }
+
+func TestMachineID(t *testing.T) {
+	root := t.TempDir()
+	if err := MachineID(root); err != nil {
+		t.Fatalf("MachineID: %v", err)
+	}
+	path := filepath.Join(root, "etc", "machine-id")
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	id := strings.TrimSuffix(string(got), "\n")
+	if len(id) != 32 || strings.Trim(id, "0123456789abcdef") != "" {
+		t.Errorf("machine-id = %q, want 32 lowercase hex digits", id)
+	}
+
+	// An existing ID is kept, not regenerated.
+	if err := MachineID(root); err != nil {
+		t.Fatalf("MachineID again: %v", err)
+	}
+	again, _ := os.ReadFile(path)
+	if string(again) != string(got) {
+		t.Errorf("machine-id changed from %q to %q; it must stay with the machine", got, again)
+	}
+}
