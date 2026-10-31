@@ -457,17 +457,13 @@ func (in *installer) bootloader() error {
 		}
 	}
 
-	// An encrypted root must be unlocked by the initramfs before the
-	// kernel can mount it, so the LUKS UUID on the root's path goes on the
-	// command line for dracut's rd.luks to pick up. A root on LVM needs its
-	// group activated the same way — rd.lvm.lv.
-	//
-	// Every LUKS volume is named, not just the root's: dracut unlocks the
-	// root itself from the filesystem path, but Sunlight's runit base has no
+	// An encrypted volume must be unlocked by the initramfs before it can be
+	// mounted, so each LUKS UUID goes on the command line for dracut's
+	// rd.luks to pick up — every volume, not just the root's: dracut unlocks
+	// the root from the filesystem path, but Sunlight's runit base has no
 	// service to process /etc/crypttab for the others (a crypt /home, /data,
-	// or an encrypted LVM physical volume), so they are unlocked up front in
-	// the initramfs too. With one passphrase, dracut prompts once and reuses
-	// it for the rest.
+	// or an encrypted LVM physical volume). A root on LVM also needs its
+	// group activated — rd.lvm.lv.
 	encrypted := false
 	for _, p := range in.plan.Parts {
 		if p.Encrypted {
@@ -482,8 +478,17 @@ func (in *installer) bootloader() error {
 			kargs = append(kargs, "rd.lvm.lv="+p.VGName+"/"+p.LVName)
 		}
 	}
+	if encrypted {
+		// Tell dracut to drive the unlock from rd.luks.uuid alone and ignore
+		// /etc/crypttab. dracut would otherwise process BOTH — once per
+		// rd.luks.uuid and once per crypttab entry — asking for the
+		// passphrase twice for every volume. With this, each volume is asked
+		// once (and dracut reuses an entered passphrase for the rest).
+		kargs = append(kargs, "rd.luks.crypttab=0")
+	}
 	// When a keyfile was embedded (encrypted /boot), point the initramfs at
-	// it so it unlocks the volumes without a second passphrase prompt.
+	// it so it unlocks the volumes without any passphrase prompt (GRUB
+	// already asked once to read the kernel).
 	if in.keyfile != "" {
 		kargs = append(kargs, "rd.luks.key="+in.keyfile)
 	}
