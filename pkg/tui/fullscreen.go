@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,7 +13,36 @@ import (
 
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
+	"github.com/sunlightlinux/slinstaller/pkg/network"
 )
+
+// --- Test Network Settings: a secondary-progress popup ---
+
+// netTestTarget is the endpoint the connectivity check probes. A plain,
+// widely-reachable host so the test reflects general network health, not a
+// specific mirror.
+const netTestTarget = "https://repo-default.voidlinux.org/current"
+
+type spinnerTickMsg struct{}
+type netTestDoneMsg struct{ result string }
+
+var spinnerFrames = []string{"|", "/", "-", "\\"}
+
+// spinnerTickCmd schedules the next spinner frame.
+func spinnerTickCmd() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return spinnerTickMsg{} })
+}
+
+// testNetCmd runs the connectivity check off the UI goroutine and reports
+// the outcome as a message.
+func testNetCmd() tea.Cmd {
+	return func() tea.Msg {
+		if err := network.VerifyConnectivity(netTestTarget); err != nil {
+			return netTestDoneMsg{result: "✗ No connectivity: " + err.Error()}
+		}
+		return netTestDoneMsg{result: "✓ Network is reachable."}
+	}
+}
 
 // RunFullscreen drives the install as a full-screen menu styled after the
 // Clear Linux minimal-ISO installer: a blue panel with [R] Required / [A]
@@ -191,40 +221,51 @@ func hasCrypt(parts []partEntry) bool {
 
 type section int
 
-// The hub sections, grouped the way clr-installer groups them: the
-// everyday choices under [R] Required, the ones most installs leave at
-// their defaults under [A] Advanced. Installation Media is one section
-// (disk + partitions), as in clr's media_config page.
+// The hub sections, named and ordered exactly as clr-installer's TUI menu:
+// the Required tab first (Timezone … Telemetry), then the Advanced tab
+// (Network … Save Configuration). This is the phase-1 1:1 match; some
+// sections (Telemetry, Bundles, Automatic OS Updates) are presented for
+// fidelity and are not yet wired to a Sunlight behaviour.
 const (
-	secMedia section = iota
-	secTimezone
-	secKeyboard
+	// Required options.
+	secTimezone section = iota
 	secLanguage
+	secKeyboard
+	secMedia
 	secUser
-	secHostname
+	secTelemetry
+	// Advanced options.
 	secNetwork
 	secProxy
-	secMirror
-	secKernel
+	secTestNet
+	secBundles
+	secHostname
 	secKernelArgs
-	secPackages
-	secPassphrase
+	secKernel
+	secMirror
+	secAutoUpdate
+	secSaveConfig
 	sectionCount
 )
 
-// sectionLabels are the hub rows; sectionTitles are the fuller titles shown
-// at the top of each section's dialog, worded like clr-installer's.
+// sectionLabels are the hub rows (clr's menu titles); sectionTitles are the
+// titles shown at the top of each section's own dialog.
 var sectionLabels = [sectionCount]string{
-	"Installation Media", "Timezone", "Keyboard", "Language", "Manage User", "Hostname",
-	"Network Interface", "Network Proxy", "Storage Mirror", "Kernel Selection",
-	"Kernel Command Line", "Additional Packages", "Encryption Passphrase",
+	"Choose Timezone", "Choose Language", "Configure the Keyboard",
+	"Configure Installation Media", "Manage User", "Telemetry",
+	"Configure Network Interfaces", "Proxy", "Test Network Settings",
+	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
+	"Kernel Selection", "Swupd Mirror", "Automatic OS Updates",
+	"Save Configuration Settings",
 }
 
 var sectionTitles = [sectionCount]string{
-	"Configure Installation Media", "Choose Timezone", "Configure the Keyboard",
-	"Choose Language", "Manage User", "Assign Hostname", "Configure Network Interface",
-	"Configure the Network Proxy", "Set the Storage Mirror", "Select Desired Kernel",
-	"Add Kernel Command-Line Arguments", "Select Additional Packages", "Set Encryption Passphrase",
+	"Select System Timezone", "Select System Language", "Select Keyboard",
+	"Select Installation Media", "Manage User", "Telemetry",
+	"Configure Network Interfaces", "Configure the Network Proxy", "Test Network Settings",
+	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
+	"Select Desired Kernel", "Swupd Mirror", "Automatic OS Updates",
+	"Save Configuration Settings",
 }
 
 type view int
@@ -246,6 +287,7 @@ const (
 	popupNone popupKind = iota
 	popupPassphrase
 	popupMessage
+	popupSpinner // a running operation with a small animated indicator
 )
 
 type model struct {
@@ -263,9 +305,20 @@ type model struct {
 	mirror     string // swupdMirror
 	kernel     string // clr bundle name: "", kernel-native, kernel-lts
 	kernelArgs string // extra kernel command-line arguments, space-separated
-	packages   string // extra xbps packages, space/comma-separated
+	packages   string // extra xbps packages (shown as "bundles"), space/comma-separated
 	// A single optional static interface; empty netIface means DHCP.
 	netIface, netAddr, netGateway, netDNS string
+
+	// Tri-state clr toggles: 0 = no choice, 1 = enabled, 2 = disabled.
+	// telemetry and autoUpdate are presented for clr fidelity; autoUpdate
+	// defaults to enabled as clr does.
+	telemetry, autoUpdate int
+
+	// Test Network Settings runs a connectivity check with a small spinner
+	// popup — a secondary progress indicator like clr's.
+	testingNet   bool
+	spinnerFrame int
+	netResult    string
 
 	view          view
 	tab           int // 0 = Required options, 1 = Advanced options
@@ -296,6 +349,7 @@ func newModel(disks []blockdev.Device) model {
 	return model{
 		disks: disks, view: viewHub,
 		keyboard: "us", language: "en_US.UTF-8", timezone: "UTC", hostname: "sunlight", login: "user",
+		autoUpdate: 1, // clr defaults automatic updates on
 	}
 }
 
@@ -386,8 +440,22 @@ func overlayCenter(base, popup string, width, height int) string {
 func (m model) Init() tea.Cmd { return textinput.Blink }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if ws, ok := msg.(tea.WindowSizeMsg); ok {
-		m.width, m.height = ws.Width, ws.Height
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+	case spinnerTickMsg:
+		if m.testingNet {
+			m.spinnerFrame++
+			return m, spinnerTickCmd()
+		}
+		return m, nil
+	case netTestDoneMsg:
+		// The check finished: swap the spinner for a result message popup.
+		m.testingNet = false
+		m.netResult = msg.result
+		m.popup = popupMessage
+		m.popupMsg = []string{"Test Network Settings", "", msg.result}
 		return m, nil
 	}
 	key, ok := msg.(tea.KeyMsg)
@@ -424,6 +492,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // closes on any key; the passphrase popup edits an input and commits on
 // Enter (Esc discards).
 func (m model) updatePopup(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.popup == popupSpinner {
+		// A running operation ignores keys until it reports back.
+		return m, nil
+	}
 	if m.popup == popupMessage {
 		m.popup = popupNone
 		return m, nil
@@ -501,9 +573,10 @@ func (m model) canInstall() bool {
 // mirroring clr-installer's [R] Required / [A] Advanced split.
 func visibleSections(tab int) []section {
 	if tab == 1 {
-		return []section{secNetwork, secProxy, secMirror, secKernel, secKernelArgs, secPackages, secPassphrase}
+		return []section{secNetwork, secProxy, secTestNet, secBundles, secHostname,
+			secKernelArgs, secKernel, secMirror, secAutoUpdate, secSaveConfig}
 	}
-	return []section{secMedia, secTimezone, secKeyboard, secLanguage, secUser, secHostname}
+	return []section{secTimezone, secLanguage, secKeyboard, secMedia, secUser, secTelemetry}
 }
 
 func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -540,9 +613,9 @@ func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// missing in a bordered popup, the way clr warns.
 			m.popup = popupMessage
 			m.popupMsg = []string{
-				"The install is not ready yet.",
+				"Not ready",
 				"",
-				"Still required:",
+				"The install is not ready yet. Still required:",
 				"  • a target disk and an EFI System Partition",
 				"  • a partition mounted at /",
 				"  • an admin user",
@@ -565,10 +638,19 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.partCursor = 0
 		return m, nil
 	case secKernel:
-		// A short choice list of the kernels, like clr's kernel selection.
 		m.view = viewSectionChoice
 		m.choices = kernelOptions
 		m.edCursor = indexOf(kernelOptions, m.kernel)
+		return m, nil
+	case secTelemetry:
+		m.view = viewSectionChoice
+		m.choices = yesNoOptions
+		m.edCursor = triToIndex(m.telemetry)
+		return m, nil
+	case secAutoUpdate:
+		m.view = viewSectionChoice
+		m.choices = yesNoOptions
+		m.edCursor = triToIndex(m.autoUpdate)
 		return m, nil
 	case secNetwork:
 		// A small multi-field form for one static interface (blank = DHCP).
@@ -579,15 +661,26 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		ti.SetValue(m.netIface)
 		m.input = ti
 		return m, textinput.Blink
-	case secPassphrase:
-		// A bordered popup over the hub, masked.
-		m.popup = popupPassphrase
-		ti := textinput.New()
-		ti.Focus()
-		ti.EchoMode = textinput.EchoPassword
-		ti.SetValue(m.passphrase)
-		m.input = ti
-		return m, textinput.Blink
+	case secTestNet:
+		// A secondary-progress popup: run a connectivity check while a small
+		// spinner animates, like clr's "Test Network Settings".
+		m.popup = popupSpinner
+		m.testingNet = true
+		m.spinnerFrame = 0
+		m.netResult = ""
+		return m, tea.Batch(spinnerTickCmd(), testNetCmd())
+	case secSaveConfig:
+		// The config is always written during the install (the controller's
+		// save-config stage). Here, say so, clr-style.
+		m.popup = popupMessage
+		m.popupMsg = []string{
+			"Save Configuration Settings",
+			"",
+			"The installation configuration is saved automatically",
+			"during the install, to /root/slinstaller.yaml on the",
+			"target system.",
+		}
+		return m, nil
 	default: // text sections
 		m.view = viewSectionText
 		ti := textinput.New()
@@ -607,7 +700,7 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 			ti.SetValue(m.mirror)
 		case secKernelArgs:
 			ti.SetValue(m.kernelArgs)
-		case secPackages:
+		case secBundles:
 			ti.SetValue(m.packages)
 		}
 		m.input = ti
@@ -619,6 +712,19 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 // kernelOptions are the kernels offered in the selection dialog; the empty
 // first entry keeps the base system's default kernel.
 var kernelOptions = []string{"", "kernel-native", "kernel-lts"}
+
+// yesNoOptions back the Enabled/Disabled choice pages (Telemetry, Automatic
+// OS Updates).
+var yesNoOptions = []string{"Enabled", "Disabled"}
+
+// triToIndex maps a tri-state toggle (0 unset, 1 on, 2 off) to the
+// Enabled/Disabled list index (defaulting to Enabled when unset).
+func triToIndex(t int) int {
+	if t == 2 {
+		return 1
+	}
+	return 0
+}
 
 // kernelLabel is how a kernel option reads in the dialog and the hub.
 func kernelLabel(k string) string {
@@ -645,49 +751,79 @@ func indexOf(ss []string, v string) int {
 
 func (m model) sectionValue(s section) string {
 	switch s {
-	case secMedia:
-		if !m.diskSet {
-			return "— choose a disk —"
-		}
-		return fmt.Sprintf("%s (%d parts)", m.disks[m.diskIdx].Path, len(m.parts))
-	case secPassphrase:
-		if m.passphrase != "" {
-			return "set"
-		}
-		if hasCrypt(m.parts) {
-			return "— required —"
-		}
-		return "—"
-	case secKeyboard:
-		return m.keyboard
-	case secLanguage:
-		return m.language
 	case secTimezone:
 		return m.timezone
-	case secHostname:
-		return m.hostname
+	case secLanguage:
+		return "[" + m.language + "]"
+	case secKeyboard:
+		return m.keyboard
+	case secMedia:
+		if !m.diskSet {
+			return "Warning: No Media Selected"
+		}
+		return fmt.Sprintf("%s (%d parts)", m.disks[m.diskIdx].Path, len(m.parts))
 	case secUser:
 		if m.userSet {
 			return m.login + " (admin)"
 		}
-		return "— not set —"
+		return "No users added"
+	case secTelemetry:
+		return triLabel(m.telemetry)
 	case secNetwork:
 		if m.netIface == "" {
-			return "DHCP (all interfaces)"
+			return "Automatic (DHCP)"
 		}
-		return fmt.Sprintf("%s static %s", m.netIface, m.netAddr)
+		return fmt.Sprintf("%s: %s", m.netIface, m.netAddr)
 	case secProxy:
-		return orDash(m.proxy)
-	case secMirror:
-		return orDefault(m.mirror)
-	case secKernel:
-		return kernelLabel(m.kernel)
+		if strings.TrimSpace(m.proxy) == "" {
+			return "No HTTPS proxy URL set"
+		}
+		return m.proxy
+	case secTestNet:
+		return "Check if all the required network settings are properly set"
+	case secBundles:
+		if strings.TrimSpace(m.packages) == "" {
+			return "No bundles selected"
+		}
+		return m.packages
+	case secHostname:
+		if strings.TrimSpace(m.hostname) == "" {
+			return "No target system hostname assigned"
+		}
+		return m.hostname
 	case secKernelArgs:
-		return orDash(m.kernelArgs)
-	case secPackages:
-		return orDash(m.packages)
+		if strings.TrimSpace(m.kernelArgs) == "" {
+			return "No kernel command line configuration defined"
+		}
+		return m.kernelArgs
+	case secKernel:
+		if m.kernel == "" {
+			return "Select desired kernel"
+		}
+		return kernelLabel(m.kernel)
+	case secMirror:
+		if strings.TrimSpace(m.mirror) == "" {
+			return "No swupd mirror set"
+		}
+		return m.mirror
+	case secAutoUpdate:
+		return triLabel(m.autoUpdate)
+	case secSaveConfig:
+		return "Save the installation configuration to a file"
 	}
 	return ""
+}
+
+// triLabel renders a tri-state toggle: no choice yet, enabled or disabled.
+func triLabel(t int) string {
+	switch t {
+	case 1:
+		return "Enabled"
+	case 2:
+		return "Disabled"
+	default:
+		return "No choice made"
+	}
 }
 
 func orDash(s string) string {
@@ -736,7 +872,14 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.diskSet = true
 			m.view = viewPartList
 		} else {
-			m.kernel = m.choices[m.edCursor]
+			switch m.editing {
+			case secTelemetry:
+				m.telemetry = m.edCursor + 1 // 1 Enabled, 2 Disabled
+			case secAutoUpdate:
+				m.autoUpdate = m.edCursor + 1
+			default: // kernel
+				m.kernel = m.choices[m.edCursor]
+			}
 			m.choices = nil
 			m.view = viewHub
 		}
@@ -774,7 +917,7 @@ func (m model) updateSectionText(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mirror = v
 		case secKernelArgs:
 			m.kernelArgs = v
-		case secPackages:
+		case secBundles:
 			m.packages = v
 		case secUser:
 			if m.formStep == 0 {
@@ -915,6 +1058,19 @@ func (m model) updateFormText(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// openPassphrasePopup floats the masked LUKS passphrase prompt over the
+// current view (the media dialog), the way clr asks for it when an
+// encrypted partition is added.
+func (m model) openPassphrasePopup() (tea.Model, tea.Cmd) {
+	m.popup = popupPassphrase
+	ti := textinput.New()
+	ti.Focus()
+	ti.EchoMode = textinput.EchoPassword
+	ti.SetValue(m.passphrase)
+	m.input = ti
+	return m, textinput.Blink
+}
+
 // commitFormField records the current field and moves to the next, or
 // finishes the form.
 func (m model) commitFormField(v string) (tea.Model, tea.Cmd) {
@@ -965,6 +1121,11 @@ func (m model) commitFormField(v string) (tea.Model, tea.Cmd) {
 		m.parts = append(m.parts, m.form)
 		m.view = viewPartList
 		m.partCursor = len(m.parts) - 1
+		// clr collects the LUKS passphrase from the media dialog: the moment
+		// an encrypted partition is added and none is set, pop the prompt.
+		if (m.form.Type == "crypt" || m.form.Encrypted) && m.passphrase == "" {
+			return m.openPassphrasePopup()
+		}
 		return m, nil
 	}
 
@@ -1093,9 +1254,20 @@ func (m model) popupBox() string {
 			popupHint.Render("[Enter] confirm · [Esc] cancel"),
 		}
 	case popupMessage:
-		inner = append([]string{popupTitle.Render("Not ready")}, "")
-		inner = append(inner, m.popupMsg...)
+		// popupMsg[0] is the title; the rest is the body.
+		title, body := "", m.popupMsg
+		if len(m.popupMsg) > 0 {
+			title, body = m.popupMsg[0], m.popupMsg[1:]
+		}
+		inner = append([]string{popupTitle.Render(title), ""}, body...)
 		inner = append(inner, "", popupHint.Render("press any key to continue"))
+	case popupSpinner:
+		frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+		inner = []string{
+			popupTitle.Render("Test Network Settings"),
+			"",
+			frame + " Checking connectivity to the mirror...",
+		}
 	}
 	return popupBoxStyle.Render(strings.Join(inner, "\n"))
 }
@@ -1158,11 +1330,15 @@ func (m model) choiceView() string {
 		return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
 	}
 	body := []string{
-		itemLabel.Width(w).Render("  " + sectionTitles[secKernel]),
+		itemLabel.Width(w).Render("  " + sectionTitles[m.editing]),
 		lineBG.Width(w).Render(""),
 	}
 	for i, c := range m.choices {
-		body = append(body, row(w, i == m.edCursor, kernelLabel(c)))
+		label := c
+		if m.editing == secKernel {
+			label = kernelLabel(c)
+		}
+		body = append(body, row(w, i == m.edCursor, label))
 	}
 	return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
 }

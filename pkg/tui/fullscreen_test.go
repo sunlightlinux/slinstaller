@@ -135,8 +135,7 @@ func TestCanInstall(t *testing.T) {
 
 func TestFormAddPartition(t *testing.T) {
 	// Hub -> Installation Media (disk + partitions) -> add a plain ext4 root.
-	var m tea.Model = newModel(oneDisk())
-	m = send(m, enter) // cursor 0 = Installation Media -> open the media dialog
+	m := openSectionInTab(newModel(oneDisk()), 0, secMedia)
 	m = send(m, runes("a"))
 	m = send(m, enter)      // type = "part" (first choice)
 	m = send(m, enter)      // fs = "ext4" (first choice)
@@ -144,7 +143,7 @@ func TestFormAddPartition(t *testing.T) {
 	m = send(m, enter)      //
 	m = send(m, enter)      // size blank = fill -> append
 
-	got := m.(model)
+	got := m
 	if len(got.parts) != 1 {
 		t.Fatalf("got %d parts, want 1", len(got.parts))
 	}
@@ -218,6 +217,24 @@ func withSize(m model) model {
 	return m
 }
 
+// openSectionInTab switches to the given tab, moves the hub cursor to the
+// named section, and opens it.
+func openSectionInTab(m model, tab int, s section) model {
+	if tab == 1 {
+		m = send(m, runes("A"))
+	}
+	vis := visibleSections(tab)
+	for i, vs := range vis {
+		if vs == s {
+			for j := 0; j < i; j++ {
+				m = send(m, down)
+			}
+			break
+		}
+	}
+	return send(m, enter)
+}
+
 // TestViewsRenderNoPanic drives the hub, the Installation Media dialog,
 // each Advanced section, and both popups, rendering each to confirm the new
 // views and the overlay do not panic and are non-empty.
@@ -227,10 +244,10 @@ func TestViewsRenderNoPanic(t *testing.T) {
 		t.Errorf("hub render missing the Required tab:\n%s", v)
 	}
 
-	// Installation Media dialog (cursor 0, Enter).
-	media := withSize(send(hub, enter))
+	// Installation Media dialog (navigate to it, then Enter).
+	media := withSize(openSectionInTab(hub, 0, secMedia))
 	if v := media.View(); !strings.Contains(v, "Installation Media") {
-		t.Errorf("media dialog missing its title")
+		t.Errorf("media dialog missing its title:\n%s", v)
 	}
 
 	// Advanced tab: open each section and render.
@@ -246,17 +263,32 @@ func TestViewsRenderNoPanic(t *testing.T) {
 		}
 	}
 
-	// The passphrase popup overlays the hub.
-	pm := adv
+	// Test Network Settings opens a spinner popup (secondary progress).
+	tn := adv
 	for _, s := range visibleSections(1) {
-		if s == secPassphrase {
+		if s == secTestNet {
 			break
 		}
-		pm = send(pm, down)
+		tn = send(tn, down)
 	}
-	pass := withSize(send(pm, enter))
-	if v := pass.View(); !strings.Contains(v, "Passphrase") {
-		t.Errorf("passphrase popup not shown:\n%s", v)
+	tn = withSize(send(tn, enter))
+	if v := tn.View(); !strings.Contains(v, "Test Network") {
+		t.Errorf("test-network spinner popup not shown:\n%s", v)
+	}
+
+	// Adding an encrypted partition in the media dialog pops the passphrase
+	// prompt, the way clr collects it.
+	mp := openSectionInTab(hub, 0, secMedia)
+	mp = send(mp, runes("a")) // add partition
+	mp = send(mp, down)       // type cursor -> crypt
+	mp = send(mp, enter)      // choose crypt
+	mp = send(mp, enter)      // filesystem (first choice)
+	mp = send(mp, runes("/data"))
+	mp = send(mp, enter) // mountpoint
+	mp = send(mp, enter) // size blank -> append -> passphrase popup
+	mp = withSize(mp)
+	if v := mp.View(); !strings.Contains(v, "Passphrase") {
+		t.Errorf("passphrase popup not shown after adding a crypt partition:\n%s", v)
 	}
 
 	// The not-ready warning popup (Install pressed on an empty layout).

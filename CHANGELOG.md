@@ -31,6 +31,22 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Full-screen TUI reorganised to match clr-installer's menu 1:1 (phase 1):
+  the Required tab is Choose Timezone, Choose Language, Configure the
+  Keyboard, Configure Installation Media, Manage User, Telemetry; the
+  Advanced tab is Configure Network Interfaces, Proxy, Test Network
+  Settings, Select Additional Bundles, Assign Hostname, Kernel Command Line,
+  Kernel Selection, Swupd Mirror, Automatic OS Updates, Save Configuration
+  Settings — in clr's exact order and wording (e.g. "Warning: No Media
+  Selected", "No HTTPS proxy URL set"). Hostname moved to Advanced. The LUKS
+  passphrase is now collected by a popup raised from the media dialog when
+  an encrypted partition is added, as clr does, rather than a standalone
+  section. "Test Network Settings" runs a real connectivity check behind a
+  small animated spinner popup. Telemetry, Additional Bundles and Automatic
+  OS Updates are present for fidelity (Telemetry/Auto-updates are
+  Enabled/Disabled toggles; Bundles edits the extra-packages list). Further
+  pieces — the multi-user Manage User table and the network-interface
+  sub-page — follow in later phases.
 - `--reboot` flag (the CLI equivalent of the config's `postReboot`) and
   `--log <file>` (tees the install's command trace, stage headers and
   sub-command output to a file as well as the terminal, for debugging an
