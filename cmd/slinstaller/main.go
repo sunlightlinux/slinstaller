@@ -434,9 +434,8 @@ func run(args []string) error {
 			opts.Passphrase = os.Getenv("SLINSTALLER_LUKS_PASSPHRASE")
 		}
 		if opts.Passphrase == "" {
-			fmt.Fprint(os.Stderr, "LUKS passphrase: ")
-			line, _ := stdin.ReadString('\n')
-			opts.Passphrase = strings.TrimSpace(line)
+			// Read it with echo off so the passphrase is not shown on screen.
+			opts.Passphrase = tui.ReadSecret(stdin, os.Stderr, "LUKS passphrase")
 		}
 		if opts.Passphrase == "" {
 			return fmt.Errorf("the layout is encrypted but no passphrase was given")

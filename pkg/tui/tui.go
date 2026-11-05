@@ -191,8 +191,8 @@ func promptDefault(in *bufio.Reader, w io.Writer, label, def string) string {
 // mistyped password or passphrase is caught here, not at the login prompt.
 func promptSecret(in *bufio.Reader, w io.Writer, label string) string {
 	for {
-		a := prompt(in, w, label)
-		b := prompt(in, w, label+" (again)")
+		a := ReadSecret(in, w, label)
+		b := ReadSecret(in, w, label+" (again)")
 		if a == b {
 			return a
 		}

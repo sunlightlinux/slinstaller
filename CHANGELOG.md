@@ -12,6 +12,10 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- Passwords and passphrases typed at the text prompt flow and the LUKS
+  passphrase prompt are no longer echoed on screen: input is read with
+  terminal echo turned off (and still read normally on a pipe/non-terminal,
+  e.g. an unattended run). The full-screen TUI already masked them.
 - A fully offline install (a local repository on the live medium, no remote
   mirror) failed at base-install with "xbps: no repository": the install
   command always required a remote `Repo` and emitted an empty `-R`. xbps
