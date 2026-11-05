@@ -269,6 +269,17 @@ func run(args []string) error {
 	}
 	localRepos := presentRepos(strings.Split(localRepo, ","))
 
+	// A local repository under the target root would be shadowed the moment
+	// the target filesystem is mounted there: xbps would then read an empty
+	// directory and the base install would fail (the classic "mounted the 9p
+	// share at /mnt/share, installed to /mnt" mistake). Catch it before any
+	// disk is touched and say where to move the repo.
+	for _, r := range localRepos {
+		if underRoot(r, root) {
+			return fmt.Errorf("local repository %s is under the target root %s and would be hidden when the target is mounted there — move it outside %s (e.g. mount the share at /run/slshare)", r, root, root)
+		}
+	}
+
 	// --log tees everything the install prints — the command trace, stage
 	// headers and sub-command output — to a file as well as the terminal,
 	// for debugging an unattended or serial install. Without it, output goes
@@ -625,6 +636,25 @@ func orDash(s string) string {
 		return "—"
 	}
 	return s
+}
+
+// underRoot reports whether path sits inside the target root — the repo
+// would be hidden once the target filesystem is mounted at root. http(s)
+// repositories and a root of "/" (nothing is meaningfully "under" it) are
+// never under. Paths are compared cleaned and absolute.
+func underRoot(path, root string) bool {
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return false
+	}
+	root = filepath.Clean(root)
+	if root == "/" || root == "." {
+		return false
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	return abs == root || strings.HasPrefix(abs, root+string(os.PathSeparator))
 }
 
 // presentRepos keeps the paths that hold an xbps repository index

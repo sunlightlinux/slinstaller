@@ -55,3 +55,23 @@ func TestDefaultPackagesBootSlinit(t *testing.T) {
 		t.Errorf("defaultPackages = %q: base-system pulls runit-void, which conflicts with slinit", defaultPackages)
 	}
 }
+
+func TestUnderRoot(t *testing.T) {
+	cases := []struct {
+		path, root string
+		want       bool
+	}{
+		{"/mnt/share/repo", "/mnt", true},    // the shadowed case
+		{"/mnt", "/mnt", true},               // exactly the root
+		{"/run/slshare/repo", "/mnt", false}, // the fix: outside the root
+		{"/mnt-other/repo", "/mnt", false},   // prefix but not a path boundary
+		{"https://repo.example/current", "/mnt", false},
+		{"/anything", "/", false}, // root "/" never shadows
+		{"/usr/share/slinstaller/repo", "/mnt", false},
+	}
+	for _, c := range cases {
+		if got := underRoot(c.path, c.root); got != c.want {
+			t.Errorf("underRoot(%q, %q) = %v, want %v", c.path, c.root, got, c.want)
+		}
+	}
+}

@@ -193,9 +193,15 @@ fi
 
 echo "Booting the Void live ISO with a blank /dev/vda (exit: ${EXIT_HINT})"
 echo "Inside the guest, install with:"
-echo "    mkdir -p /mnt/share && mount -t 9p -o trans=virtio slshare /mnt/share"
-echo "    /mnt/share/slinstaller --apply /mnt/share/config.yaml"
+echo "    # mount the share OUTSIDE /mnt: the installer mounts the target at"
+echo "    # /mnt, which would hide anything under it (e.g. a --local-repo)."
+echo "    mkdir -p /run/slshare && mount -t 9p -o trans=virtio slshare /run/slshare"
+echo "    /run/slshare/slinstaller --apply /run/slshare/config.yaml"
 echo "    poweroff   # then: ./run.sh --installed"
+echo ""
+echo "  Hybrid (ISO repo + network), if the share carries repo/ and keys/:"
+echo "    cp /run/slshare/keys/*.plist /var/db/xbps/keys/ 2>/dev/null"
+echo "    /run/slshare/slinstaller --local-repo /run/slshare/repo --apply /run/slshare/config.yaml"
 echo ""
 exec qemu-system-x86_64 "${COMMON[@]}" \
     -cdrom "${ISO}" \

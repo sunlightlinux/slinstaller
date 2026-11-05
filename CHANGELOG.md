@@ -12,6 +12,12 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- A `--local-repo` under the target root (e.g. a 9p share mounted at
+  `/mnt/share` while installing to `/mnt`) is now refused in preflight: the
+  repository would be hidden the moment the target filesystem is mounted,
+  and the base install would fail with "package not found" partway through.
+  The error says to move the repo outside the root. The VM demo's guest
+  instructions now mount the share at `/run/slshare`, outside `/mnt`.
 - Passwords and passphrases typed at the text prompt flow and the LUKS
   passphrase prompt are no longer echoed on screen: input is read with
   terminal echo turned off (and still read normally on a pipe/non-terminal,
