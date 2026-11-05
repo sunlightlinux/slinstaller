@@ -10,8 +10,20 @@ for what will and will not be allowed to change once releases begin.
 
 ## [Unreleased]
 
+### Fixed
+
+- A fully offline install (a local repository on the live medium, no remote
+  mirror) failed at base-install with "xbps: no repository": the install
+  command always required a remote `Repo` and emitted an empty `-R`. xbps
+  now accepts a local-only repository set — every `-R` is local and the
+  network is never reached — so `offline` installs (and a bare
+  `--local-repo` with no `--repo`) work.
+
 ### Added
 
+- `--offline` flag: the command-line equivalent of the config's `offline`,
+  so an offline install (local repository only, no network) can be run
+  interactively without hand-writing a config.
 - Full-screen TUI expanded to clr-installer's section set. The hub's two
   tabs now hold, under Required: Installation Media (disk + the partition
   editor in one dialog, like clr's media_config), Timezone, Keyboard,

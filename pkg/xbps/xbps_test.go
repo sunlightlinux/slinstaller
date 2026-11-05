@@ -93,3 +93,23 @@ func TestCommandsLocalRepos(t *testing.T) {
 		t.Errorf("install =\n  %s\nwant\n  %s", got, want)
 	}
 }
+
+func TestCommandsOfflineLocalOnly(t *testing.T) {
+	// Offline: no remote Repo, only a local repository on the live medium.
+	// The install command must carry the local -R and no empty remote -R.
+	cmds, err := Options{
+		Root:       "/mnt",
+		LocalRepos: []string{"/usr/share/slinstaller/repo"},
+		Packages:   []string{"base-system"},
+	}.Commands()
+	if err != nil {
+		t.Fatalf("Commands: %v", err)
+	}
+	want := "xbps-install -Sy -R /usr/share/slinstaller/repo -r /mnt base-system"
+	if got := strings.Join(cmds[0], " "); got != want {
+		t.Errorf("offline install =\n  %s\nwant\n  %s", got, want)
+	}
+	if strings.Contains(want, "-R  ") || strings.Contains(want, "-R -r") {
+		t.Error("offline install has an empty remote -R")
+	}
+}

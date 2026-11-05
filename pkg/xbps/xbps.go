@@ -61,7 +61,9 @@ func (o Options) Commands() ([][]string, error) {
 	if o.Root == "" {
 		return nil, fmt.Errorf("xbps: no target root")
 	}
-	if o.Repo == "" {
+	// A repository is needed, but a local one is enough: an offline install
+	// pulls everything from the live medium's repository with no remote Repo.
+	if o.Repo == "" && len(o.LocalRepos) == 0 {
 		return nil, fmt.Errorf("xbps: no repository")
 	}
 	if len(o.Packages) == 0 {
@@ -97,7 +99,12 @@ func (o Options) Commands() ([][]string, error) {
 	for _, r := range o.LocalRepos {
 		install = append(install, "-R", r)
 	}
-	install = append(install, "-R", o.Repo, "-r", o.Root)
+	// The remote repository, when there is one. Offline installs have none:
+	// every -R is a local repository and xbps never reaches the network.
+	if o.Repo != "" {
+		install = append(install, "-R", o.Repo)
+	}
+	install = append(install, "-r", o.Root)
 	install = append(install, o.Packages...)
 	cmds = append(cmds, install)
 

@@ -121,7 +121,52 @@ To autostart it on the live medium, launch `slinstaller` on the console
 login (e.g. from the live user's shell profile or a getty), leaving a
 shell available if the operator exits it.
 
-## 7. Interim vs. target state
+## 7. Offline and hybrid installs
+
+The base system is fetched with `xbps-install`, which can read several
+repositories at once (`-R` per repository) and installs the **newest**
+version of each package found across them. slinstaller drives this with two
+knobs:
+
+- `--repo <url>` — the remote mirror (defaults to the config's `swupdMirror`,
+  else Void's official repo).
+- `--local-repo <path>[,<path>…]` — repositories carried **on the live ISO**,
+  searched alongside the remote one. Paths without an xbps repository index
+  are skipped.
+
+This gives three modes:
+
+- **Online** (the default): remote mirror only. Needs working networking and
+  CA certificates (see §2).
+- **Hybrid — ISO packages + network updates**: pass **both** a `--local-repo`
+  on the ISO and a `--repo`. The base installs fast from the ISO, and any
+  package the mirror has a newer version of is pulled from the network. This
+  is already the default shape whenever the ISO carries a local repo and the
+  remote is left at its default — no extra flag.
+- **Offline — ISO only**: `--offline` (or `offline: true` in the config)
+  together with `--local-repo`. The remote mirror is dropped entirely: every
+  repository is local and xbps never touches the network. Preflight refuses
+  an offline install that has no local repository, before the disk is wiped.
+
+**What the ISO must carry for a *full* offline install.** The live repo that
+ships `slinit`/`slinit-services`/`sunlight-base` (§2–§3) is enough for an
+online or hybrid install, but an offline install resolves **every**
+dependency from the ISO. The on-ISO repository must therefore be a complete
+set for the layouts it should handle:
+
+- `sunlight-base` and its full dependency closure (including the kernel);
+- `grub-x86_64-efi` (the target bootloader) and `shadow`, `dracut`, `xbps`
+  (the chroot tools from §4);
+- the per-layout filesystem/feature packages — `btrfs-progs`, `xfsprogs`,
+  `f2fs-tools`, `cryptsetup`, `lvm2`, `mdadm` — for any layout offered.
+
+Build it with `xbps` the usual way (`xbps-rindex` over a directory of
+`.xbps` packages). If it is signed, ship its signing key in
+`/var/db/xbps/keys` (§3) just like the remote mirror's. A hybrid ISO can
+carry a smaller local repo (just the essentials) and rely on the mirror for
+the rest.
+
+## 8. Interim vs. target state
 
 The installed system boots **slinit**, and has no runit. Its base is
 **`sunlight-base`**: Void's `base-system` with runit-void taken out and

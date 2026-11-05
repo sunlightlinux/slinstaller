@@ -93,6 +93,9 @@ func run(args []string) error {
 	var textUI bool
 	fs.BoolVar(&textUI, "text", false,
 		"use the plain text prompt installer instead of the full-screen TUI (for serial consoles)")
+	var offline bool
+	fs.BoolVar(&offline, "offline", false,
+		"install only from --local-repo, without a remote mirror (same as the config's offline)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] [config.yaml]\n\n")
 		fmt.Fprintf(os.Stderr, "With a config file, reads a clr-installer-format config and prints its plan;\n")
@@ -148,6 +151,12 @@ func run(args []string) error {
 	}
 	if err != nil {
 		return err
+	}
+
+	// --offline is the CLI equivalent of the config's offline: install only
+	// from the local repository, never the network.
+	if offline {
+		cfg.Offline = true
 	}
 
 	// Validate before anything else: this is the last point at which
