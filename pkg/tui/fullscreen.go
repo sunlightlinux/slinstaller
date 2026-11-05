@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -15,11 +17,16 @@ import (
 // RunFullscreen drives the install as a full-screen menu styled after the
 // Clear Linux minimal-ISO installer: a blue panel with [R] Required / [A]
 // Advanced tabs, each section a label over a "» value" line with a teal
-// selection bar, and Cancel/Install buttons at the foot. Sections are
-// configured in any order and include a manual partition editor (plain,
-// encrypted and LVM); Install lights up once the layout is complete. It
-// returns the config and the LUKS passphrase; cmd uses it on a real
-// terminal, the prompt flow otherwise.
+// selection bar, and Cancel/Install buttons at the foot. Required holds
+// Installation Media (disk + a manual partition editor: plain, encrypted,
+// LVM), Timezone, Keyboard, Language, Manage User and Hostname; Advanced
+// holds the Network Interface, Network Proxy, Storage Mirror, Kernel
+// Selection, Kernel Command Line, Additional Packages and Encryption
+// Passphrase — mirroring clr-installer's section set. The passphrase and
+// the not-ready warning are bordered popups floated over the hub. Sections
+// are configured in any order; Install lights up once the layout is
+// complete. It returns the config and the LUKS passphrase; cmd uses it on a
+// real terminal, the prompt flow otherwise.
 func RunFullscreen() (*config.Config, string, error) {
 	devs, err := blockdev.List()
 	if err != nil {
@@ -49,9 +56,64 @@ func RunFullscreen() (*config.Config, string, error) {
 			Children: layoutToMedia(m.disks[m.diskIdx].Name, m.parts),
 		}},
 		Hostname: m.hostname, Keyboard: m.keyboard, Language: m.language, Timezone: m.timezone,
-		Users: []*config.User{{Login: m.login, Password: hash, Admin: true}},
+		Users:       []*config.User{{Login: m.login, Password: hash, Admin: true}},
+		Kernel:      m.kernel,
+		HTTPSProxy:  strings.TrimSpace(m.proxy),
+		SwupdMirror: strings.TrimSpace(m.mirror),
+	}
+	if args := strings.Fields(m.kernelArgs); len(args) > 0 {
+		cfg.KernelArguments = &config.KernelArguments{Add: args}
+	}
+	cfg.Packages = splitList(m.packages)
+	if iface := staticInterface(m.netIface, m.netAddr, m.netGateway, m.netDNS); iface != nil {
+		cfg.NetworkInterfaces = []*config.Interface{iface}
 	}
 	return cfg, m.passphrase, nil
+}
+
+// splitList splits a comma/space-separated list into trimmed, non-empty
+// items.
+func splitList(s string) []string {
+	var out []string
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// staticInterface builds a config.Interface for a single static interface
+// from the network form's fields, parsing the CIDR address into an IP and a
+// dotted netmask. A blank name (DHCP) or an unparseable address yields nil.
+func staticInterface(name, cidr, gateway, dns string) *config.Interface {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	iface := &config.Interface{Name: name, DHCP: "false", Gateway: strings.TrimSpace(gateway), DNS: strings.TrimSpace(dns)}
+	if a := parseCIDR(strings.TrimSpace(cidr)); a != nil {
+		iface.Addrs = []*config.Address{a}
+	}
+	return iface
+}
+
+// parseCIDR turns "192.168.1.50/24" into a config.Address (dotted netmask
+// for IPv4, prefix length kept for IPv6), or nil if it does not parse.
+func parseCIDR(s string) *config.Address {
+	if s == "" {
+		return nil
+	}
+	ip, ipnet, err := net.ParseCIDR(s)
+	if err != nil {
+		return nil
+	}
+	if v4 := ip.To4(); v4 != nil {
+		mask := ipnet.Mask
+		return &config.Address{IP: v4.String(), Netmask: fmt.Sprintf("%d.%d.%d.%d", mask[0], mask[1], mask[2], mask[3]), Version: 0}
+	}
+	ones, _ := ipnet.Mask.Size()
+	return &config.Address{IP: ip.String(), Netmask: strconv.Itoa(ones), Version: 1}
 }
 
 // --- the layout data model (separate from the UI, so it is testable) ---
@@ -129,20 +191,40 @@ func hasCrypt(parts []partEntry) bool {
 
 type section int
 
+// The hub sections, grouped the way clr-installer groups them: the
+// everyday choices under [R] Required, the ones most installs leave at
+// their defaults under [A] Advanced. Installation Media is one section
+// (disk + partitions), as in clr's media_config page.
 const (
-	secDisk section = iota
-	secParts
-	secPassphrase
+	secMedia section = iota
+	secTimezone
 	secKeyboard
 	secLanguage
-	secTimezone
-	secHostname
 	secUser
+	secHostname
+	secNetwork
+	secProxy
+	secMirror
+	secKernel
+	secKernelArgs
+	secPackages
+	secPassphrase
 	sectionCount
 )
 
+// sectionLabels are the hub rows; sectionTitles are the fuller titles shown
+// at the top of each section's dialog, worded like clr-installer's.
 var sectionLabels = [sectionCount]string{
-	"Disk", "Partitions", "Passphrase", "Keyboard", "Language", "Timezone", "Hostname", "Admin user",
+	"Installation Media", "Timezone", "Keyboard", "Language", "Manage User", "Hostname",
+	"Network Interface", "Network Proxy", "Storage Mirror", "Kernel Selection",
+	"Kernel Command Line", "Additional Packages", "Encryption Passphrase",
+}
+
+var sectionTitles = [sectionCount]string{
+	"Configure Installation Media", "Choose Timezone", "Configure the Keyboard",
+	"Choose Language", "Manage User", "Assign Hostname", "Configure Network Interface",
+	"Configure the Network Proxy", "Set the Storage Mirror", "Select Desired Kernel",
+	"Add Kernel Command-Line Arguments", "Select Additional Packages", "Set Encryption Passphrase",
 }
 
 type view int
@@ -153,6 +235,17 @@ const (
 	viewSectionText
 	viewPartList
 	viewPartForm
+	viewNetForm
+)
+
+// popupKind selects the bordered dialog drawn centred over the hub, the way
+// clr-installer floats its passphrase and message windows.
+type popupKind int
+
+const (
+	popupNone popupKind = iota
+	popupPassphrase
+	popupMessage
 )
 
 type model struct {
@@ -165,6 +258,15 @@ type model struct {
 	login, password, passphrase string
 	parts                       []partEntry
 
+	// Advanced-tab values.
+	proxy      string // httpsProxy
+	mirror     string // swupdMirror
+	kernel     string // clr bundle name: "", kernel-native, kernel-lts
+	kernelArgs string // extra kernel command-line arguments, space-separated
+	packages   string // extra xbps packages, space/comma-separated
+	// A single optional static interface; empty netIface means DHCP.
+	netIface, netAddr, netGateway, netDNS string
+
 	view          view
 	tab           int // 0 = Required options, 1 = Advanced options
 	hubCursor     int
@@ -174,6 +276,11 @@ type model struct {
 	editing  section
 	input    textinput.Model
 	edCursor int
+	choices  []string // options for a generic choice view (e.g. kernel)
+
+	// popup: a bordered dialog drawn over the hub.
+	popup    popupKind
+	popupMsg []string
 
 	// partition editor
 	partCursor int       // index into parts (and -1.. for buttons)
@@ -236,7 +343,45 @@ var (
 	btnIdle  = lipgloss.NewStyle().Foreground(clrInk).Background(lipgloss.Color("250")).Padding(0, 2)
 	btnOff   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Background(lipgloss.Color("238")).Padding(0, 2)
 	warnText = lipgloss.NewStyle().Foreground(lipgloss.Color("221")).Background(clrBlue)
+
+	// Popup: a bordered window floated over the hub. A lighter blue fill and
+	// a white border set it apart from the dialog behind it.
+	clrPopup      = lipgloss.Color("25")
+	popupBoxStyle = lipgloss.NewStyle().Background(clrPopup).Foreground(clrWhite).
+			Border(lipgloss.RoundedBorder()).BorderForeground(clrWhite).
+			BorderBackground(clrBlack).Padding(1, 3)
+	popupTitle = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrPopup)
+	popupHint  = lipgloss.NewStyle().Foreground(clrDim).Background(clrPopup)
+	popupInput = lipgloss.NewStyle().Foreground(clrWhite).Background(lipgloss.Color("17")).Padding(0, 1)
 )
+
+// overlayCenter composites a popup box centred over a base screen: the base
+// rows above and below the popup stay visible, so the popup reads as a
+// window floating on the hub. The popup's own rows (black-backed, holding
+// the bordered box centred horizontally) replace the base rows they cover.
+func overlayCenter(base, popup string, width, height int) string {
+	if width <= 0 {
+		width = 80
+	}
+	if height <= 0 {
+		height = 24
+	}
+	baseLines := strings.Split(base, "\n")
+	popLines := strings.Split(popup, "\n")
+	start := (len(baseLines) - len(popLines)) / 2
+	if start < 0 {
+		start = 0
+	}
+	for i, pl := range popLines {
+		row := start + i
+		if row < 0 || row >= len(baseLines) {
+			continue
+		}
+		baseLines[row] = lipgloss.PlaceHorizontal(width, lipgloss.Center, pl,
+			lipgloss.WithWhitespaceBackground(clrBlack))
+	}
+	return strings.Join(baseLines, "\n")
+}
 
 func (m model) Init() tea.Cmd { return textinput.Blink }
 
@@ -254,6 +399,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	// A popup, when open, takes all keys until it is dismissed.
+	if m.popup != popupNone {
+		return m.updatePopup(key)
+	}
 	switch m.view {
 	case viewHub:
 		return m.updateHub(key)
@@ -265,8 +414,79 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updatePartList(key)
 	case viewPartForm:
 		return m.updatePartForm(key)
+	case viewNetForm:
+		return m.updateNetForm(key)
 	}
 	return m, nil
+}
+
+// updatePopup handles the bordered dialog over the hub: a message popup
+// closes on any key; the passphrase popup edits an input and commits on
+// Enter (Esc discards).
+func (m model) updatePopup(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.popup == popupMessage {
+		m.popup = popupNone
+		return m, nil
+	}
+	// passphrase
+	switch key.String() {
+	case "esc":
+		m.popup = popupNone
+		return m, nil
+	case "enter":
+		m.passphrase = m.input.Value()
+		m.popup = popupNone
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(key)
+	return m, cmd
+}
+
+// updateNetForm drives the single-interface static-network form: a name
+// (blank = leave everything on DHCP), then address (CIDR), gateway and DNS.
+func (m model) updateNetForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		m.view = viewHub
+		return m, nil
+	case "enter":
+		v := strings.TrimSpace(m.input.Value())
+		switch m.formStep {
+		case 0:
+			if v == "" {
+				// DHCP: clear any previous static config.
+				m.netIface, m.netAddr, m.netGateway, m.netDNS = "", "", "", ""
+				m.view = viewHub
+				return m, nil
+			}
+			m.netIface = v
+		case 1:
+			m.netAddr = v
+		case 2:
+			m.netGateway = v
+		case 3:
+			m.netDNS = v
+			m.view = viewHub
+			return m, nil
+		}
+		m.formStep++
+		ti := textinput.New()
+		ti.Focus()
+		switch m.formStep {
+		case 1:
+			ti.SetValue(m.netAddr)
+		case 2:
+			ti.SetValue(m.netGateway)
+		case 3:
+			ti.SetValue(m.netDNS)
+		}
+		m.input = ti
+		return m, textinput.Blink
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(key)
+	return m, cmd
 }
 
 // --- hub ---
@@ -281,9 +501,9 @@ func (m model) canInstall() bool {
 // mirroring clr-installer's [R] Required / [A] Advanced split.
 func visibleSections(tab int) []section {
 	if tab == 1 {
-		return []section{secPassphrase, secHostname}
+		return []section{secNetwork, secProxy, secMirror, secKernel, secKernelArgs, secPackages, secPassphrase}
 	}
-	return []section{secDisk, secParts, secKeyboard, secLanguage, secTimezone, secUser}
+	return []section{secMedia, secTimezone, secKeyboard, secLanguage, secUser, secHostname}
 }
 
 func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -316,6 +536,19 @@ func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.confirmed = true
 				return m, tea.Quit
 			}
+			// Install pressed before the layout is complete: say what is
+			// missing in a bordered popup, the way clr warns.
+			m.popup = popupMessage
+			m.popupMsg = []string{
+				"The install is not ready yet.",
+				"",
+				"Still required:",
+				"  • a target disk and an EFI System Partition",
+				"  • a partition mounted at /",
+				"  • an admin user",
+				"  • a passphrase, if any partition is encrypted",
+			}
+			return m, nil
 		default:
 			return m, tea.Quit
 		}
@@ -326,14 +559,35 @@ func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 	m.editing = s
 	switch s {
-	case secParts:
+	case secMedia:
+		// Installation Media: the disk and its partitions in one dialog.
 		m.view = viewPartList
 		m.partCursor = 0
 		return m, nil
-	case secDisk:
+	case secKernel:
+		// A short choice list of the kernels, like clr's kernel selection.
 		m.view = viewSectionChoice
-		m.edCursor = m.diskIdx
+		m.choices = kernelOptions
+		m.edCursor = indexOf(kernelOptions, m.kernel)
 		return m, nil
+	case secNetwork:
+		// A small multi-field form for one static interface (blank = DHCP).
+		m.view = viewNetForm
+		m.formStep = 0
+		ti := textinput.New()
+		ti.Focus()
+		ti.SetValue(m.netIface)
+		m.input = ti
+		return m, textinput.Blink
+	case secPassphrase:
+		// A bordered popup over the hub, masked.
+		m.popup = popupPassphrase
+		ti := textinput.New()
+		ti.Focus()
+		ti.EchoMode = textinput.EchoPassword
+		ti.SetValue(m.passphrase)
+		m.input = ti
+		return m, textinput.Blink
 	default: // text sections
 		m.view = viewSectionText
 		ti := textinput.New()
@@ -347,10 +601,14 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 			ti.SetValue(m.timezone)
 		case secHostname:
 			ti.SetValue(m.hostname)
-		case secPassphrase, secUser:
-			if s == secPassphrase {
-				ti.EchoMode = textinput.EchoPassword
-			}
+		case secProxy:
+			ti.SetValue(m.proxy)
+		case secMirror:
+			ti.SetValue(m.mirror)
+		case secKernelArgs:
+			ti.SetValue(m.kernelArgs)
+		case secPackages:
+			ti.SetValue(m.packages)
 		}
 		m.input = ti
 		m.formStep = 0 // for the two-field user editor
@@ -358,18 +616,40 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 	}
 }
 
+// kernelOptions are the kernels offered in the selection dialog; the empty
+// first entry keeps the base system's default kernel.
+var kernelOptions = []string{"", "kernel-native", "kernel-lts"}
+
+// kernelLabel is how a kernel option reads in the dialog and the hub.
+func kernelLabel(k string) string {
+	switch k {
+	case "":
+		return "(default)"
+	case "kernel-native":
+		return "linux (current)"
+	case "kernel-lts":
+		return "linux-lts (long-term support)"
+	default:
+		return k
+	}
+}
+
+func indexOf(ss []string, v string) int {
+	for i, s := range ss {
+		if s == v {
+			return i
+		}
+	}
+	return 0
+}
+
 func (m model) sectionValue(s section) string {
 	switch s {
-	case secDisk:
-		if m.diskSet {
-			return m.disks[m.diskIdx].Path
+	case secMedia:
+		if !m.diskSet {
+			return "— choose a disk —"
 		}
-		return "— choose —"
-	case secParts:
-		if len(m.parts) == 0 {
-			return "— none —"
-		}
-		return fmt.Sprintf("%d defined", len(m.parts))
+		return fmt.Sprintf("%s (%d parts)", m.disks[m.diskIdx].Path, len(m.parts))
 	case secPassphrase:
 		if m.passphrase != "" {
 			return "set"
@@ -391,28 +671,75 @@ func (m model) sectionValue(s section) string {
 			return m.login + " (admin)"
 		}
 		return "— not set —"
+	case secNetwork:
+		if m.netIface == "" {
+			return "DHCP (all interfaces)"
+		}
+		return fmt.Sprintf("%s static %s", m.netIface, m.netAddr)
+	case secProxy:
+		return orDash(m.proxy)
+	case secMirror:
+		return orDefault(m.mirror)
+	case secKernel:
+		return kernelLabel(m.kernel)
+	case secKernelArgs:
+		return orDash(m.kernelArgs)
+	case secPackages:
+		return orDash(m.packages)
 	}
 	return ""
 }
 
+func orDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "—"
+	}
+	return s
+}
+
+func orDefault(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "(default)"
+	}
+	return s
+}
+
 // --- simple section editors ---
 
+// updateSectionChoice drives both choice lists: the disk chooser (when
+// m.choices is nil, reached from the Installation Media dialog) and a
+// generic option list such as the kernel selection (from the hub).
 func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	diskMode := m.choices == nil
+	n := len(m.choices)
+	if diskMode {
+		n = len(m.disks)
+	}
 	switch key.String() {
 	case "esc":
-		m.view = viewHub
+		if diskMode {
+			m.view = viewPartList // back to the media dialog
+		} else {
+			m.view = viewHub
+		}
 	case "up", "k":
 		if m.edCursor > 0 {
 			m.edCursor--
 		}
 	case "down", "j":
-		if m.edCursor < len(m.disks)-1 {
+		if m.edCursor < n-1 {
 			m.edCursor++
 		}
 	case "enter":
-		m.diskIdx = m.edCursor
-		m.diskSet = true
-		m.view = viewHub
+		if diskMode {
+			m.diskIdx = m.edCursor
+			m.diskSet = true
+			m.view = viewPartList
+		} else {
+			m.kernel = m.choices[m.edCursor]
+			m.choices = nil
+			m.view = viewHub
+		}
 	}
 	return m, nil
 }
@@ -441,8 +768,14 @@ func (m model) updateSectionText(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if v != "" {
 				m.hostname = v
 			}
-		case secPassphrase:
-			m.passphrase = v
+		case secProxy:
+			m.proxy = v
+		case secMirror:
+			m.mirror = v
+		case secKernelArgs:
+			m.kernelArgs = v
+		case secPackages:
+			m.packages = v
 		case secUser:
 			if m.formStep == 0 {
 				if v == "" {
@@ -473,6 +806,11 @@ func (m model) updatePartList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		m.view = viewHub
+	case "c": // change the target disk
+		m.view = viewSectionChoice
+		m.choices = nil // disk mode
+		m.edCursor = m.diskIdx
+		return m, nil
 	case "up", "k":
 		if m.partCursor > 0 {
 			m.partCursor--
@@ -719,19 +1057,47 @@ func item(w int, selected bool, label, value string) []string {
 }
 
 func (m model) View() string {
+	var base string
 	switch m.view {
 	case viewHub:
-		return m.hubView()
+		base = m.hubView()
 	case viewSectionChoice:
-		return m.diskChoiceView()
+		base = m.choiceView()
 	case viewSectionText:
-		return m.textView()
+		base = m.textView()
 	case viewPartList:
-		return m.partListView()
+		base = m.partListView()
 	case viewPartForm:
-		return m.partFormView()
+		base = m.partFormView()
+	case viewNetForm:
+		base = m.netFormView()
 	}
-	return ""
+	if m.popup != popupNone {
+		return overlayCenter(base, m.popupBox(), m.width, m.height)
+	}
+	return base
+}
+
+// popupBox renders the current popup as a bordered box: a title, the body,
+// and a hint — the floating window clr-installer draws over its menu.
+func (m model) popupBox() string {
+	var inner []string
+	switch m.popup {
+	case popupPassphrase:
+		inner = []string{
+			popupTitle.Render("Encryption Passphrase"),
+			"",
+			"Enter the LUKS passphrase:",
+			popupInput.Render(m.input.View()),
+			"",
+			popupHint.Render("[Enter] confirm · [Esc] cancel"),
+		}
+	case popupMessage:
+		inner = append([]string{popupTitle.Render("Not ready")}, "")
+		inner = append(inner, m.popupMsg...)
+		inner = append(inner, "", popupHint.Render("press any key to continue"))
+	}
+	return popupBoxStyle.Render(strings.Join(inner, "\n"))
 }
 
 func (m model) hubView() string {
@@ -776,16 +1142,57 @@ func (m model) hubView() string {
 	return m.screen(body, "Use [Tab] or the arrow keys [Up and Down] to navigate")
 }
 
-func (m model) diskChoiceView() string {
+// choiceView renders the disk chooser (m.choices nil) or a generic option
+// list such as the kernel selection.
+func (m model) choiceView() string {
 	w := m.panelWidth()
+	if m.choices == nil { // disk mode
+		body := []string{
+			itemLabel.Width(w).Render("  Select Installation Media"),
+			warnText.Width(w).Render("  The chosen disk will be ERASED."),
+			lineBG.Width(w).Render(""),
+		}
+		for i, d := range m.disks {
+			body = append(body, row(w, i == m.edCursor, fmt.Sprintf("%-14s %s", d.Path, d.Model)))
+		}
+		return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
+	}
 	body := []string{
-		warnText.Width(w).Render("  Select a target disk — it will be ERASED."),
+		itemLabel.Width(w).Render("  " + sectionTitles[secKernel]),
 		lineBG.Width(w).Render(""),
 	}
-	for i, d := range m.disks {
-		body = append(body, row(w, i == m.edCursor, fmt.Sprintf("%-14s %s", d.Path, d.Model)))
+	for i, c := range m.choices {
+		body = append(body, row(w, i == m.edCursor, kernelLabel(c)))
 	}
 	return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
+}
+
+func (m model) netFormView() string {
+	w := m.panelWidth()
+	var title, hint string
+	switch m.formStep {
+	case 0:
+		title = "Interface name (blank = DHCP on all interfaces)"
+		hint = "e.g. eth0, enp0s3"
+	case 1:
+		title = "Address in CIDR form"
+		hint = "e.g. 192.168.1.50/24"
+	case 2:
+		title = "Gateway (blank for none)"
+		hint = "e.g. 192.168.1.1"
+	case 3:
+		title = "DNS server (blank for none)"
+		hint = "e.g. 192.168.1.1"
+	}
+	body := []string{
+		itemLabel.Width(w).Render("  " + sectionTitles[secNetwork]),
+		rule(w),
+		itemLabel.Width(w).Render("  " + title),
+		footer.Width(w).Render("  " + hint),
+		lineBG.Width(w).Render(""),
+		lineBG.Width(w).Render("  " + m.input.View()),
+	}
+	return m.screen(body, "type · [Enter] next · [Esc] cancel")
 }
 
 func (m model) textView() string {
@@ -808,9 +1215,17 @@ func (m model) textView() string {
 
 func (m model) partListView() string {
 	w := m.panelWidth()
+	disk := "— none —"
+	if m.diskSet {
+		disk = m.disks[m.diskIdx].Path + "  " + m.disks[m.diskIdx].Model
+	}
 	body := []string{
-		itemLabel.Width(w).Render("  Partitions"),
+		itemLabel.Width(w).Render("  " + sectionTitles[secMedia]),
 		rule(w),
+		itemLabel.Width(w).Render("  Target disk"),
+		itemValue.Width(w).Render("    » " + disk + "   [c] change"),
+		rule(w),
+		itemLabel.Width(w).Render("  Partitions"),
 	}
 	if len(m.parts) == 0 {
 		body = append(body, footer.Width(w).Render("  none yet — press [a] to add"))
@@ -821,7 +1236,7 @@ func (m model) partListView() string {
 			body = append(body, lineBG.Width(w).Render("      lv "+lvSummary(lv)))
 		}
 	}
-	return m.screen(body, "[a] add · [l] add LV (on lvm) · [d] delete · [Esc] back")
+	return m.screen(body, "[c] change disk · [a] add · [l] add LV · [d] delete · [Esc] back")
 }
 
 func partSummary(p partEntry) string {

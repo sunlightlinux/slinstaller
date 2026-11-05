@@ -12,6 +12,18 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Full-screen TUI expanded to clr-installer's section set. The hub's two
+  tabs now hold, under Required: Installation Media (disk + the partition
+  editor in one dialog, like clr's media_config), Timezone, Keyboard,
+  Language, Manage User, Hostname; under Advanced: Network Interface
+  (a single static interface, blank = DHCP), Network Proxy, Storage Mirror,
+  Kernel Selection (→ `linux`/`linux-lts`), Kernel Command Line, Additional
+  Packages, Encryption Passphrase. Each opens its own titled dialog. The
+  passphrase entry and the "not ready" warning are now bordered popup
+  windows floated over the hub, the way clr-installer draws them. All the
+  new sections feed the produced config (`kernel-arguments`, `httpsProxy`,
+  `swupdMirror`, `packages`, `networkInterfaces`), so the wizard can now
+  build the same configs the file front-end accepts.
 - Storage aliases (clr-installer's `block-devices`): a `targetMedia` disk
   written as `${alias}` and its partitions as `${alias}1` now expand to
   real device names at load time, using the `block-devices: [{name, file}]`
