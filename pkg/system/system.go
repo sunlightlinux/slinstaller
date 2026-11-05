@@ -182,6 +182,23 @@ func EnableService(root, name string) error {
 	return nil
 }
 
+// efiFirmwarePath is the sysfs directory the kernel creates only when the
+// machine was booted via UEFI. It is a variable so tests can point it
+// elsewhere.
+var efiFirmwarePath = "/sys/firmware/efi"
+
+// IsUEFI reports whether the running (live) system was booted in UEFI
+// mode. Sunlight Linux is UEFI-only: grub-install and efibootmgr need
+// /sys/firmware/efi/efivars, which exists only after a UEFI boot. A
+// BIOS/legacy boot of the installer medium has no such directory, and an
+// install started there would fail at the bootloader stage — after the
+// disk is already wiped — so the installer checks this before touching
+// anything.
+func IsUEFI() bool {
+	fi, err := os.Stat(efiFirmwarePath)
+	return err == nil && fi.IsDir()
+}
+
 // SlinitServicesDir is where slinit-services installs its service files.
 const SlinitServicesDir = "/usr/lib/slinit.d"
 

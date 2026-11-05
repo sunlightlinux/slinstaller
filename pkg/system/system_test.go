@@ -253,3 +253,34 @@ func TestEnableSlinitService(t *testing.T) {
 		t.Error("a link was left for a missing service")
 	}
 }
+
+func TestIsUEFI(t *testing.T) {
+	saved := efiFirmwarePath
+	defer func() { efiFirmwarePath = saved }()
+
+	// Absent path: not UEFI.
+	efiFirmwarePath = filepath.Join(t.TempDir(), "nope")
+	if IsUEFI() {
+		t.Error("IsUEFI() = true for a missing firmware path")
+	}
+
+	// A regular file is not the firmware dir.
+	f := filepath.Join(t.TempDir(), "efi")
+	if err := os.WriteFile(f, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	efiFirmwarePath = f
+	if IsUEFI() {
+		t.Error("IsUEFI() = true for a regular file")
+	}
+
+	// A directory (as sysfs presents it) means UEFI.
+	d := filepath.Join(t.TempDir(), "efi")
+	if err := os.Mkdir(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	efiFirmwarePath = d
+	if !IsUEFI() {
+		t.Error("IsUEFI() = false for an existing firmware directory")
+	}
+}

@@ -12,6 +12,36 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Storage aliases (clr-installer's `block-devices`): a `targetMedia` disk
+  written as `${alias}` and its partitions as `${alias}1` now expand to
+  real device names at load time, using the `block-devices: [{name, file}]`
+  declarations — the disk to the device's base name (`/dev/nvme0n1` →
+  `nvme0n1`) and its partitions to that name plus the kernel's partition
+  suffix (`nvme0n1p1`; empty for the `sd*`/`vd*` family). Both `${alias}`
+  and `$alias` forms, matching clr-installer. A layout can be written once
+  and pointed at different disks by changing one `file:`.
+- UEFI preflight: a full `--apply` now refuses to start when the installer
+  medium was not booted in UEFI mode (`/sys/firmware/efi` absent), instead
+  of failing at the bootloader stage after the disk is already wiped.
+- `copyNetwork` (config): copies the live system's network configuration
+  (`/etc/wpa_supplicant`, a hand-edited `/etc/dhcpcd.conf`) into the target,
+  so an install done over Wi-Fi stays reachable after first boot.
+- `postReboot` (config): an unattended `--apply` reboots into the installed
+  system when the full run finishes.
+- `env` (config): extra variables made available to pre/post-install hook
+  commands, on top of the `$chrootDir`/`$chrooted` the installer always sets
+  (clr-installer parity).
+- Kernel selection: the config's `kernel` (clr's `kernel-native` /
+  `kernel-lts` / `kernel-kvm`) now maps to the Sunlight kernel package
+  (`linux` / `linux-lts`); any other value is taken as a literal package
+  name, and is installed into the target.
+- `packages` (config): extra xbps packages to install into the target —
+  slinstaller's functional stand-in for Clear's untranslatable `bundles`
+  (which stays carried-but-ignored).
+- `offline` and `allowInsecureHTTP` (config): an offline install uses only
+  a local repository on the live medium and skips the network precheck; a
+  plain-`http://` remote mirror is refused unless `allowInsecureHTTP` is set
+  (https and local repos are always allowed).
 - `pkg/config` — reads clr-installer's config schema (`targetMedia` with
   its partition children, plus `users`, `networkInterfaces`, `keyboard`,
   `language`, `timezone`, `kernel-arguments`, `bundles` and pre/post

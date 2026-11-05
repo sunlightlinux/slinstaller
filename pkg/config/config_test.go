@@ -547,3 +547,82 @@ func TestValidateRaid(t *testing.T) {
 		t.Errorf("one-member raid1 should fail on member count, got: %v", err)
 	}
 }
+
+func TestExpandAliases(t *testing.T) {
+	cases := []struct {
+		name      string
+		file      string
+		wantDisk  string
+		wantPart1 string
+	}{
+		{"sata", "/dev/sda", "sda", "sda1"},
+		{"nvme", "/dev/nvme0n1", "nvme0n1", "nvme0n1p1"},
+		{"mmc", "/dev/mmcblk0", "mmcblk0", "mmcblk0p1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{
+				BlockDevices: []*StorageAlias{{Name: "bdev", File: tc.file}},
+				TargetMedia: []*Media{{
+					Name: "${bdev}", Type: "disk",
+					Children: []*Media{
+						{Name: "${bdev}1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+						{Name: "${bdev}2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+					},
+				}},
+			}
+			c.expandAliases()
+			if got := c.TargetMedia[0].Name; got != tc.wantDisk {
+				t.Errorf("disk name = %q, want %q", got, tc.wantDisk)
+			}
+			if got := c.TargetMedia[0].Children[0].Name; got != tc.wantPart1 {
+				t.Errorf("part1 name = %q, want %q", got, tc.wantPart1)
+			}
+			// A plan should build device paths from the expanded names.
+			plan, err := c.Plan()
+			if err != nil {
+				t.Fatalf("Plan: %v", err)
+			}
+			if plan.Disks[0] != "/dev/"+tc.wantDisk {
+				t.Errorf("plan disk = %q, want /dev/%s", plan.Disks[0], tc.wantDisk)
+			}
+			if plan.Parts[0].Device != "/dev/"+tc.wantPart1 {
+				t.Errorf("plan part1 device = %q, want /dev/%s", plan.Parts[0].Device, tc.wantPart1)
+			}
+		})
+	}
+}
+
+func TestExpandAliasesDollarForm(t *testing.T) {
+	// clr accepts the bare $name form as well as ${name}.
+	c := &Config{
+		BlockDevices: []*StorageAlias{{Name: "d", File: "/dev/vda"}},
+		TargetMedia: []*Media{{
+			Name: "$d", Type: "disk",
+			Children: []*Media{{Name: "${d}1", Type: "part", FsType: "vfat", Mountpoint: "/boot"}},
+		}},
+	}
+	c.expandAliases()
+	if c.TargetMedia[0].Name != "vda" || c.TargetMedia[0].Children[0].Name != "vda1" {
+		t.Errorf("dollar-form expansion wrong: disk=%q part=%q",
+			c.TargetMedia[0].Name, c.TargetMedia[0].Children[0].Name)
+	}
+}
+
+func TestKernelPackage(t *testing.T) {
+	cases := map[string]string{
+		"":               "",
+		"kernel-native":  "linux",
+		"kernel-kvm":     "linux",
+		"kernel":         "linux",
+		"kernel-lts":     "linux-lts",
+		"kernel-lts2018": "linux-lts",
+		"linux6.6":       "linux6.6", // already a package name: passed through
+	}
+	for in, want := range cases {
+		c := &Config{Kernel: in}
+		if got := c.KernelPackage(); got != want {
+			t.Errorf("KernelPackage(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

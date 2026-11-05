@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/mdadm"
 	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
+	"github.com/sunlightlinux/slinstaller/pkg/system"
 	"github.com/sunlightlinux/slinstaller/pkg/tui"
 )
 
@@ -182,9 +184,14 @@ func run(args []string) error {
 	if repo == "" {
 		if cfg.SwupdMirror != "" {
 			repo = cfg.SwupdMirror
-		} else {
+		} else if !cfg.Offline {
 			repo = defaultRepo
 		}
+	}
+	// An offline install must not reach the network: drop a remote (http)
+	// repo so the base comes only from the live medium's local repository.
+	if cfg.Offline && strings.HasPrefix(repo, "http") {
+		repo = ""
 	}
 	var packages []string
 	seen := map[string]bool{}
@@ -201,6 +208,12 @@ func run(args []string) error {
 	// features the layout uses, or it cannot fsck/mount/assemble them at
 	// boot. (ext4's e2fsprogs and vfat's dosfstools are in base-system.)
 	for _, p := range layoutPackages(plan) {
+		addPkg(p)
+	}
+	// The configured kernel (clr's kernel-native/kernel-lts → linux/linux-lts)
+	// and any extra packages the config asks for.
+	addPkg(cfg.KernelPackage())
+	for _, p := range cfg.Packages {
 		addPkg(p)
 	}
 	localRepos := presentRepos(strings.Split(localRepo, ","))
@@ -237,6 +250,29 @@ func run(args []string) error {
 	}
 
 	if through == "" {
+		// UEFI-only: a legacy/BIOS boot of the installer has no
+		// /sys/firmware/efi, so grub-install/efibootmgr would fail at the
+		// bootloader stage — after the disk is wiped. Fail here instead.
+		if !system.IsUEFI() {
+			return fmt.Errorf("the installer medium is not booted in UEFI mode (%s is absent); Sunlight Linux is UEFI-only — reboot it in UEFI mode",
+				"/sys/firmware/efi")
+		}
+
+		// A plain-http remote repo is refused unless the config opts into it:
+		// the base is fetched before the disk is anything to salvage, so a
+		// man-in-the-middle swap of the mirror is worth guarding against.
+		// https and local repositories are always allowed.
+		if strings.HasPrefix(repo, "http://") && !cfg.AllowInsecureHTTP {
+			return fmt.Errorf("repository %s is plain http; set allowInsecureHTTP in the config (or use an https mirror)", repo)
+		}
+
+		// An offline install has no remote repo, so the base must come from a
+		// local repository on the live medium. Fail here, before wiping, if
+		// there is none.
+		if cfg.Offline && len(localRepos) == 0 {
+			return fmt.Errorf("offline install needs a local repository (--local-repo), but none is present")
+		}
+
 		required := append(plan.RequiredTools(), "xbps-install", "chroot")
 		if encrypted {
 			required = append(required, "cryptsetup")
@@ -321,6 +357,23 @@ func run(args []string) error {
 	fmt.Fprintln(os.Stderr, "\nInstall complete.")
 	if through != "" {
 		fmt.Fprintf(os.Stderr, "(stopped after stage %q; target left mounted at %s)\n", through, root)
+		return nil
+	}
+	// postReboot: an unattended install that should come up into the new
+	// system reboots once the full run has finished (not a staged --through).
+	if cfg.PostReboot {
+		fmt.Fprintln(os.Stderr, "postReboot: rebooting into the installed system...")
+		return rebootSystem()
+	}
+	return nil
+}
+
+// rebootSystem reboots the machine, for config's postReboot.
+func rebootSystem() error {
+	cmd := exec.Command("reboot")
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("postReboot: %w", err)
 	}
 	return nil
 }

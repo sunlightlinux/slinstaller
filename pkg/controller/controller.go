@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
@@ -797,6 +798,17 @@ func (in *installer) firstBoot() error {
 // enabled even with no interfaces declared, so a plain install still has
 // network.
 func (in *installer) network() error {
+	// copyNetwork: carry the live system's own network config into the
+	// target, so an install done over Wi-Fi (or with a hand-edited dhcpcd
+	// config) stays reachable after reboot. Best-effort — missing files are
+	// not a failure — and done before the config's own stanzas are appended,
+	// so an explicit networkInterfaces still takes effect.
+	if in.cfg.CopyNetwork {
+		if err := in.copyLiveNetwork(); err != nil {
+			return err
+		}
+	}
+
 	conf, err := network.DhcpcdConf(interfacesFromConfig(in.cfg.NetworkInterfaces))
 	if err != nil {
 		return err
@@ -857,12 +869,91 @@ func interfacesFromConfig(cfgIfaces []*config.Interface) []network.Interface {
 	return ifaces
 }
 
+// liveNetworkPaths are the live system's network-config locations
+// copyNetwork carries into the target: Wi-Fi credentials (which the
+// per-interface config cannot express) and a hand-edited dhcpcd.conf. Each
+// is copied only if it exists on the live system.
+var liveNetworkPaths = []string{
+	"/etc/wpa_supplicant",
+	"/etc/dhcpcd.conf",
+}
+
+// copyLiveNetwork copies the live system's network configuration into the
+// target, preserving each path's location under the target root. It is
+// best-effort: a path that is absent on the live system is skipped.
+func (in *installer) copyLiveNetwork() error {
+	for _, src := range liveNetworkPaths {
+		fi, err := os.Lstat(src)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("copyNetwork: stat %s: %w", src, err)
+		}
+		dst := filepath.Join(in.opts.Root, src)
+		if err := copyPath(src, dst, fi); err != nil {
+			return fmt.Errorf("copyNetwork: %s: %w", src, err)
+		}
+	}
+	return nil
+}
+
+// copyPath copies a file or a directory tree from src to dst, creating
+// parent directories and preserving file permissions.
+func copyPath(src, dst string, fi os.FileInfo) error {
+	if fi.IsDir() {
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(dst, fi.Mode().Perm()); err != nil {
+			return err
+		}
+		for _, e := range entries {
+			cfi, err := e.Info()
+			if err != nil {
+				return err
+			}
+			if err := copyPath(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()), cfi); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	// Regular files only; skip sockets, devices and dangling symlinks that
+	// have no meaning in the target.
+	if !fi.Mode().IsRegular() {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, fi.Mode().Perm())
+}
+
 func (in *installer) preHooks() error  { return in.runHooks(in.cfg.PreInstall) }
 func (in *installer) postHooks() error { return in.runHooks(in.cfg.PostInstall) }
 
 // runHooks runs each hook command, chrooted into the target when the
 // hook asks for it, on the live system otherwise.
 func (in *installer) runHooks(hooks []*config.Hook) error {
+	// The config's env variables are made available to every hook, sorted
+	// for a deterministic command line, on top of the fixed $chrootDir and
+	// $chrooted the installer always sets.
+	var extraEnv []string
+	keys := make([]string, 0, len(in.cfg.Environment))
+	for k := range in.cfg.Environment {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		extraEnv = append(extraEnv, k+"="+in.cfg.Environment[k])
+	}
+
 	for _, h := range hooks {
 		if h == nil || h.Cmd == "" {
 			continue
@@ -870,12 +961,14 @@ func (in *installer) runHooks(hooks []*config.Hook) error {
 		// clr-installer expands $chrootDir and $chrooted in hook commands;
 		// pass them as environment so the shell does the same. Inside the
 		// chroot the target root is /; outside it is the mount tree.
-		var cmd []string
+		cmd := []string{}
 		if h.Chroot {
-			cmd = []string{"chroot", in.opts.Root, "env", "chrootDir=/", "chrooted=1", "sh", "-c", h.Cmd}
+			cmd = append(cmd, "chroot", in.opts.Root, "env", "chrootDir=/", "chrooted=1")
 		} else {
-			cmd = []string{"env", "chrootDir=" + in.opts.Root, "chrooted=0", "sh", "-c", h.Cmd}
+			cmd = append(cmd, "env", "chrootDir="+in.opts.Root, "chrooted=0")
 		}
+		cmd = append(cmd, extraEnv...)
+		cmd = append(cmd, "sh", "-c", h.Cmd)
 		if err := storage.RunCommands([][]string{cmd}, in.opts.Runner); err != nil {
 			return err
 		}

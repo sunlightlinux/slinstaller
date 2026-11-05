@@ -193,3 +193,56 @@ func TestRemoveIfPresent(t *testing.T) {
 		t.Errorf("empty path: %v", err)
 	}
 }
+
+func TestCopyLiveNetwork(t *testing.T) {
+	live := t.TempDir()
+	// A wpa_supplicant directory with a file, and a dhcpcd.conf.
+	wpaDir := filepath.Join(live, "etc", "wpa_supplicant")
+	if err := os.MkdirAll(wpaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wpaDir, "wpa_supplicant-wlan0.conf"), []byte("network={}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(live, "etc", "dhcpcd.conf"), []byte("# custom\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := liveNetworkPaths
+	liveNetworkPaths = []string{
+		filepath.Join(live, "etc", "wpa_supplicant"),
+		filepath.Join(live, "etc", "dhcpcd.conf"),
+		filepath.Join(live, "etc", "absent.conf"), // skipped, not an error
+	}
+	defer func() { liveNetworkPaths = saved }()
+
+	target := t.TempDir()
+	in := &installer{opts: Options{Root: target}}
+	if err := in.copyLiveNetwork(); err != nil {
+		t.Fatalf("copyLiveNetwork: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(target, live, "etc", "wpa_supplicant", "wpa_supplicant-wlan0.conf"))
+	if err != nil || string(got) != "network={}\n" {
+		t.Errorf("wpa_supplicant file not copied: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(target, live, "etc", "dhcpcd.conf")); err != nil {
+		t.Errorf("dhcpcd.conf not copied: %v", err)
+	}
+}
+
+func TestHooksReceiveConfigEnv(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.PreInstall = []*config.Hook{{Cmd: "echo hi"}}
+	cfg.Environment = map[string]string{"FOO": "bar", "BAZ": "qux"}
+
+	var r recorder
+	if err := Install(cfg, Options{Through: "pre-install", Runner: r.run}); err != nil {
+		t.Fatalf("Install through pre-install: %v", err)
+	}
+	got := r.flat()
+	// Config env is injected, sorted, between the fixed vars and sh -c.
+	if !strings.Contains(got, "BAZ=qux FOO=bar sh -c echo hi") {
+		t.Errorf("config env not injected in sorted order: %q", got)
+	}
+}

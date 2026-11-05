@@ -20,6 +20,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -53,6 +54,24 @@ type Config struct {
 	SwupdMirror string   `yaml:"swupdMirror,omitempty"`
 	HTTPSProxy  string   `yaml:"httpsProxy,omitempty"`
 
+	// Packages are extra xbps packages to install into the target, on top of
+	// the base set. This is slinstaller's functional stand-in for
+	// clr-installer's bundles: Clear's bundle names (os-core, editors, …) do
+	// not map to Sunlight packages, so bundles is carried-but-ignored, while
+	// a Sunlight config names real packages here.
+	Packages []string `yaml:"packages,omitempty"`
+
+	// Offline installs without fetching from a remote repository: the base
+	// system must come from a local repository on the live medium
+	// (clr-installer's offline). The network-readiness precheck is skipped
+	// and the remote default repo is not used.
+	Offline bool `yaml:"offline,omitempty"`
+
+	// AllowInsecureHTTP permits a plain http:// package mirror
+	// (clr-installer's allowInsecureHTTP). Without it a non-https remote repo
+	// is refused; https and local repositories are always allowed.
+	AllowInsecureHTTP bool `yaml:"allowInsecureHTTP,omitempty"`
+
 	// SwapFileSize, if set, creates a swap file of that size on root
 	// instead of (or besides) a swap partition — clr-installer's
 	// swapFileSize. A human size such as "2G".
@@ -66,7 +85,40 @@ type Config struct {
 	PreInstall  []*Hook `yaml:"pre-install,omitempty"`
 	PostInstall []*Hook `yaml:"post-install,omitempty"`
 
+	// Environment is a set of variables made available to pre/post-install
+	// hook commands (clr-installer's env), on top of the $chrootDir and
+	// $chrooted the installer always provides.
+	Environment map[string]string `yaml:"env,omitempty"`
+
+	// CopyNetwork copies the live system's network configuration into the
+	// installed system (clr-installer's copyNetwork), so a machine set up on
+	// the live medium — notably its Wi-Fi credentials — keeps working after
+	// the first boot.
+	CopyNetwork bool `yaml:"copyNetwork,omitempty"`
+
+	// PostReboot reboots the machine when the install finishes
+	// (clr-installer's postReboot), for an unattended install that should
+	// come up into the new system without an operator at the console.
+	PostReboot bool `yaml:"postReboot,omitempty"`
+
+	// BlockDevices are clr-installer's storage aliases: a name bound to a
+	// device file, so a targetMedia entry can be written as `${alias}` /
+	// `${alias}1` instead of a hard-coded `nvme0n1` / `nvme0n1p1`. They are
+	// expanded into the targetMedia names at load time (expandAliases).
+	BlockDevices []*StorageAlias `yaml:"block-devices,omitempty"`
+
 	Version uint `yaml:"version,omitempty"`
+}
+
+// StorageAlias binds a name to a device file so targetMedia can refer to a
+// disk by alias. In clr-installer a disk is named `${alias}` and its
+// partitions `${alias}1`, `${alias}2`; the alias expands to the device's
+// base name (/dev/nvme0n1 -> nvme0n1) for the disk, and to that name plus
+// the kernel's partition suffix (nvme0n1p) for the partitions, so a layout
+// can be written once and pointed at different disks by changing the file.
+type StorageAlias struct {
+	Name string `yaml:"name,omitempty"`
+	File string `yaml:"file,omitempty"`
 }
 
 // Media is one entry in targetMedia: a disk (type "disk") carrying its
@@ -168,7 +220,88 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
+	c.expandAliases()
 	return &c, nil
+}
+
+// KernelPackage maps the configured kernel to the xbps package that
+// provides it, or "" to leave the base system's default kernel in place.
+// clr-installer names a kernel by its Clear bundle (kernel-native,
+// kernel-lts, kernel-kvm); those map to Sunlight's mainline (linux) or LTS
+// (linux-lts) kernel. Any other value is taken as a literal package name,
+// so a Sunlight-native config can request a specific kernel package.
+func (c *Config) KernelPackage() string {
+	k := strings.TrimSpace(c.Kernel)
+	switch {
+	case k == "":
+		return ""
+	case strings.Contains(k, "lts"):
+		return "linux-lts"
+	case strings.HasPrefix(k, "kernel-") || k == "kernel":
+		return "linux"
+	default:
+		return k
+	}
+}
+
+// aliasPartSuffix returns the partition-name suffix the kernel uses for a
+// device file: "p" for nvme/loop/mmcblk (nvme0n1 -> nvme0n1p1), "" for the
+// sd*/vd* family (sda -> sda1). This mirrors clr-installer's prefix table.
+func aliasPartSuffix(file string) string {
+	base := filepath.Base(file)
+	for _, p := range []string{"nvme", "loop", "mmcblk"} {
+		if strings.HasPrefix(base, p) {
+			return "p"
+		}
+	}
+	return ""
+}
+
+// expandVars replaces $name and ${name} in s using vars, like
+// clr-installer's utils.ExpandVariables.
+func expandVars(vars map[string]string, s string) string {
+	for k, v := range vars {
+		s = strings.ReplaceAll(s, "${"+k+"}", v)
+		s = strings.ReplaceAll(s, "$"+k, v)
+	}
+	return s
+}
+
+// expandAliases rewrites ${alias}/$alias references in targetMedia names
+// using the block-devices declarations, so a clr-installer config written
+// against aliases loads into concrete device names. A disk's name expands
+// to the device's base name; its direct partition children expand to that
+// base plus the kernel's partition suffix — the convention clr uses, where
+// a disk is `${a}` and its partitions `${a}1`, `${a}2`.
+func (c *Config) expandAliases() {
+	if len(c.BlockDevices) == 0 {
+		return
+	}
+	diskVars := map[string]string{} // alias -> nvme0n1
+	partVars := map[string]string{} // alias -> nvme0n1p (base + suffix)
+	for _, a := range c.BlockDevices {
+		if a == nil || a.Name == "" || a.File == "" {
+			continue
+		}
+		base := filepath.Base(a.File)
+		diskVars[a.Name] = base
+		partVars[a.Name] = base + aliasPartSuffix(a.File)
+	}
+	if len(diskVars) == 0 {
+		return
+	}
+	for _, m := range c.TargetMedia {
+		if m == nil {
+			continue
+		}
+		m.Name = expandVars(diskVars, m.Name)
+		for _, ch := range m.Children {
+			if ch == nil {
+				continue
+			}
+			ch.Name = expandVars(partVars, ch.Name)
+		}
+	}
 }
 
 // hostnameRe is the conservative intersection of what Linux and DNS
