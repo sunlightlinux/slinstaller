@@ -21,6 +21,14 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- `--reboot` flag (the CLI equivalent of the config's `postReboot`) and
+  `--log <file>` (tees the install's command trace, stage headers and
+  sub-command output to a file as well as the terminal, for debugging an
+  unattended or serial install).
+- Timezone and keymap validation: a mistyped `timezone` or `keyboard` is
+  caught before the disk is touched, checked against the live system's
+  zoneinfo and console-keymap data — and only when that data is present, so
+  a minimal medium that lacks it never rejects a valid value.
 - Reuse-partitions (no-wipe) install: `reusePartitions: true` installs into
   the disk's **existing** partitions without repartitioning — the partition
   table is left untouched, each declared partition is matched to its device

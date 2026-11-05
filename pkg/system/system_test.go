@@ -284,3 +284,68 @@ func TestIsUEFI(t *testing.T) {
 		t.Error("IsUEFI() = false for an existing firmware directory")
 	}
 }
+
+func TestValidTimezone(t *testing.T) {
+	saved := zoneinfoDir
+	defer func() { zoneinfoDir = saved }()
+
+	// No data: checked=false, never rejects.
+	zoneinfoDir = filepath.Join(t.TempDir(), "absent")
+	if ok, checked := ValidTimezone("Whatever"); checked {
+		t.Errorf("missing zoneinfo should be unchecked, got ok=%v checked=%v", ok, checked)
+	}
+
+	// With data: a real zone passes, a bad one and traversal fail.
+	dir := t.TempDir()
+	zoneinfoDir = dir
+	if err := os.MkdirAll(filepath.Join(dir, "Europe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Europe", "Bucharest"), []byte("tz"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "UTC"), []byte("tz"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		tz   string
+		want bool
+	}{
+		{"UTC", true}, {"Europe/Bucharest", true},
+		{"Europe/Nope", false}, {"../etc/passwd", false}, {"Europe", false}, // a dir is not a zone
+	} {
+		ok, checked := ValidTimezone(tc.tz)
+		if !checked {
+			t.Errorf("%q: expected checked", tc.tz)
+		}
+		if ok != tc.want {
+			t.Errorf("ValidTimezone(%q) = %v, want %v", tc.tz, ok, tc.want)
+		}
+	}
+}
+
+func TestValidKeymap(t *testing.T) {
+	saved := keymapsDir
+	defer func() { keymapsDir = saved }()
+
+	keymapsDir = filepath.Join(t.TempDir(), "absent")
+	if _, checked := ValidKeymap("us"); checked {
+		t.Error("missing keymaps dir should be unchecked")
+	}
+
+	dir := t.TempDir()
+	keymapsDir = dir
+	sub := filepath.Join(dir, "i386", "qwerty")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "us.map.gz"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, checked := ValidKeymap("us"); !ok || !checked {
+		t.Errorf("us should be found: ok=%v checked=%v", ok, checked)
+	}
+	if ok, _ := ValidKeymap("zz"); ok {
+		t.Error("zz should not be found")
+	}
+}

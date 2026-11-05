@@ -11,6 +11,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,6 +102,12 @@ func run(args []string) error {
 		"skip the minimum-size and disk-fit checks (same as the config's skipValidationSize)")
 	fs.BoolVar(&skipAll, "skip-validation-all", false,
 		"skip all config validation (same as the config's skipValidationAll); use with care")
+	var reboot bool
+	fs.BoolVar(&reboot, "reboot", false,
+		"reboot into the installed system when the install finishes (same as the config's postReboot)")
+	var logFile string
+	fs.StringVar(&logFile, "log", "",
+		"also write the install's output to this file (for debugging an unattended or serial install)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] [config.yaml]\n\n")
 		fmt.Fprintf(os.Stderr, "With a config file, reads a clr-installer-format config and prints its plan;\n")
@@ -171,11 +178,27 @@ func run(args []string) error {
 	if skipAll {
 		cfg.SkipValidationAll = true
 	}
+	// --reboot is the CLI equivalent of the config's postReboot.
+	if reboot {
+		cfg.PostReboot = true
+	}
 
 	// Validate before anything else: this is the last point at which
 	// nothing has been touched.
 	if err := cfg.Validate(); err != nil {
 		return err
+	}
+
+	// Catch a mistyped timezone or keymap here, before anything is wiped,
+	// but only when the live system actually has the data to check against
+	// (so a minimal medium that lacks it does not reject a valid value).
+	if !cfg.SkipValidationAll {
+		if ok, checked := system.ValidTimezone(cfg.Timezone); checked && !ok {
+			return fmt.Errorf("timezone %q is not a known zoneinfo zone (e.g. UTC, Europe/Bucharest)", cfg.Timezone)
+		}
+		if ok, checked := system.ValidKeymap(cfg.Keyboard); checked && !ok {
+			return fmt.Errorf("keymap %q is not among the system's console keymaps (e.g. us, de, ro)", cfg.Keyboard)
+		}
 	}
 
 	plan, err := cfg.Plan()
@@ -246,6 +269,22 @@ func run(args []string) error {
 	}
 	localRepos := presentRepos(strings.Split(localRepo, ","))
 
+	// --log tees everything the install prints — the command trace, stage
+	// headers and sub-command output — to a file as well as the terminal,
+	// for debugging an unattended or serial install. Without it, output goes
+	// to stderr as before.
+	logOut := io.Writer(os.Stderr)
+	runner := storage.VerboseRunner
+	if logFile != "" {
+		lf, err := os.Create(logFile)
+		if err != nil {
+			return fmt.Errorf("--log: %w", err)
+		}
+		defer lf.Close()
+		logOut = io.MultiWriter(os.Stderr, lf)
+		runner = storage.SinkRunner(func(line string) { fmt.Fprintln(logOut, line) })
+	}
+
 	opts := controller.Options{
 		Root:       root,
 		Through:    through,
@@ -256,9 +295,9 @@ func run(args []string) error {
 		Packages:   packages,
 		// Stream progress and command output so the operator sees the
 		// install work rather than a silent pause.
-		Runner: storage.VerboseRunner,
-		Log:    os.Stderr,
-		Output: os.Stderr,
+		Runner: runner,
+		Log:    logOut,
+		Output: logOut,
 	}
 
 	if os.Geteuid() != 0 {

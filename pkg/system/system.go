@@ -76,6 +76,53 @@ func Timezone(root, tz string) error {
 	return nil
 }
 
+// zoneinfoDir and keymapsDir are the live system's timezone and console-
+// keymap data, used by the validators below. Variables so tests can point
+// them elsewhere.
+var (
+	zoneinfoDir = "/usr/share/zoneinfo"
+	keymapsDir  = "/usr/share/kbd/keymaps"
+)
+
+// ValidTimezone reports whether tz names a real zoneinfo zone. checked is
+// false when the live system has no zoneinfo data to check against, in
+// which case ok is not meaningful and the caller should not reject tz.
+func ValidTimezone(tz string) (ok, checked bool) {
+	if _, err := os.Stat(zoneinfoDir); err != nil {
+		return false, false
+	}
+	// Reject traversal and absolute paths before touching the filesystem.
+	if tz == "" || strings.Contains(tz, "..") || strings.HasPrefix(tz, "/") {
+		return false, true
+	}
+	fi, err := os.Stat(filepath.Join(zoneinfoDir, tz))
+	return err == nil && !fi.IsDir(), true
+}
+
+// ValidKeymap reports whether code names a console keymap the live system
+// carries (a <code>.map / <code>.map.gz under the kbd keymaps tree).
+// checked is false when there is no keymap data to check against.
+func ValidKeymap(code string) (ok, checked bool) {
+	if _, err := os.Stat(keymapsDir); err != nil {
+		return false, false
+	}
+	if code == "" || strings.ContainsAny(code, "/.") {
+		return false, true
+	}
+	wanted := map[string]bool{code + ".map": true, code + ".map.gz": true}
+	found := false
+	_ = filepath.WalkDir(keymapsDir, func(_ string, d os.DirEntry, err error) error {
+		if err != nil || found {
+			return nil
+		}
+		if !d.IsDir() && wanted[d.Name()] {
+			found = true
+		}
+		return nil
+	})
+	return found, true
+}
+
 // Keymap sets the console keymap by appending KEYMAP to /etc/rc.conf,
 // which is where both Void's core services and slinit's OpenRC
 // compatibility read it. An empty code is a no-op.
