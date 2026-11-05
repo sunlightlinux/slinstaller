@@ -21,6 +21,23 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Reuse-partitions (no-wipe) install: `reusePartitions: true` installs into
+  the disk's **existing** partitions without repartitioning — the partition
+  table is left untouched, each declared partition is matched to its device
+  by name, formatted unless marked `preserve: true`, then mounted. This is
+  how an install shares an existing ESP or keeps a `/home` across a
+  reinstall (clr-installer's advanced/manual mode). Only plain partitions
+  are supported for now (no crypt/lvm/raid). Preflight confirms each
+  partition exists, and the confirmation lists which are formatted vs kept.
+  See `demo/vm/config-reuse.yaml`.
+- Pre-wipe size validation (clr-installer parity): `Validate` now rejects an
+  EFI System Partition below 100 MB, a root below 2 GB, or any partition
+  below 1 MiB, and preflight refuses a layout whose fixed partitions plus
+  GPT overhead do not fit the target disk — all **before** the disk is
+  touched, so an oversize or undersized layout fails up front rather than
+  partway through `parted`. `skipValidationSize`/`--skip-validation-size`
+  and `skipValidationAll`/`--skip-validation-all` turn these (or all
+  validation) off, as in clr.
 - `--offline` flag: the command-line equivalent of the config's `offline`,
   so an offline install (local repository only, no network) can be run
   interactively without hand-writing a config.

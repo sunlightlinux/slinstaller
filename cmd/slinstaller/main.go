@@ -96,6 +96,11 @@ func run(args []string) error {
 	var offline bool
 	fs.BoolVar(&offline, "offline", false,
 		"install only from --local-repo, without a remote mirror (same as the config's offline)")
+	var skipSize, skipAll bool
+	fs.BoolVar(&skipSize, "skip-validation-size", false,
+		"skip the minimum-size and disk-fit checks (same as the config's skipValidationSize)")
+	fs.BoolVar(&skipAll, "skip-validation-all", false,
+		"skip all config validation (same as the config's skipValidationAll); use with care")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] [config.yaml]\n\n")
 		fmt.Fprintf(os.Stderr, "With a config file, reads a clr-installer-format config and prints its plan;\n")
@@ -158,6 +163,14 @@ func run(args []string) error {
 	if offline {
 		cfg.Offline = true
 	}
+	// The validation-skip flags OR with the config's, so either source can
+	// turn a check off.
+	if skipSize {
+		cfg.SkipValidationSize = true
+	}
+	if skipAll {
+		cfg.SkipValidationAll = true
+	}
 
 	// Validate before anything else: this is the last point at which
 	// nothing has been touched.
@@ -182,9 +195,15 @@ func run(args []string) error {
 	}
 
 	if !apply {
-		fmt.Fprintf(os.Stderr,
-			"\nDry run. Re-run with --apply to partition %s — this destroys its contents.\n",
-			plan.Disk)
+		if plan.Wipe {
+			fmt.Fprintf(os.Stderr,
+				"\nDry run. Re-run with --apply to partition %s — this destroys its contents.\n",
+				plan.Disk)
+		} else {
+			fmt.Fprintf(os.Stderr,
+				"\nDry run (reusePartitions). Re-run with --apply to format the listed partitions on %s — the table is kept, but formatted partitions lose their data.\n",
+				plan.Disk)
+		}
 		return nil
 	}
 
@@ -320,6 +339,42 @@ func run(args []string) error {
 			}
 		}
 
+		// Reuse install: the partitions are not created here, so they must
+		// already exist on the disk. Confirm each before formatting any.
+		if !plan.Wipe {
+			for _, p := range plan.Parts {
+				if p.LV || p.Raid {
+					continue
+				}
+				d := blockdev.FindByPath(devs, p.Device)
+				if d == nil {
+					return fmt.Errorf("reusePartitions: %s does not exist — create the partitions first, or drop reusePartitions to repartition", p.Device)
+				}
+				if d.Type != "part" {
+					return fmt.Errorf("reusePartitions: %s is a %s, not a partition", p.Device, d.Type)
+				}
+			}
+		}
+
+		// Disk fit: the fixed-size partitions plus GPT overhead must fit the
+		// disk, checked before wiping so an oversize layout fails here rather
+		// than partway through parted. Skipped for a reuse install (nothing
+		// is cut) and when size validation is off.
+		if plan.Wipe && !cfg.SkipValidationSize && !cfg.SkipValidationAll {
+			fixed := plan.FixedBytesByDisk()
+			for _, disk := range plan.DiskList() {
+				d := blockdev.FindByPath(devs, disk)
+				if d == nil || d.Size == 0 {
+					continue
+				}
+				need := fixed[disk] + storage.GPTReserveBytes
+				if need > d.Size {
+					return fmt.Errorf("layout needs %s on %s but the disk is only %s — reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
+						humanSize(need), disk, humanSize(d.Size))
+				}
+			}
+		}
+
 		// Fetching the base system needs the repository; check it is
 		// reachable before wiping, not after. Local (non-http) repos are
 		// skipped.
@@ -357,7 +412,7 @@ func run(args []string) error {
 		return tui.RunInstall(cfg, opts, plan)
 	}
 
-	if !confirm(stdin, plan.DiskList()) {
+	if !confirm(stdin, plan) {
 		return fmt.Errorf("aborted")
 	}
 	if err := controller.Install(cfg, opts); err != nil {
@@ -493,8 +548,24 @@ func terminalSize(f *os.File) (cols, rows int, ok bool) {
 // prompt is too easy to answer on the wrong machine; retyping the path
 // makes the operator look at which disk they are about to erase. With
 // several disks (a RAID layout) all are listed and the first is retyped.
-func confirm(in *bufio.Reader, disks []string) bool {
-	if len(disks) == 1 {
+func confirm(in *bufio.Reader, plan *storage.Plan) bool {
+	disks := plan.DiskList()
+	if !plan.Wipe {
+		// Reuse install: the partition table is untouched; only the listed
+		// partitions are formatted (and the preserved ones mounted as-is).
+		fmt.Fprintln(os.Stderr, "\nReusing the existing partitions (the disk is NOT repartitioned).")
+		for _, p := range plan.Parts {
+			if p.LV || p.Raid {
+				continue
+			}
+			if p.Preserve {
+				fmt.Fprintf(os.Stderr, "  KEEP   %s -> %s (not formatted)\n", p.Device, orDash(p.Mountpoint))
+			} else {
+				fmt.Fprintf(os.Stderr, "  FORMAT %s as %s -> %s\n", p.Device, p.Filesystem, orDash(p.Mountpoint))
+			}
+		}
+		fmt.Fprintf(os.Stderr, "This ERASES the partitions marked FORMAT. Type the disk path (%s) to confirm: ", disks[0])
+	} else if len(disks) == 1 {
 		fmt.Fprintf(os.Stderr, "\nAbout to PARTITION and ERASE %s.\nType the disk path to confirm: ", disks[0])
 	} else {
 		fmt.Fprintln(os.Stderr, "\nAbout to PARTITION and ERASE these disks:")
@@ -508,6 +579,14 @@ func confirm(in *bufio.Reader, disks []string) bool {
 		return false
 	}
 	return strings.TrimSpace(line) == disks[0]
+}
+
+// orDash renders an empty mountpoint as a dash.
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
 }
 
 // presentRepos keeps the paths that hold an xbps repository index

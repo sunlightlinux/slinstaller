@@ -271,3 +271,24 @@ func TestMkfsSkipsRaidMembers(t *testing.T) {
 		t.Errorf("raid members should not be formatted:\n%s", flat)
 	}
 }
+
+func TestFixedBytesByDisk(t *testing.T) {
+	pl := &Plan{
+		Disk:  "/dev/sda",
+		Disks: []string{"/dev/sda", "/dev/sdb"},
+		Parts: []Partition{
+			{Device: "/dev/sda1", Disk: "/dev/sda", Size: "536870912"},  // 512 MiB
+			{Device: "/dev/sda2", Disk: "/dev/sda", Size: SizeRest},     // fill: ignored
+			{Device: "/dev/sdb1", Disk: "/dev/sdb", Size: "1073741824"}, // 1 GiB
+			{LV: true, Size: "999"},                                     // LV: ignored
+			{Raid: true, Size: "999"},                                   // array: ignored
+		},
+	}
+	got := pl.FixedBytesByDisk()
+	if got["/dev/sda"] != 536870912 {
+		t.Errorf("sda fixed = %d, want 536870912", got["/dev/sda"])
+	}
+	if got["/dev/sdb"] != 1073741824 {
+		t.Errorf("sdb fixed = %d, want 1073741824", got["/dev/sdb"])
+	}
+}

@@ -626,3 +626,105 @@ func TestKernelPackage(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateMinimumSizes(t *testing.T) {
+	// ESP too small, root too small, and a sub-MiB partition.
+	c := &Config{
+		Hostname: "box",
+		Users:    []*User{{Login: "me", Password: "$6$a$b", Admin: true}},
+		TargetMedia: []*Media{{
+			Name: "sda", Type: "disk",
+			Children: []*Media{
+				{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "10M"},
+				{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/", Size: "500M"},
+				{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: "/data", Size: "512K"},
+			},
+		}},
+	}
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("expected size problems, got nil")
+	}
+	for _, want := range []string{"100 MB", "2 GB", "1 MiB"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in: %v", want, err)
+		}
+	}
+	// skipValidationSize must silence exactly those.
+	c.SkipValidationSize = true
+	if err := c.Validate(); err != nil {
+		t.Errorf("skipValidationSize should pass, got: %v", err)
+	}
+}
+
+func TestValidateSkipAll(t *testing.T) {
+	// A layout with no root and no ESP is invalid, but skipValidationAll
+	// bypasses everything.
+	c := &Config{
+		SkipValidationAll: true,
+		TargetMedia: []*Media{{
+			Name: "sda", Type: "disk",
+			Children: []*Media{{Name: "sda1", Type: "part", FsType: "ext4", Mountpoint: "/x", Size: "1G"}},
+		}},
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("skipValidationAll should pass, got: %v", err)
+	}
+}
+
+func TestPlanReuse(t *testing.T) {
+	c := &Config{
+		ReusePartitions: true,
+		Hostname:        "box",
+		Users:           []*User{{Login: "me", Password: "$6$a$b", Admin: true}},
+		TargetMedia: []*Media{{
+			Name: "sda", Type: "disk",
+			Children: []*Media{
+				{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Preserve: true},
+				{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+			},
+		}},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	plan, err := c.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.Wipe {
+		t.Error("reuse plan must not wipe")
+	}
+	if !plan.Parts[0].Preserve || plan.Parts[1].Preserve {
+		t.Errorf("preserve flags wrong: %+v", plan.Parts)
+	}
+	// No parted commands; mkfs only for the non-preserved partition.
+	if tc := plan.TableCommands(); len(tc) != 0 {
+		t.Errorf("reuse emitted %d table commands, want 0: %v", len(tc), tc)
+	}
+	mkfs, _ := plan.MkfsCommands()
+	if len(mkfs) != 1 {
+		t.Fatalf("reuse mkfs = %d commands, want 1 (sda2 only)", len(mkfs))
+	}
+	if got := strings.Join(mkfs[0], " "); !strings.Contains(got, "/dev/sda2") {
+		t.Errorf("mkfs should target sda2: %s", got)
+	}
+}
+
+func TestValidateReuseRejectsNonPlain(t *testing.T) {
+	c := &Config{
+		ReusePartitions: true,
+		Users:           []*User{{Login: "me", Password: "$6$a$b", Admin: true}},
+		TargetMedia: []*Media{{
+			Name: "sda", Type: "disk",
+			Children: []*Media{
+				{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot"},
+				{Name: "sda2", Type: "crypt", FsType: "ext4", Mountpoint: "/"},
+			},
+		}},
+	}
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "only plain partitions") {
+		t.Fatalf("reuse+crypt should be rejected, got: %v", err)
+	}
+}

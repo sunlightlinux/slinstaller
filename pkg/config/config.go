@@ -72,6 +72,14 @@ type Config struct {
 	// is refused; https and local repositories are always allowed.
 	AllowInsecureHTTP bool `yaml:"allowInsecureHTTP,omitempty"`
 
+	// SkipValidationSize turns off the minimum-size and disk-fit checks
+	// (clr-installer's skipValidationSize); SkipValidationAll turns off
+	// Validate entirely (clr's skipValidationAll). Both exist so a
+	// deliberately unusual layout can be forced through, and both are off by
+	// default.
+	SkipValidationSize bool `yaml:"skipValidationSize,omitempty"`
+	SkipValidationAll  bool `yaml:"skipValidationAll,omitempty"`
+
 	// SwapFileSize, if set, creates a swap file of that size on root
 	// instead of (or besides) a swap partition — clr-installer's
 	// swapFileSize. A human size such as "2G".
@@ -100,6 +108,15 @@ type Config struct {
 	// (clr-installer's postReboot), for an unattended install that should
 	// come up into the new system without an operator at the console.
 	PostReboot bool `yaml:"postReboot,omitempty"`
+
+	// ReusePartitions installs into the disk's existing partitions instead
+	// of repartitioning it (clr-installer's advanced/manual mode): the
+	// partition table is left untouched, each declared partition is matched
+	// to the existing device by name, formatted unless it is marked
+	// preserve, then mounted. It is how an install shares an existing ESP or
+	// keeps a /home across a reinstall, and the only way slinstaller writes
+	// to a disk without wiping it.
+	ReusePartitions bool `yaml:"reusePartitions,omitempty"`
 
 	// BlockDevices are clr-installer's storage aliases: a name bound to a
 	// device file, so a targetMedia entry can be written as `${alias}` /
@@ -148,6 +165,11 @@ type Media struct {
 	// The array itself is declared in the config's top-level raid list;
 	// several partitions, usually on different disks, carry the same name.
 	Raid string `yaml:"raid,omitempty"`
+
+	// Preserve, in a reusePartitions install, keeps this existing partition's
+	// data: it is mounted but not reformatted. Ignored for a normal
+	// (wiping) install, where every partition is made fresh.
+	Preserve bool `yaml:"preserve,omitempty"`
 }
 
 // RaidArray is one software RAID array: a name (its device is /dev/md/<name>,
@@ -327,6 +349,10 @@ func looksHashed(s string) bool {
 // a valid clr config may omit (a login account, a hostname), only
 // rejects layouts that cannot install or boot.
 func (c *Config) Validate() error {
+	if c.SkipValidationAll {
+		return nil
+	}
+
 	disks, err := c.installDisks()
 	if err != nil {
 		return err
@@ -334,6 +360,28 @@ func (c *Config) Validate() error {
 
 	var probs []string
 	add := func(format string, a ...any) { probs = append(probs, fmt.Sprintf(format, a...)) }
+
+	// checkMin flags a fixed partition/volume size below a floor, unless size
+	// validation is turned off. A missing size, 0 or "rest" (fill) is not a
+	// fixed size and is left to the disk-fit check at install time.
+	checkMin := func(where, sizeStr string, min uint64, minLabel, what string) {
+		// Sizes are meaningless in a reuse install (the partitions already
+		// exist), and off when size validation is skipped.
+		if c.SkipValidationSize || c.ReusePartitions {
+			return
+		}
+		s := strings.TrimSpace(sizeStr)
+		if s == "" || s == "0" || strings.EqualFold(s, "rest") {
+			return
+		}
+		b, err := parseSize(s)
+		if err != nil {
+			return // the size format is reported elsewhere
+		}
+		if b < min {
+			add("%s: %s %q is below the %s minimum", where, what, s, minLabel)
+		}
+	}
 
 	roots, esps := 0, 0
 	seen := map[string]bool{}
@@ -373,12 +421,30 @@ func (c *Config) Validate() error {
 				where = fmt.Sprintf("partition %d", i+1)
 			}
 
+			// A reuse install writes into existing partitions, so it cannot
+			// create the on-disk structures crypt/lvm/raid need: only plain
+			// partitions are allowed, and the rest is validated as usual
+			// (filesystem, mountpoint, ESP/root counting) so the same checks
+			// apply whether or not the disk is wiped.
+			if c.ReusePartitions {
+				if (ch.Type != "" && ch.Type != "part") || ch.Encrypted {
+					add("%s: reusePartitions supports only plain partitions (no crypt, lvm, raid or encrypted)", where)
+					continue
+				}
+				checkFS(where, ch.FsType, ch.Mountpoint)
+				if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
+					esps++
+				}
+				continue
+			}
+
 			// An lvm partition carries no filesystem itself; its logical
 			// volumes do. Validate those, and the group it names.
 			if ch.Type == "lvm" {
 				if ch.VolumeGroup == "" {
 					add("%s: lvm partition has no volumeGroup", where)
 				}
+				checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "physical-volume size")
 				fills := 0
 				for j, lv := range ch.Children {
 					if lv == nil {
@@ -389,6 +455,10 @@ func (c *Config) Validate() error {
 						lvWhere = fmt.Sprintf("%s/lv%d", where, j+1)
 					}
 					checkFS(lvWhere, lv.FsType, lv.Mountpoint)
+					checkMin(lvWhere, lv.Size, storage.MinPartitionSize, "1 MiB", "size")
+					if lv.Mountpoint == "/" {
+						checkMin(lvWhere, lv.Size, storage.MinRootSize, "2 GB", "root size")
+					}
 					if s := strings.TrimSpace(lv.Size); s == "" || s == "0" || strings.EqualFold(s, "rest") {
 						fills++
 					}
@@ -411,9 +481,14 @@ func (c *Config) Validate() error {
 			}
 
 			checkFS(where, ch.FsType, ch.Mountpoint)
+			checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "size")
+			if ch.Mountpoint == "/" {
+				checkMin(where, ch.Size, storage.MinRootSize, "2 GB", "root size")
+			}
 
 			if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
 				esps++
+				checkMin(where, ch.Size, storage.MinESPSize, "100 MB", "ESP size")
 				if ch.Type == "crypt" {
 					add("%s: the EFI System Partition cannot be encrypted", where)
 				}
@@ -545,6 +620,10 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		return nil, err
 	}
 
+	if c.ReusePartitions {
+		return c.planReuse(disks)
+	}
+
 	pl := &storage.Plan{Wipe: true}
 	for _, d := range disks {
 		pl.Disks = append(pl.Disks, "/dev/"+d.Name)
@@ -663,6 +742,51 @@ func (c *Config) Plan() (*storage.Plan, error) {
 				p.Size == storage.SizeRest && i != lastPhys {
 				return nil, fmt.Errorf("config: %s fills its disk but is not the last partition on it", p.Device)
 			}
+		}
+	}
+	return pl, nil
+}
+
+// planReuse builds a plan that installs into existing partitions without
+// repartitioning: Wipe is false, each declared child is matched to its
+// existing device by name, formatted unless marked preserve, and mounted.
+// Only plain partitions are supported — crypt, lvm and raid would need to
+// create or re-create on-disk structures, which reuse exists to avoid — and
+// Validate reports those; this guards again so a direct Plan call is safe.
+func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
+	pl := &storage.Plan{Wipe: false}
+	for _, d := range disks {
+		pl.Disks = append(pl.Disks, "/dev/"+d.Name)
+	}
+	for _, disk := range disks {
+		device := "/dev/" + disk.Name
+		for i, ch := range disk.Children {
+			if ch == nil {
+				continue
+			}
+			if (ch.Type != "" && ch.Type != "part") || ch.Encrypted {
+				return nil, fmt.Errorf("config: reusePartitions supports only plain partitions; %s/%s is %q",
+					disk.Name, ch.Name, ch.Type)
+			}
+			dev, num := partDev(device, i, ch.Name)
+			pl.Parts = append(pl.Parts, storage.Partition{
+				Number:     num,
+				Device:     dev,
+				Disk:       device,
+				Mountpoint: ch.Mountpoint,
+				Filesystem: ch.FsType,
+				Preserve:   ch.Preserve,
+			})
+		}
+	}
+	if len(pl.Parts) == 0 {
+		return nil, fmt.Errorf("config: targetMedia declares no partitions")
+	}
+	pl.Disk = pl.Disks[0]
+	for _, p := range pl.Parts {
+		if p.Filesystem == "vfat" && (p.Mountpoint == "/boot" || p.Mountpoint == "/boot/efi") && p.Disk != "" {
+			pl.Disk = p.Disk
+			break
 		}
 	}
 	return pl, nil

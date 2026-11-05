@@ -27,6 +27,12 @@ type Partition struct {
 	// the partition that takes whatever space is left.
 	Size string
 
+	// Preserve marks an existing partition to keep as-is: in a reuse
+	// (no-wipe) install it is mounted but not reformatted, so its data
+	// survives — a shared ESP or a /home kept across a reinstall. Only
+	// meaningful when the plan does not wipe the disk.
+	Preserve bool
+
 	// Encrypted marks a LUKS partition. Its filesystem is made and
 	// mounted on the mapper device, not the raw partition; MapName is the
 	// mapper name (/dev/mapper/<MapName>).
@@ -112,6 +118,34 @@ func (pl *Plan) DiskList() []string {
 		return pl.Disks
 	}
 	return []string{pl.Disk}
+}
+
+// FixedBytesByDisk sums, per disk, the bytes of the physical partitions
+// with a fixed size — ignoring fill partitions (SizeRest, which take only
+// what is left) and the logical volumes and RAID arrays that are not cut by
+// parted. It lets the caller check a layout fits its disks before anything
+// is wiped. A partition's disk is its Disk field, defaulting to the plan's
+// primary disk.
+func (pl *Plan) FixedBytesByDisk() map[string]uint64 {
+	out := map[string]uint64{}
+	for _, p := range pl.Parts {
+		if p.LV || p.Raid {
+			continue
+		}
+		if p.Size == SizeRest || p.Size == "" {
+			continue
+		}
+		n, err := ParseSize(p.Size)
+		if err != nil {
+			continue
+		}
+		disk := p.Disk
+		if disk == "" {
+			disk = pl.Disk
+		}
+		out[disk] += n
+	}
+	return out
 }
 
 // PartitionName returns the device path for partition n on disk:

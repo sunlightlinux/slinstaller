@@ -36,13 +36,19 @@ func (pl *Plan) TableCommands() [][]string {
 
 // diskTableCommands lays down one disk's partition table.
 func (pl *Plan) diskTableCommands(disk string) [][]string {
+	// A reuse install does not touch the partition table at all: the
+	// partitions already exist and are only formatted/mounted. Emitting no
+	// parted commands is what keeps an existing layout (and any other OS on
+	// the disk) intact.
+	if !pl.Wipe {
+		return nil
+	}
+
 	var cmds [][]string
 
 	// mklabel destroys the existing partition table, so it is gated on
 	// Wipe — the config's explicit authorisation to repartition.
-	if pl.Wipe {
-		cmds = append(cmds, []string{"parted", "-s", disk, "mklabel", "gpt"})
-	}
+	cmds = append(cmds, []string{"parted", "-s", disk, "mklabel", "gpt"})
 
 	parts := pl.physOn(disk)
 
@@ -118,6 +124,11 @@ func (pl *Plan) MkfsCommands() ([][]string, error) {
 	var cmds [][]string
 	for _, p := range pl.Parts {
 		if p.IsPV || p.IsRaidMember {
+			continue
+		}
+		// A preserved partition keeps its existing filesystem and data — no
+		// mkfs. It is still mounted and listed in fstab.
+		if p.Preserve {
 			continue
 		}
 		mkfs, err := mkfsCommand(p)
