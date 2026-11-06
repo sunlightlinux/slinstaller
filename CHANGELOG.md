@@ -39,11 +39,11 @@ for what will and will not be allowed to change once releases begin.
   `networkInterfaces` entry in the built config.
 - Manage User is now clr's account table (phase 2): a Login / User Name /
   Password / Admin table with Add New User, Revert, Confirm and Cancel, and
-  an Add New User form (login, full name, masked password, administrator
-  yes/no). The wizard can define several accounts, mark which are
-  administrators, and delete rows — replacing the previous single-admin
-  prompt. Passwords are hashed when the config is built; the install needs
-  at least one administrator.
+  a form (login, full name, masked password, administrator yes/no). The
+  wizard can define several accounts, mark which are administrators, edit an
+  existing row (Enter) or delete it (d) — replacing the previous
+  single-admin prompt. Passwords are hashed when the config is built; the
+  install needs at least one administrator.
 - Full-screen TUI reorganised to match clr-installer's menu 1:1 (phase 1):
   the Required tab is Choose Timezone, Choose Language, Configure the
   Keyboard, Configure Installation Media, Manage User, Telemetry; the

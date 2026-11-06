@@ -363,9 +363,11 @@ type model struct {
 	formIsLV   bool
 
 	// Manage User editor: a cursor over the table rows/buttons and the
-	// account being built in the Add New User form.
-	userCursor int
-	userForm   userEntry
+	// account being built in the Add/Edit User form. editUserIdx is the row
+	// being edited, or -1 when adding a new account.
+	userCursor  int
+	userForm    userEntry
+	editUserIdx int
 
 	confirmed bool
 }
@@ -706,29 +708,44 @@ func (m model) updateUserList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "enter":
-		switch btn := m.userCursor - len(m.users); btn {
+		if m.userCursor < len(m.users) {
+			// On a user row: edit that account.
+			return m.startUserEdit(m.userCursor)
+		}
+		switch m.userCursor - len(m.users) {
 		case 0: // Add New User
 			return m.startUserForm()
 		case 1: // Revert
 			m.users = nil
 			m.userCursor = 0
-		case 2, 3: // Confirm / Cancel both return to the hub
+		default: // Confirm / Cancel both return to the hub
 			m.view = viewHub
-		default: // on a user row: Enter opens the add form too
-			return m.startUserForm()
 		}
 	}
 	return m, nil
 }
 
-// startUserForm opens the Add New User form with an empty account.
+// startUserForm opens the form to add a new account.
 func (m model) startUserForm() (tea.Model, tea.Cmd) {
+	return m.openUserForm(-1, userEntry{})
+}
+
+// startUserEdit opens the form pre-filled with an existing account.
+func (m model) startUserEdit(i int) (tea.Model, tea.Cmd) {
+	return m.openUserForm(i, m.users[i])
+}
+
+// openUserForm opens the Add/Edit User form: idx is -1 to add, or the row
+// being edited, and u seeds the fields.
+func (m model) openUserForm(idx int, u userEntry) (tea.Model, tea.Cmd) {
 	m.view = viewUserForm
 	m.formStep = 0
 	m.edCursor = 0
-	m.userForm = userEntry{}
+	m.editUserIdx = idx
+	m.userForm = u
 	ti := textinput.New()
 	ti.Focus()
+	ti.SetValue(u.Login)
 	m.input = ti
 	return m, textinput.Blink
 }
@@ -746,8 +763,13 @@ func (m model) updateUserForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.edCursor = 1 - m.edCursor
 		case "enter":
 			m.userForm.Admin = m.edCursor == 0 // index 0 = Yes
-			m.users = append(m.users, m.userForm)
-			m.userCursor = len(m.users) - 1
+			if m.editUserIdx >= 0 && m.editUserIdx < len(m.users) {
+				m.users[m.editUserIdx] = m.userForm // edit in place
+				m.userCursor = m.editUserIdx
+			} else {
+				m.users = append(m.users, m.userForm)
+				m.userCursor = len(m.users) - 1
+			}
 			m.view = viewUserList
 		}
 		return m, nil
@@ -770,13 +792,22 @@ func (m model) updateUserForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.formStep++
 		if m.formStep == 3 {
-			m.edCursor = 0 // default to Admin: Yes
+			// A new account defaults to administrator; editing keeps the
+			// account's current value.
+			m.edCursor = 0
+			if m.editUserIdx >= 0 && !m.userForm.Admin {
+				m.edCursor = 1
+			}
 			return m, nil
 		}
 		ti := textinput.New()
 		ti.Focus()
-		if m.formStep == 2 {
+		switch m.formStep {
+		case 1:
+			ti.SetValue(m.userForm.UserName)
+		case 2:
 			ti.EchoMode = textinput.EchoPassword
+			ti.SetValue(m.userForm.Password)
 		}
 		m.input = ti
 		return m, textinput.Blink
@@ -1521,16 +1552,22 @@ func (m model) userListView() string {
 		btns = append(btns, style.Render(b))
 	}
 	body = append(body, lineBG.Width(w).Render("  "+strings.Join(btns, "  ")))
-	return m.screen(body, "[Up/Down] move · [a] add · [d] delete · [Enter] select · [Esc] back")
+	return m.screen(body, "[Up/Down] move · [a] add · [Enter] edit · [d] delete · [Esc] back")
 }
 
-// userFormView renders the Add New User form: one field at a time, then the
+// userFormView renders the Add/Edit User form: one field at a time, then the
 // Admin yes/no choice.
 func (m model) userFormView() string {
 	w := m.panelWidth()
+	heading := "Add New User"
+	done := "add user"
+	if m.editUserIdx >= 0 {
+		heading = "Edit User"
+		done = "save user"
+	}
 	if m.formStep == 3 {
 		body := []string{
-			itemLabel.Width(w).Render("  Add New User"),
+			itemLabel.Width(w).Render("  " + heading),
 			rule(w),
 			itemLabel.Width(w).Render("  Administrator (sudo / wheel)?"),
 			lineBG.Width(w).Render(""),
@@ -1538,7 +1575,7 @@ func (m model) userFormView() string {
 		for i, opt := range []string{"Yes", "No"} {
 			body = append(body, row(w, i == m.edCursor, opt))
 		}
-		return m.screen(body, "[Left/Right] choose · [Enter] add user · [Esc] cancel")
+		return m.screen(body, "[Left/Right] choose · [Enter] "+done+" · [Esc] cancel")
 	}
 	var title, hint string
 	switch m.formStep {
@@ -1550,7 +1587,7 @@ func (m model) userFormView() string {
 		title, hint = "Password", "not shown as you type"
 	}
 	body := []string{
-		itemLabel.Width(w).Render("  Add New User"),
+		itemLabel.Width(w).Render("  " + heading),
 		rule(w),
 		itemLabel.Width(w).Render("  " + title),
 		footer.Width(w).Render("  " + hint),

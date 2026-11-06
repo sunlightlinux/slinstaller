@@ -369,3 +369,32 @@ func TestNetworkSubpageStatic(t *testing.T) {
 		t.Error("interface should be back on DHCP")
 	}
 }
+
+func TestManageUserEditsRow(t *testing.T) {
+	// Start with one admin user, then edit it: change the name and make it
+	// non-admin, keeping the count at one.
+	m := newModel(oneDisk())
+	m.users = []userEntry{{Login: "ionut", UserName: "Old", Password: "pw", Admin: true}}
+	m.view = viewUserList
+	m.userCursor = 0
+
+	m = send(m, enter) // Enter on the row -> edit form (login prefilled)
+	m = send(m, enter) // keep login
+	// Replace the user name.
+	for range "Old" {
+		m = send(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	}
+	m = send(m, runes("New Name"))
+	m = send(m, enter)      // user name -> password (prefilled)
+	m = send(m, enter)      // keep password
+	m = send(m, runes("l")) // Admin toggle Yes -> No
+	m = send(m, enter)      // save
+
+	if len(m.users) != 1 {
+		t.Fatalf("edit changed the count to %d", len(m.users))
+	}
+	u := m.users[0]
+	if u.Login != "ionut" || u.UserName != "New Name" || u.Password != "pw" || u.Admin {
+		t.Fatalf("edited user wrong: %+v", u)
+	}
+}
