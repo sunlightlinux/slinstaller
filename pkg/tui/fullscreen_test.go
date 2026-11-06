@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -454,3 +455,39 @@ func TestManageUserButtonsNavigate(t *testing.T) {
 		t.Errorf("Tab from last did not wrap to 0, got %d", m.userCursor)
 	}
 }
+
+func TestPanelHeightStable(t *testing.T) {
+	// The dialog must not resize moving between the menu and a short section:
+	// the title and footer land on the same rows for both.
+	titleRow := func(v string) (first, last int) {
+		for i, l := range strings.Split(v, "\n") {
+			plain := stripANSIForTest(l)
+			if strings.Contains(plain, "Sunlight Linux Installer") {
+				first = i
+			}
+			if strings.Contains(plain, "navigate") || strings.Contains(plain, "[Enter] confirm") {
+				last = i
+			}
+		}
+		return
+	}
+	size := func(m model) model { m.width, m.height = 100, 40; return m }
+
+	hub := size(newModel(oneDisk()))
+	tz := size(openSectionInTab(newModel(oneDisk()), 0, secTimezone))
+
+	hf, hl := titleRow(hub.View())
+	tf, tl := titleRow(tz.View())
+	if hf != tf || hl != tl {
+		t.Errorf("dialog resized between menu and section: hub title@%d footer@%d, section title@%d footer@%d", hf, hl, tf, tl)
+	}
+	if hl-hf != 33 { // panelHeight(40) = 34 -> span 33 (0-indexed)
+		t.Errorf("box height span=%d, want 33", hl-hf)
+	}
+}
+
+var ansiRe = regexpMustCompile()
+
+func stripANSIForTest(s string) string { return ansiRe.ReplaceAllString(s, "") }
+
+func regexpMustCompile() *regexp.Regexp { return regexp.MustCompile("\x1b\\[[0-9;]*m") }

@@ -29,6 +29,12 @@ for what will and will not be allowed to change once releases begin.
   network is never reached — so `offline` installs (and a bare
   `--local-repo` with no `--repo`) work.
 
+### Changed
+
+- The full-screen dialog keeps a stable size: its body is padded to a fixed
+  height (tracking the terminal, bounded), so the blue box no longer shrinks
+  when entering a short section and grows back on return to the menu.
+
 ### Added
 
 - The full-screen install's final screen now has action buttons — Reboot,

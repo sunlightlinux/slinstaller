@@ -1462,10 +1462,28 @@ func contentWidth(width int) int {
 	return cw
 }
 
+// panelHeight is the dialog's fixed inner height (title + body + rule +
+// footer), so the blue box stays the same size moving between the menu and
+// a section instead of shrinking to each view's content. It tracks the
+// terminal height but is bounded so it neither overflows a small screen nor
+// sprawls on a large one; the terminal size does not change mid-session, so
+// this is stable.
+func panelHeight(height int) int {
+	h := height - 4
+	if h < 18 {
+		h = 18
+	}
+	if h > 34 {
+		h = 34
+	}
+	return h
+}
+
 // frameScreen frames a view the way clr-installer does: a filled blue dialog
 // — bracketed title, the body, a rule and the footer hint — centred on a
 // black screen. Both front-ends (the hub and the install progress view)
-// render through it, so they match.
+// render through it, so they match. The body is padded to a stable height so
+// the box does not resize as views change.
 func frameScreen(width, height int, body []string, foot string) string {
 	if width <= 0 {
 		width = 80
@@ -1478,6 +1496,12 @@ func frameScreen(width, height int, body []string, foot string) string {
 		titleBar.Width(cw).Render("[Sunlight Linux Installer]"),
 	}
 	lines = append(lines, body...)
+	// Pad with blank full-width lines so title+body fills the panel, leaving
+	// the last two rows for the rule and footer. A view taller than this
+	// (e.g. the Advanced menu on a short terminal) is left as-is.
+	for len(lines) < panelHeight(height)-2 {
+		lines = append(lines, lineBG.Width(cw).Render(""))
+	}
 	lines = append(lines, rule(cw), footer.Width(cw).Render(foot))
 	box := boxStyle.Render(strings.Join(lines, "\n"))
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box,
