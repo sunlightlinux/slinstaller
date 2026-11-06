@@ -114,7 +114,7 @@ func TestCanInstall(t *testing.T) {
 		t.Fatal("empty model installable")
 	}
 	m.diskSet = true
-	m.userSet = true
+	m.users = []userEntry{{Login: "me", Password: "x", Admin: true}}
 	m.parts = []partEntry{
 		{Type: "part", FS: "vfat", Mount: "/boot", Size: "512M"},
 		{Type: "part", FS: "ext4", Mount: "/"},
@@ -299,5 +299,39 @@ func TestViewsRenderNoPanic(t *testing.T) {
 	warn = withSize(send(warn, enter)) // Install while incomplete
 	if v := warn.View(); !strings.Contains(v, "Not ready") {
 		t.Errorf("warning popup not shown:\n%s", v)
+	}
+}
+
+func TestManageUserTableAddsUser(t *testing.T) {
+	// Hub -> Manage User -> Add New User -> fill Login/Name/Password/Admin.
+	m := openSectionInTab(newModel(oneDisk()), 0, secUser)
+	if v := m.View(); !strings.Contains(v, "No Custom Users Defined") {
+		t.Errorf("empty table should say so:\n%s", v)
+	}
+	m = send(m, runes("a"))     // Add New User
+	m = send(m, runes("ionut")) // Login
+	m = send(m, enter)
+	m = send(m, runes("Ionut N")) // User Name
+	m = send(m, enter)
+	m = send(m, runes("secret")) // Password
+	m = send(m, enter)
+	m = send(m, enter) // Admin: Yes (default) -> append
+
+	if len(m.users) != 1 {
+		t.Fatalf("got %d users, want 1", len(m.users))
+	}
+	u := m.users[0]
+	if u.Login != "ionut" || u.UserName != "Ionut N" || u.Password != "secret" || !u.Admin {
+		t.Fatalf("user = %+v", u)
+	}
+	// The table now lists the user, masked password, admin yes.
+	if v := m.View(); !strings.Contains(v, "ionut") || !strings.Contains(v, "****") {
+		t.Errorf("table missing the new user row:\n%s", v)
+	}
+	// Delete it.
+	m.userCursor = 0
+	m = send(m, runes("d"))
+	if len(m.users) != 0 {
+		t.Errorf("delete left %d users", len(m.users))
 	}
 }

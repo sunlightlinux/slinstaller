@@ -76,9 +76,13 @@ func RunFullscreen() (*config.Config, string, error) {
 		return nil, "", fmt.Errorf("cancelled")
 	}
 
-	hash, err := cryptHash(m.password)
-	if err != nil {
-		return nil, "", err
+	users := make([]*config.User, 0, len(m.users))
+	for _, u := range m.users {
+		hash, err := cryptHash(u.Password)
+		if err != nil {
+			return nil, "", err
+		}
+		users = append(users, &config.User{Login: u.Login, UserName: u.UserName, Password: hash, Admin: u.Admin})
 	}
 	cfg := &config.Config{
 		TargetMedia: []*config.Media{{
@@ -86,7 +90,7 @@ func RunFullscreen() (*config.Config, string, error) {
 			Children: layoutToMedia(m.disks[m.diskIdx].Name, m.parts),
 		}},
 		Hostname: m.hostname, Keyboard: m.keyboard, Language: m.language, Timezone: m.timezone,
-		Users:       []*config.User{{Login: m.login, Password: hash, Admin: true}},
+		Users:       users,
 		Kernel:      m.kernel,
 		HTTPSProxy:  strings.TrimSpace(m.proxy),
 		SwupdMirror: strings.TrimSpace(m.mirror),
@@ -277,6 +281,8 @@ const (
 	viewPartList
 	viewPartForm
 	viewNetForm
+	viewUserList
+	viewUserForm
 )
 
 // popupKind selects the bordered dialog drawn centred over the hub, the way
@@ -293,12 +299,16 @@ const (
 type model struct {
 	disks []blockdev.Device
 
-	diskIdx                     int
-	diskSet, userSet            bool
-	keyboard, language          string
-	timezone, hostname          string
-	login, password, passphrase string
-	parts                       []partEntry
+	diskIdx            int
+	diskSet            bool
+	keyboard, language string
+	timezone, hostname string
+	passphrase         string
+	parts              []partEntry
+
+	// Accounts, shown in the clr-style Manage User table. Password is the
+	// plaintext typed in the form; it is hashed when the config is built.
+	users []userEntry
 
 	// Advanced-tab values.
 	proxy      string // httpsProxy
@@ -342,13 +352,26 @@ type model struct {
 	formStep   int
 	formIsLV   bool
 
+	// Manage User editor: a cursor over the table rows/buttons and the
+	// account being built in the Add New User form.
+	userCursor int
+	userForm   userEntry
+
 	confirmed bool
+}
+
+// userEntry is one account in the Manage User table.
+type userEntry struct {
+	Login    string
+	UserName string
+	Password string // plaintext in the TUI; hashed when the config is built
+	Admin    bool
 }
 
 func newModel(disks []blockdev.Device) model {
 	return model{
 		disks: disks, view: viewHub,
-		keyboard: "us", language: "en_US.UTF-8", timezone: "UTC", hostname: "sunlight", login: "user",
+		keyboard: "us", language: "en_US.UTF-8", timezone: "UTC", hostname: "sunlight",
 		autoUpdate: 1, // clr defaults automatic updates on
 	}
 }
@@ -484,6 +507,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updatePartForm(key)
 	case viewNetForm:
 		return m.updateNetForm(key)
+	case viewUserList:
+		return m.updateUserList(key)
+	case viewUserForm:
+		return m.updateUserForm(key)
 	}
 	return m, nil
 }
@@ -561,11 +588,142 @@ func (m model) updateNetForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// --- Manage User: the clr-style account table ---
+
+// userButtons are the action rows below the table; the cursor runs over the
+// user rows first, then these.
+var userButtons = []string{"Add New User", "Revert", "Confirm", "Cancel"}
+
+// updateUserList drives the Manage User table: move over the account rows
+// and the action buttons, delete a selected account, or open the Add New
+// User form.
+func (m model) updateUserList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	last := len(m.users) + len(userButtons) - 1
+	switch key.String() {
+	case "esc":
+		m.view = viewHub
+	case "up", "k":
+		if m.userCursor > 0 {
+			m.userCursor--
+		}
+	case "down", "j":
+		if m.userCursor < last {
+			m.userCursor++
+		}
+	case "a":
+		return m.startUserForm()
+	case "d":
+		if m.userCursor < len(m.users) {
+			m.users = append(m.users[:m.userCursor], m.users[m.userCursor+1:]...)
+			if m.userCursor > 0 {
+				m.userCursor--
+			}
+		}
+	case "enter":
+		switch btn := m.userCursor - len(m.users); btn {
+		case 0: // Add New User
+			return m.startUserForm()
+		case 1: // Revert
+			m.users = nil
+			m.userCursor = 0
+		case 2, 3: // Confirm / Cancel both return to the hub
+			m.view = viewHub
+		default: // on a user row: Enter opens the add form too
+			return m.startUserForm()
+		}
+	}
+	return m, nil
+}
+
+// startUserForm opens the Add New User form with an empty account.
+func (m model) startUserForm() (tea.Model, tea.Cmd) {
+	m.view = viewUserForm
+	m.formStep = 0
+	m.edCursor = 0
+	m.userForm = userEntry{}
+	ti := textinput.New()
+	ti.Focus()
+	m.input = ti
+	return m, textinput.Blink
+}
+
+// updateUserForm drives the Add New User form: Login, User Name, Password
+// (masked), then an Admin yes/no choice, appended to the table.
+func (m model) updateUserForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.String() == "esc" {
+		m.view = viewUserList
+		return m, nil
+	}
+	if m.formStep == 3 { // Admin choice
+		switch key.String() {
+		case "up", "k", "down", "j", "left", "h", "right", "l", "tab":
+			m.edCursor = 1 - m.edCursor
+		case "enter":
+			m.userForm.Admin = m.edCursor == 0 // index 0 = Yes
+			m.users = append(m.users, m.userForm)
+			m.userCursor = len(m.users) - 1
+			m.view = viewUserList
+		}
+		return m, nil
+	}
+	if key.String() == "enter" {
+		switch m.formStep {
+		case 0: // login (required)
+			v := strings.TrimSpace(m.input.Value())
+			if v == "" {
+				return m, nil
+			}
+			m.userForm.Login = v
+		case 1: // user name (optional)
+			m.userForm.UserName = strings.TrimSpace(m.input.Value())
+		case 2: // password (required; not trimmed)
+			if m.input.Value() == "" {
+				return m, nil
+			}
+			m.userForm.Password = m.input.Value()
+		}
+		m.formStep++
+		if m.formStep == 3 {
+			m.edCursor = 0 // default to Admin: Yes
+			return m, nil
+		}
+		ti := textinput.New()
+		ti.Focus()
+		if m.formStep == 2 {
+			ti.EchoMode = textinput.EchoPassword
+		}
+		m.input = ti
+		return m, textinput.Blink
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(key)
+	return m, cmd
+}
+
 // --- hub ---
 
 func (m model) canInstall() bool {
-	return m.diskSet && m.userSet && hasRoot(m.parts) && hasESP(m.parts) &&
+	return m.diskSet && hasAdmin(m.users) && hasRoot(m.parts) && hasESP(m.parts) &&
 		(!hasCrypt(m.parts) || m.passphrase != "")
+}
+
+// hasAdmin reports whether at least one account is an administrator — the
+// install needs one (for sudo/wheel), as clr requires.
+func hasAdmin(users []userEntry) bool {
+	for _, u := range users {
+		if u.Admin {
+			return true
+		}
+	}
+	return false
+}
+
+// adminTag is " (admin)" for an administrator account, "" otherwise.
+func adminTag(admin bool) string {
+	if admin {
+		return " (admin)"
+	}
+	return ""
 }
 
 // visibleSections lists the sections shown under a tab. Required holds the
@@ -636,6 +794,11 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		// Installation Media: the disk and its partitions in one dialog.
 		m.view = viewPartList
 		m.partCursor = 0
+		return m, nil
+	case secUser:
+		// Manage User: the clr-style table of accounts.
+		m.view = viewUserList
+		m.userCursor = 0
 		return m, nil
 	case secKernel:
 		m.view = viewSectionChoice
@@ -763,10 +926,14 @@ func (m model) sectionValue(s section) string {
 		}
 		return fmt.Sprintf("%s (%d parts)", m.disks[m.diskIdx].Path, len(m.parts))
 	case secUser:
-		if m.userSet {
-			return m.login + " (admin)"
+		switch len(m.users) {
+		case 0:
+			return "No users added"
+		case 1:
+			return m.users[0].Login + adminTag(m.users[0].Admin)
+		default:
+			return fmt.Sprintf("%d users (%s, …)", len(m.users), m.users[0].Login)
 		}
-		return "No users added"
 	case secTelemetry:
 		return triLabel(m.telemetry)
 	case secNetwork:
@@ -919,21 +1086,6 @@ func (m model) updateSectionText(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.kernelArgs = v
 		case secBundles:
 			m.packages = v
-		case secUser:
-			if m.formStep == 0 {
-				if v == "" {
-					return m, nil
-				}
-				m.login = v
-				m.formStep = 1
-				ti := textinput.New()
-				ti.Focus()
-				ti.EchoMode = textinput.EchoPassword
-				m.input = ti
-				return m, textinput.Blink
-			}
-			m.password = m.input.Value()
-			m.userSet = true
 		}
 		m.view = viewHub
 		return m, nil
@@ -1232,11 +1384,86 @@ func (m model) View() string {
 		base = m.partFormView()
 	case viewNetForm:
 		base = m.netFormView()
+	case viewUserList:
+		base = m.userListView()
+	case viewUserForm:
+		base = m.userFormView()
 	}
 	if m.popup != popupNone {
 		return overlayCenter(base, m.popupBox(), m.width, m.height)
 	}
 	return base
+}
+
+// userListView renders the Manage User table (Login / User Name / Password
+// / Admin) and the action buttons, in clr's layout.
+func (m model) userListView() string {
+	w := m.panelWidth()
+	body := []string{
+		itemLabel.Width(w).Render("  Manage User"),
+		rule(w),
+		itemLabel.Width(w).Render(fmt.Sprintf("  %-16s %-18s %-10s %s", "Login", "User Name", "Password", "Admin")),
+	}
+	if len(m.users) == 0 {
+		body = append(body, footer.Width(w).Render("  *** No Custom Users Defined ***"))
+	}
+	for i, u := range m.users {
+		admin := "no"
+		if u.Admin {
+			admin = "yes"
+		}
+		line := fmt.Sprintf("%-16s %-18s %-10s %s", u.Login, orDash(u.UserName), "****", admin)
+		body = append(body, row(w, i == m.userCursor, line))
+	}
+	body = append(body, lineBG.Width(w).Render(""))
+
+	// Buttons: Add New User / Revert / Confirm / Cancel.
+	var btns []string
+	for i, b := range userButtons {
+		style := btnIdle
+		if m.userCursor == len(m.users)+i {
+			style = btnSel
+		}
+		btns = append(btns, style.Render(b))
+	}
+	body = append(body, lineBG.Width(w).Render("  "+strings.Join(btns, "  ")))
+	return m.screen(body, "[Up/Down] move · [a] add · [d] delete · [Enter] select · [Esc] back")
+}
+
+// userFormView renders the Add New User form: one field at a time, then the
+// Admin yes/no choice.
+func (m model) userFormView() string {
+	w := m.panelWidth()
+	if m.formStep == 3 {
+		body := []string{
+			itemLabel.Width(w).Render("  Add New User"),
+			rule(w),
+			itemLabel.Width(w).Render("  Administrator (sudo / wheel)?"),
+			lineBG.Width(w).Render(""),
+		}
+		for i, opt := range []string{"Yes", "No"} {
+			body = append(body, row(w, i == m.edCursor, opt))
+		}
+		return m.screen(body, "[Left/Right] choose · [Enter] add user · [Esc] cancel")
+	}
+	var title, hint string
+	switch m.formStep {
+	case 0:
+		title, hint = "Login", "the account name, e.g. ionut"
+	case 1:
+		title, hint = "User Name", "the full name (optional)"
+	case 2:
+		title, hint = "Password", "not shown as you type"
+	}
+	body := []string{
+		itemLabel.Width(w).Render("  Add New User"),
+		rule(w),
+		itemLabel.Width(w).Render("  " + title),
+		footer.Width(w).Render("  " + hint),
+		lineBG.Width(w).Render(""),
+		lineBG.Width(w).Render("  " + m.input.View()),
+	}
+	return m.screen(body, "type · [Enter] next · [Esc] cancel")
 }
 
 // popupBox renders the current popup as a bordered box: a title, the body,
@@ -1373,16 +1600,8 @@ func (m model) netFormView() string {
 
 func (m model) textView() string {
 	w := m.panelWidth()
-	title := sectionLabels[m.editing]
-	if m.editing == secUser {
-		if m.formStep == 0 {
-			title = "Admin username"
-		} else {
-			title = "Password for " + m.login
-		}
-	}
 	body := []string{
-		itemLabel.Width(w).Render("  " + title),
+		itemLabel.Width(w).Render("  " + sectionTitles[m.editing]),
 		lineBG.Width(w).Render(""),
 		lineBG.Width(w).Render("  " + m.input.View()),
 	}
