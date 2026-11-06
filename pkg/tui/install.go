@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -12,6 +13,25 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
+
+// doneAction is what the operator chose on the final screen.
+type doneAction int
+
+const (
+	actionExit doneAction = iota
+	actionReboot
+	actionPowerOff
+)
+
+// doneButtons are the choices on the final screen, in order.
+var doneButtons = []struct {
+	label  string
+	action doneAction
+}{
+	{"Reboot", actionReboot},
+	{"Power off", actionPowerOff},
+	{"Exit to shell", actionExit},
+}
 
 // RunInstall carries out the install inside the full-screen interface:
 // a final confirmation, then a progress bar with the current stage and a
@@ -39,6 +59,18 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 	fm := final.(installModel)
 	if fm.cancelled {
 		return fmt.Errorf("aborted")
+	}
+	// The full-screen interface has been torn down by now, so a reboot or
+	// power-off chosen on the final screen runs cleanly.
+	switch fm.action {
+	case actionReboot:
+		if e := exec.Command("reboot").Run(); e != nil && fm.err == nil {
+			return fmt.Errorf("reboot: %w", e)
+		}
+	case actionPowerOff:
+		if e := exec.Command("poweroff").Run(); e != nil && fm.err == nil {
+			return fmt.Errorf("poweroff: %w", e)
+		}
 	}
 	return fm.err
 }
@@ -72,6 +104,9 @@ type installModel struct {
 	logs        []string
 	err         error
 	cancelled   bool
+
+	doneCursor int        // selected button on the final screen
+	action     doneAction // what the operator chose there
 
 	width, height int
 }
@@ -107,7 +142,26 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		case phaseDone:
-			return m, tea.Quit
+			switch msg.String() {
+			case "left", "h", "up", "k", "shift+tab":
+				if m.doneCursor > 0 {
+					m.doneCursor--
+				} else {
+					m.doneCursor = len(doneButtons) - 1
+				}
+			case "right", "l", "down", "j", "tab":
+				if m.doneCursor < len(doneButtons)-1 {
+					m.doneCursor++
+				} else {
+					m.doneCursor = 0
+				}
+			case "enter":
+				m.action = doneButtons[m.doneCursor].action
+				return m, tea.Quit
+			case "q", "esc":
+				m.action = actionExit
+				return m, tea.Quit
+			}
 		}
 		return m, nil
 
@@ -289,7 +343,18 @@ func (m installModel) doneView() string {
 			}
 		}
 	}
-	return frameScreen(m.width, m.height, body, "[Enter] exit")
+
+	// Action buttons: Reboot / Power off / Exit to shell.
+	var btns []string
+	for i, b := range doneButtons {
+		style := btnIdle
+		if i == m.doneCursor {
+			style = btnSel
+		}
+		btns = append(btns, style.Render(b.label))
+	}
+	body = append(body, lineBG.Width(w).Render(""), lineBG.Width(w).Render("  "+strings.Join(btns, "   ")))
+	return frameScreen(m.width, m.height, body, "[Tab/Arrows] move · [Enter] select")
 }
 
 func clip(s string, n int) string {

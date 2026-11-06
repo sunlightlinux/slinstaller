@@ -31,6 +31,10 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- The full-screen install's final screen now has action buttons — Reboot,
+  Power off and Exit to shell — navigable with Tab/arrows and activated with
+  Enter, instead of only "[Enter] exit". Reboot and power-off run after the
+  interface is torn down, so they execute cleanly.
 - Save Configuration Settings now writes the wizard's config to a file
   (clr parity): it builds the clr-format `config.yaml` from the current
   choices and saves it (never including the LUKS passphrase), so the layout
