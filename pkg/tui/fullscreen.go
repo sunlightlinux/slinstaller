@@ -486,6 +486,9 @@ var (
 	popupTitle = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrPopup)
 	popupHint  = lipgloss.NewStyle().Foreground(clrDim).Background(clrPopup)
 	popupInput = lipgloss.NewStyle().Foreground(clrWhite).Background(lipgloss.Color("17")).Padding(0, 1)
+
+	// Scrollbar on the right of the hub's section list.
+	scrollStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("153")).Background(clrBlue)
 )
 
 // overlayCenter composites a popup box centred over a base screen: the base
@@ -1525,22 +1528,60 @@ func row(w int, selected bool, text string) string {
 }
 
 // item renders a hub entry: a bold label line and a "» value" line. When
-// selected it becomes a taller teal bar — a blank teal line above and below
-// the two lines — the way clr-installer highlights the focused row.
+// selected it is drawn in the teal selection colours. The height is fixed
+// at two lines so the hub's section list can be windowed and scrolled
+// cleanly — every section occupies the same space.
 func item(w int, selected bool, label, value string) []string {
 	if selected {
-		blank := selBG.Width(w).Render("")
 		return []string{
-			blank,
 			itemSelLabel.Width(w).Render("  " + label),
 			itemSelValue.Width(w).Render("    » " + value),
-			blank,
 		}
 	}
 	return []string{
 		itemLabel.Width(w).Render("  " + label),
 		itemValue.Width(w).Render("    » " + value),
 	}
+}
+
+// hubRowsPerSection is the height, in lines, of one hub section: a label
+// line, a value line and a separator rule.
+const hubRowsPerSection = 3
+
+// hubVisibleCount is how many sections the hub shows at once, from the
+// panel's fixed height; the rest scroll, with a scrollbar on the right.
+func hubVisibleCount(height int) int {
+	rows := panelHeight(height) - 8 // chrome: tab, rules, blank, buttons, footer
+	if rows < hubRowsPerSection {
+		rows = hubRowsPerSection
+	}
+	return rows / hubRowsPerSection
+}
+
+// scrollbarCol builds the right-hand scrollbar: rows lines, each a space
+// plus a glyph. The thumb covers the visible window [start, start+win) of a
+// list of total items; ▲/▼ cap the ends. When everything fits (total<=win)
+// it is a blank column, so the section content keeps the same width either
+// way.
+func scrollbarCol(rows, start, win, total int) []string {
+	out := make([]string, rows)
+	if total <= win || rows < 2 {
+		for i := range out {
+			out[i] = scrollStyle.Render("  ")
+		}
+		return out
+	}
+	for i := 0; i < rows; i++ {
+		sec := i * total / rows
+		glyph := "░"
+		if sec >= start && sec < start+win {
+			glyph = "█"
+		}
+		out[i] = scrollStyle.Render(" " + glyph)
+	}
+	out[0] = scrollStyle.Render(" ▲")
+	out[rows-1] = scrollStyle.Render(" ▼")
+	return out
 }
 
 func (m model) View() string {
@@ -1695,11 +1736,37 @@ func (m model) hubView() string {
 	tabs := req.Render(" [R] Required options ") + tabInactive.Render("  ") + adv.Render(" [A] Advanced options ")
 	body = append(body, tabStrip.Width(w).Render("  "+tabs), rule(w))
 
+	// The section list, windowed to a fixed height with a scrollbar on the
+	// right — the way clr-installer shows there is more below.
 	vis := visibleSections(m.tab)
-	for i, s := range vis {
-		body = append(body, item(w, m.hubCursor == i, sectionLabels[s], m.sectionValue(s))...)
-		body = append(body, rule(w))
+	win := hubVisibleCount(m.height)
+	if win > len(vis) {
+		win = len(vis)
 	}
+	if win < 1 {
+		win = 1
+	}
+	start := 0
+	if m.hubCursor >= win { // keep the cursor's section in view
+		start = m.hubCursor - win + 1
+	}
+	if max := len(vis) - win; start > max {
+		start = max
+	}
+	if start < 0 {
+		start = 0
+	}
+
+	cw := w - 2 // leave two columns for the scrollbar
+	var secLines []string
+	for i := start; i < start+win && i < len(vis); i++ {
+		s := vis[i]
+		secLines = append(secLines, item(cw, m.hubCursor == i, sectionLabels[s], m.sectionValue(s))...)
+		secLines = append(secLines, rule(cw))
+	}
+	sb := scrollbarCol(len(secLines), start, win, len(vis))
+	secBlock := lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(secLines, "\n"), strings.Join(sb, "\n"))
+	body = append(body, strings.Split(secBlock, "\n")...)
 
 	body = append(body, lineBG.Width(w).Render(""))
 

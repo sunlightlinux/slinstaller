@@ -491,3 +491,34 @@ var ansiRe = regexpMustCompile()
 func stripANSIForTest(s string) string { return ansiRe.ReplaceAllString(s, "") }
 
 func regexpMustCompile() *regexp.Regexp { return regexp.MustCompile("\x1b\\[[0-9;]*m") }
+
+func TestHubScrollbar(t *testing.T) {
+	size := func(m model) model { m.width, m.height = 90, 30; return m }
+	plain := func(v string) string { return stripANSIForTest(v) }
+
+	// The Advanced tab has more sections than fit, so it shows a scrollbar
+	// and the last section is not visible at the top.
+	adv := size(send(newModel(oneDisk()), runes("A")))
+	v := plain(adv.View())
+	if !strings.Contains(v, "▲") || !strings.Contains(v, "▼") {
+		t.Errorf("Advanced tab missing a scrollbar:\n%s", v)
+	}
+	if strings.Contains(v, "Automatic OS Updates") {
+		t.Errorf("last section should be scrolled out of view at the top")
+	}
+
+	// Moving the cursor to the bottom scrolls it into view.
+	m := adv
+	for i := 0; i < len(visibleSections(1))-1; i++ {
+		m = send(m, down)
+	}
+	if !strings.Contains(plain(m.View()), "Automatic OS Updates") {
+		t.Errorf("last section not visible after scrolling down:\n%s", plain(m.View()))
+	}
+
+	// The Required tab fits, so no scrollbar arrows.
+	req := size(newModel(oneDisk()))
+	if strings.Contains(plain(req.View()), "▼") {
+		t.Errorf("Required tab should not scroll")
+	}
+}

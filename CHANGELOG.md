@@ -34,6 +34,11 @@ for what will and will not be allowed to change once releases begin.
 - The full-screen dialog keeps a stable size: its body is padded to a fixed
   height (tracking the terminal, bounded), so the blue box no longer shrinks
   when entering a short section and grows back on return to the menu.
+- The hub's section list now scrolls within that fixed height, with a
+  scrollbar (▲/▼ and a thumb) on the right showing there is more below — as
+  clr-installer does. The Advanced tab, which has more sections than fit, no
+  longer makes the dialog taller than the Required tab; the selected row is
+  highlighted at a uniform two-line height so the list scrolls cleanly.
 
 ### Added
 
