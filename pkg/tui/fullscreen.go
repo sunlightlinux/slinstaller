@@ -99,8 +99,13 @@ func RunFullscreen() (*config.Config, string, error) {
 		cfg.KernelArguments = &config.KernelArguments{Add: args}
 	}
 	cfg.Packages = splitList(m.packages)
-	if iface := staticInterface(m.netIface, m.netAddr, m.netGateway, m.netDNS); iface != nil {
-		cfg.NetworkInterfaces = []*config.Interface{iface}
+	for _, ni := range m.netIfaces {
+		if !ni.Static {
+			continue
+		}
+		if iface := staticInterface(ni.Name, ni.Addr, ni.Gateway, ni.DNS); iface != nil {
+			cfg.NetworkInterfaces = append(cfg.NetworkInterfaces, iface)
+		}
 	}
 	return cfg, m.passphrase, nil
 }
@@ -281,6 +286,7 @@ const (
 	viewPartList
 	viewPartForm
 	viewNetForm
+	viewNetList
 	viewUserList
 	viewUserForm
 )
@@ -316,8 +322,12 @@ type model struct {
 	kernel     string // clr bundle name: "", kernel-native, kernel-lts
 	kernelArgs string // extra kernel command-line arguments, space-separated
 	packages   string // extra xbps packages (shown as "bundles"), space/comma-separated
-	// A single optional static interface; empty netIface means DHCP.
-	netIface, netAddr, netGateway, netDNS string
+
+	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
+	// default; a static one carries its CIDR address, gateway and DNS.
+	netIfaces []netIfaceEntry
+	netCursor int // cursor in the interface list
+	netEdit   int // interface being configured in the form
 
 	// Tri-state clr toggles: 0 = no choice, 1 = enabled, 2 = disabled.
 	// telemetry and autoUpdate are presented for clr fidelity; autoUpdate
@@ -366,6 +376,34 @@ type userEntry struct {
 	UserName string
 	Password string // plaintext in the TUI; hashed when the config is built
 	Admin    bool
+}
+
+// netIfaceEntry is one network interface in the Configure Network Interfaces
+// sub-page. Static carries a CIDR address, gateway and DNS; otherwise the
+// interface is left on DHCP.
+type netIfaceEntry struct {
+	Name    string
+	Static  bool
+	Addr    string // CIDR, e.g. 192.168.1.50/24
+	Gateway string
+	DNS     string
+}
+
+// liveInterfaces lists the machine's non-loopback interfaces, each starting
+// on DHCP, for the network sub-page to configure.
+func liveInterfaces() []netIfaceEntry {
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []netIfaceEntry
+	for _, i := range ifs {
+		if i.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		out = append(out, netIfaceEntry{Name: i.Name})
+	}
+	return out
 }
 
 func newModel(disks []blockdev.Device) model {
@@ -507,6 +545,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updatePartForm(key)
 	case viewNetForm:
 		return m.updateNetForm(key)
+	case viewNetList:
+		return m.updateNetList(key)
 	case viewUserList:
 		return m.updateUserList(key)
 	case viewUserForm:
@@ -542,43 +582,89 @@ func (m model) updatePopup(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// updateNetForm drives the single-interface static-network form: a name
-// (blank = leave everything on DHCP), then address (CIDR), gateway and DNS.
-func (m model) updateNetForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+// updateNetList drives the interface list: pick one to configure, or leave.
+func (m model) updateNetList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		m.view = viewHub
-		return m, nil
+	case "up", "k":
+		if m.netCursor > 0 {
+			m.netCursor--
+		}
+	case "down", "j":
+		if m.netCursor < len(m.netIfaces)-1 {
+			m.netCursor++
+		}
 	case "enter":
-		v := strings.TrimSpace(m.input.Value())
-		switch m.formStep {
-		case 0:
-			if v == "" {
-				// DHCP: clear any previous static config.
-				m.netIface, m.netAddr, m.netGateway, m.netDNS = "", "", "", ""
-				m.view = viewHub
+		if m.netCursor < len(m.netIfaces) {
+			return m.startNetForm(m.netCursor)
+		}
+	}
+	return m, nil
+}
+
+// startNetForm opens the per-interface form, starting at the DHCP/Static
+// mode choice.
+func (m model) startNetForm(idx int) (tea.Model, tea.Cmd) {
+	m.view = viewNetForm
+	m.netEdit = idx
+	m.formStep = 0
+	if m.netIfaces[idx].Static {
+		m.edCursor = 1
+	} else {
+		m.edCursor = 0
+	}
+	return m, nil
+}
+
+// updateNetForm configures one interface: first DHCP or Static, then (for
+// static) the CIDR address, gateway and DNS.
+func (m model) updateNetForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	ni := &m.netIfaces[m.netEdit]
+	if key.String() == "esc" {
+		m.view = viewNetList
+		return m, nil
+	}
+	if m.formStep == 0 { // mode choice: DHCP / Static
+		switch key.String() {
+		case "up", "k", "down", "j", "left", "h", "right", "l", "tab":
+			m.edCursor = 1 - m.edCursor
+		case "enter":
+			if m.edCursor == 0 { // DHCP
+				ni.Static, ni.Addr, ni.Gateway, ni.DNS = false, "", "", ""
+				m.view = viewNetList
 				return m, nil
 			}
-			m.netIface = v
+			m.formStep = 1 // static: collect fields
+			ti := textinput.New()
+			ti.Focus()
+			ti.SetValue(ni.Addr)
+			m.input = ti
+			return m, textinput.Blink
+		}
+		return m, nil
+	}
+	if key.String() == "enter" {
+		v := strings.TrimSpace(m.input.Value())
+		switch m.formStep {
 		case 1:
-			m.netAddr = v
+			ni.Addr = v
 		case 2:
-			m.netGateway = v
+			ni.Gateway = v
 		case 3:
-			m.netDNS = v
-			m.view = viewHub
+			ni.DNS = v
+			ni.Static = true
+			m.view = viewNetList
 			return m, nil
 		}
 		m.formStep++
 		ti := textinput.New()
 		ti.Focus()
 		switch m.formStep {
-		case 1:
-			ti.SetValue(m.netAddr)
 		case 2:
-			ti.SetValue(m.netGateway)
+			ti.SetValue(ni.Gateway)
 		case 3:
-			ti.SetValue(m.netDNS)
+			ti.SetValue(ni.DNS)
 		}
 		m.input = ti
 		return m, textinput.Blink
@@ -816,14 +902,14 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.edCursor = triToIndex(m.autoUpdate)
 		return m, nil
 	case secNetwork:
-		// A small multi-field form for one static interface (blank = DHCP).
-		m.view = viewNetForm
-		m.formStep = 0
-		ti := textinput.New()
-		ti.Focus()
-		ti.SetValue(m.netIface)
-		m.input = ti
-		return m, textinput.Blink
+		// The clr-style interface list: the live interfaces, each DHCP until
+		// configured static.
+		if len(m.netIfaces) == 0 {
+			m.netIfaces = liveInterfaces()
+		}
+		m.view = viewNetList
+		m.netCursor = 0
+		return m, nil
 	case secTestNet:
 		// A secondary-progress popup: run a connectivity check while a small
 		// spinner animates, like clr's "Test Network Settings".
@@ -937,10 +1023,16 @@ func (m model) sectionValue(s section) string {
 	case secTelemetry:
 		return triLabel(m.telemetry)
 	case secNetwork:
-		if m.netIface == "" {
+		var statics []string
+		for _, ni := range m.netIfaces {
+			if ni.Static {
+				statics = append(statics, ni.Name+": "+ni.Addr)
+			}
+		}
+		if len(statics) == 0 {
 			return "Automatic (DHCP)"
 		}
-		return fmt.Sprintf("%s: %s", m.netIface, m.netAddr)
+		return strings.Join(statics, ", ")
 	case secProxy:
 		if strings.TrimSpace(m.proxy) == "" {
 			return "No HTTPS proxy URL set"
@@ -1384,6 +1476,8 @@ func (m model) View() string {
 		base = m.partFormView()
 	case viewNetForm:
 		base = m.netFormView()
+	case viewNetList:
+		base = m.netListView()
 	case viewUserList:
 		base = m.userListView()
 	case viewUserForm:
@@ -1570,25 +1664,57 @@ func (m model) choiceView() string {
 	return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
 }
 
-func (m model) netFormView() string {
+// netListView renders the list of interfaces and their current setting.
+func (m model) netListView() string {
 	w := m.panelWidth()
-	var title, hint string
-	switch m.formStep {
-	case 0:
-		title = "Interface name (blank = DHCP on all interfaces)"
-		hint = "e.g. eth0, enp0s3"
-	case 1:
-		title = "Address in CIDR form"
-		hint = "e.g. 192.168.1.50/24"
-	case 2:
-		title = "Gateway (blank for none)"
-		hint = "e.g. 192.168.1.1"
-	case 3:
-		title = "DNS server (blank for none)"
-		hint = "e.g. 192.168.1.1"
-	}
 	body := []string{
 		itemLabel.Width(w).Render("  " + sectionTitles[secNetwork]),
+		rule(w),
+	}
+	if len(m.netIfaces) == 0 {
+		body = append(body, footer.Width(w).Render("  No network interfaces found"))
+	}
+	for i, ni := range m.netIfaces {
+		setting := "Automatic (DHCP)"
+		if ni.Static {
+			setting = "Static " + ni.Addr
+		}
+		body = append(body, row(w, i == m.netCursor, fmt.Sprintf("%-14s %s", ni.Name, setting)))
+	}
+	return m.screen(body, "[Up/Down] move · [Enter] configure · [Esc] back")
+}
+
+// netFormView renders the per-interface form: the DHCP/Static mode choice,
+// then the static address, gateway and DNS fields.
+func (m model) netFormView() string {
+	w := m.panelWidth()
+	name := ""
+	if m.netEdit < len(m.netIfaces) {
+		name = m.netIfaces[m.netEdit].Name
+	}
+	if m.formStep == 0 {
+		body := []string{
+			itemLabel.Width(w).Render("  Configure " + name),
+			rule(w),
+			itemLabel.Width(w).Render("  Addressing"),
+			lineBG.Width(w).Render(""),
+		}
+		for i, opt := range []string{"Automatic (DHCP)", "Static IP"} {
+			body = append(body, row(w, i == m.edCursor, opt))
+		}
+		return m.screen(body, "[Left/Right] choose · [Enter] select · [Esc] back")
+	}
+	var title, hint string
+	switch m.formStep {
+	case 1:
+		title, hint = "Address in CIDR form", "e.g. 192.168.1.50/24"
+	case 2:
+		title, hint = "Gateway (blank for none)", "e.g. 192.168.1.1"
+	case 3:
+		title, hint = "DNS server (blank for none)", "e.g. 192.168.1.1"
+	}
+	body := []string{
+		itemLabel.Width(w).Render("  Configure " + name + " (static)"),
 		rule(w),
 		itemLabel.Width(w).Render("  " + title),
 		footer.Width(w).Render("  " + hint),

@@ -31,6 +31,12 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Configure Network Interfaces is now clr's interface sub-page (phase 3):
+  the machine's live interfaces are listed with their current setting
+  (Automatic DHCP or a static address), and selecting one opens a
+  per-interface window to choose DHCP or a static IP (CIDR address, gateway,
+  DNS). Several interfaces can be configured; each static one becomes a
+  `networkInterfaces` entry in the built config.
 - Manage User is now clr's account table (phase 2): a Login / User Name /
   Password / Admin table with Add New User, Revert, Confirm and Cancel, and
   an Add New User form (login, full name, masked password, administrator

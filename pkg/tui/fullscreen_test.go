@@ -335,3 +335,37 @@ func TestManageUserTableAddsUser(t *testing.T) {
 		t.Errorf("delete left %d users", len(m.users))
 	}
 }
+
+func TestNetworkSubpageStatic(t *testing.T) {
+	// Start on the interface list with one interface, configure it static.
+	m := newModel(oneDisk())
+	m.netIfaces = []netIfaceEntry{{Name: "eth0"}}
+	m.view = viewNetList
+	m.netCursor = 0
+
+	m = send(m, enter)      // open per-interface form (mode choice)
+	m = send(m, runes("l")) // toggle DHCP -> Static
+	m = send(m, enter)      // choose Static -> address step
+	m = send(m, runes("192.168.1.50/24"))
+	m = send(m, enter) // address -> gateway
+	m = send(m, runes("192.168.1.1"))
+	m = send(m, enter) // gateway -> dns
+	m = send(m, runes("1.1.1.1"))
+	m = send(m, enter) // dns -> done, back to list
+
+	ni := m.netIfaces[0]
+	if !ni.Static || ni.Addr != "192.168.1.50/24" || ni.Gateway != "192.168.1.1" || ni.DNS != "1.1.1.1" {
+		t.Fatalf("interface not configured static: %+v", ni)
+	}
+	if v := m.View(); !strings.Contains(v, "Static 192.168.1.50/24") {
+		t.Errorf("list should show the static setting:\n%s", v)
+	}
+
+	// DHCP path: reconfigure back to automatic.
+	m = send(m, enter)      // open form (edCursor starts at Static=1)
+	m = send(m, runes("l")) // toggle -> DHCP (index 0)
+	m = send(m, enter)      // choose DHCP
+	if m.netIfaces[0].Static {
+		t.Error("interface should be back on DHCP")
+	}
+}
