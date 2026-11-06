@@ -21,6 +21,7 @@ const (
 	actionExit doneAction = iota
 	actionReboot
 	actionPowerOff
+	actionBack // return to the configuration wizard
 )
 
 // doneButtons are the choices on the final screen, in order.
@@ -30,6 +31,7 @@ var doneButtons = []struct {
 }{
 	{"Reboot", actionReboot},
 	{"Power off", actionPowerOff},
+	{"Back to installer", actionBack},
 	{"Exit to shell", actionExit},
 }
 
@@ -43,7 +45,11 @@ var doneButtons = []struct {
 // RunInstall supplies its own Runner and Progress to feed the view, so the
 // caller leaves those unset. plan is used for the confirmation screen and the
 // stage count.
-func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan) error {
+// RunInstall returns back=true when the operator chose "Back to installer"
+// on the final screen, so the caller can re-run the configuration wizard.
+// Reboot and power-off are carried out here, after the interface is torn
+// down; an error aborts as before.
+func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan) (back bool, err error) {
 	ch := make(chan tea.Msg, 1024)
 	m := installModel{
 		cfg: cfg, opts: opts, disk: plan.Disk, ch: ch,
@@ -52,27 +58,31 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 		// default blue→pink gradient.
 		bar: progress.New(progress.WithSolidFill("#00afaf")),
 	}
-	final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
-	if err != nil {
-		return err
+	final, runErr := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	if runErr != nil {
+		return false, runErr
 	}
 	fm := final.(installModel)
 	if fm.cancelled {
-		return fmt.Errorf("aborted")
+		return false, fmt.Errorf("aborted")
 	}
 	// The full-screen interface has been torn down by now, so a reboot or
 	// power-off chosen on the final screen runs cleanly.
 	switch fm.action {
 	case actionReboot:
 		if e := exec.Command("reboot").Run(); e != nil && fm.err == nil {
-			return fmt.Errorf("reboot: %w", e)
+			return false, fmt.Errorf("reboot: %w", e)
 		}
 	case actionPowerOff:
 		if e := exec.Command("poweroff").Run(); e != nil && fm.err == nil {
-			return fmt.Errorf("poweroff: %w", e)
+			return false, fmt.Errorf("poweroff: %w", e)
 		}
+	case actionBack:
+		// Caller re-runs the wizard; the install itself may have succeeded or
+		// failed, but the operator asked to go back regardless.
+		return true, nil
 	}
-	return fm.err
+	return false, fm.err
 }
 
 // Messages pushed from the install goroutine into the model.

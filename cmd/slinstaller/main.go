@@ -132,10 +132,15 @@ func run(args []string) error {
 	stdin := bufio.NewReader(os.Stdin)
 
 	rest := fs.Args()
+	// repoFlag preserves the original --repo so the full-screen "Back to
+	// installer" loop below can re-resolve it from a re-run wizard each time.
+	repoFlag := repo
 	var cfg *config.Config
 	var interactivePass string
 	var fullscreen bool
 	var err error
+restart:
+	repo = repoFlag
 	switch len(rest) {
 	case 1:
 		cfg, err = config.Load(rest[0])
@@ -458,7 +463,18 @@ func run(args []string) error {
 	// serial paths confirm by retyping the disk path and install over plain
 	// streamed text.
 	if fullscreen {
-		return tui.RunInstall(cfg, opts, plan)
+		back, rerr := tui.RunInstall(cfg, opts, plan)
+		if rerr != nil {
+			return rerr
+		}
+		if back {
+			// The operator chose "Back to installer": re-run the wizard and
+			// everything downstream of it (reboot/power-off already happened
+			// inside RunInstall when chosen).
+			fmt.Fprintln(os.Stderr, "\nReturning to the configuration menu…")
+			goto restart
+		}
+		return nil
 	}
 
 	if !confirm(stdin, plan) {
