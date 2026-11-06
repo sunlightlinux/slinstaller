@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -239,6 +241,12 @@ func openSectionInTab(m model, tab int, s section) model {
 // each Advanced section, and both popups, rendering each to confirm the new
 // views and the overlay do not panic and are non-empty.
 func TestViewsRenderNoPanic(t *testing.T) {
+	// Opening the Save Configuration section writes a file; keep it in a temp
+	// dir rather than the working tree.
+	savedPath := saveConfigPath
+	saveConfigPath = filepath.Join(t.TempDir(), "cfg.yaml")
+	defer func() { saveConfigPath = savedPath }()
+
 	hub := withSize(newModel(oneDisk()))
 	if v := hub.View(); !strings.Contains(v, "[R] Required") {
 		t.Errorf("hub render missing the Required tab:\n%s", v)
@@ -396,5 +404,27 @@ func TestManageUserEditsRow(t *testing.T) {
 	u := m.users[0]
 	if u.Login != "ionut" || u.UserName != "New Name" || u.Password != "pw" || u.Admin {
 		t.Fatalf("edited user wrong: %+v", u)
+	}
+}
+
+func TestSaveConfigWritesFile(t *testing.T) {
+	saved := saveConfigPath
+	defer func() { saveConfigPath = saved }()
+	saveConfigPath = filepath.Join(t.TempDir(), "cfg.yaml")
+
+	m := newModel(oneDisk())
+	m.users = []userEntry{{Login: "me", Password: "pw", Admin: true}}
+	m.parts = []partEntry{{Type: "part", FS: "ext4", Mount: "/"}}
+
+	m2 := openSectionInTab(m, 1, secSaveConfig)
+	if m2.popup != popupMessage {
+		t.Fatalf("Save Config should show a result popup")
+	}
+	data, err := os.ReadFile(saveConfigPath)
+	if err != nil {
+		t.Fatalf("config not written: %v", err)
+	}
+	if !strings.Contains(string(data), "login: me") {
+		t.Errorf("written config missing the user:\n%s", data)
 	}
 }

@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -75,12 +76,23 @@ func RunFullscreen() (*config.Config, string, error) {
 	if !m.confirmed {
 		return nil, "", fmt.Errorf("cancelled")
 	}
+	cfg, err := m.buildConfig()
+	if err != nil {
+		return nil, "", err
+	}
+	return cfg, m.passphrase, nil
+}
 
+// buildConfig turns the wizard's state into a config, in clr-installer's
+// shape: the disk layout, the accounts (passwords hashed here), identity,
+// and the Advanced-tab values. It is used both to run the install and to
+// write the config out from the Save Configuration Settings section.
+func (m model) buildConfig() (*config.Config, error) {
 	users := make([]*config.User, 0, len(m.users))
 	for _, u := range m.users {
 		hash, err := cryptHash(u.Password)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		users = append(users, &config.User{Login: u.Login, UserName: u.UserName, Password: hash, Admin: u.Admin})
 	}
@@ -107,8 +119,12 @@ func RunFullscreen() (*config.Config, string, error) {
 			cfg.NetworkInterfaces = append(cfg.NetworkInterfaces, iface)
 		}
 	}
-	return cfg, m.passphrase, nil
+	return cfg, nil
 }
+
+// saveConfigPath is where the Save Configuration Settings section writes the
+// config. A variable so a test can point it elsewhere.
+var saveConfigPath = "slinstaller-config.yaml"
 
 // splitList splits a comma/space-separated list into trimmed, non-empty
 // items.
@@ -950,15 +966,20 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.netResult = ""
 		return m, tea.Batch(spinnerTickCmd(), testNetCmd())
 	case secSaveConfig:
-		// The config is always written during the install (the controller's
-		// save-config stage). Here, say so, clr-style.
+		// Write the current configuration to a file, as clr's Save
+		// Configuration Settings does, and report the outcome.
 		m.popup = popupMessage
-		m.popupMsg = []string{
-			"Save Configuration Settings",
-			"",
-			"The installation configuration is saved automatically",
-			"during the install, to /root/slinstaller.yaml on the",
-			"target system.",
+		if cfg, err := m.buildConfig(); err != nil {
+			m.popupMsg = []string{"Save Configuration Settings", "", "Could not build the config: " + err.Error()}
+		} else if err := config.Save(saveConfigPath, cfg); err != nil {
+			m.popupMsg = []string{"Save Configuration Settings", "", "Could not save: " + err.Error()}
+		} else {
+			abs, _ := filepath.Abs(saveConfigPath)
+			m.popupMsg = []string{
+				"Save Configuration Settings", "",
+				"Saved to " + abs,
+				"(re-run it later with: slinstaller --apply <file>)",
+			}
 		}
 		return m, nil
 	default: // text sections

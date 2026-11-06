@@ -2,6 +2,7 @@ package config
 
 import (
 	"math"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -726,5 +727,33 @@ func TestValidateReuseRejectsNonPlain(t *testing.T) {
 	err := c.Validate()
 	if err == nil || !strings.Contains(err.Error(), "only plain partitions") {
 		t.Fatalf("reuse+crypt should be rejected, got: %v", err)
+	}
+}
+
+func TestSaveRoundTrip(t *testing.T) {
+	c := &Config{
+		Hostname: "box", Timezone: "UTC", Keyboard: "us",
+		TargetMedia: []*Media{{
+			Name: "sda", Type: "disk",
+			Children: []*Media{
+				{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+				{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+			},
+		}},
+		Users: []*User{{Login: "me", Password: "$6$a$b", Admin: true}},
+	}
+	path := filepath.Join(t.TempDir(), "out.yaml")
+	if err := Save(path, c); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	back, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := back.Validate(); err != nil {
+		t.Fatalf("saved config does not validate: %v", err)
+	}
+	if back.Hostname != "box" || len(back.Users) != 1 || back.Users[0].Login != "me" {
+		t.Errorf("round-trip lost data: %+v", back)
 	}
 }

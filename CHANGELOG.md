@@ -31,6 +31,11 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Save Configuration Settings now writes the wizard's config to a file
+  (clr parity): it builds the clr-format `config.yaml` from the current
+  choices and saves it (never including the LUKS passphrase), so the layout
+  can be inspected or re-run later with `slinstaller --apply <file>`. New
+  `config.Save` writes a config back in the shape `Load` reads.
 - Configure Network Interfaces is now clr's interface sub-page (phase 3):
   the machine's live interfaces are listed with their current setting
   (Automatic DHCP or a static address), and selecting one opens a

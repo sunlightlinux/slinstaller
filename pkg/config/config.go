@@ -246,6 +246,21 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
+// Save writes the config to path as YAML, in the clr-installer-compatible
+// shape it was read in. A file written here loads back with Load and drives
+// the same install. It never contains a LUKS passphrase — that is prompted
+// or taken from the environment, never stored.
+func Save(path string, c *Config) error {
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("config: marshal: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("config: write %s: %w", path, err)
+	}
+	return nil
+}
+
 // KernelPackage maps the configured kernel to the xbps package that
 // provides it, or "" to leave the base system's default kernel in place.
 // clr-installer names a kernel by its Clear bundle (kernel-native,
