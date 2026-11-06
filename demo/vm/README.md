@@ -33,15 +33,18 @@ Log in at the live prompt as `root` (Void live password: `voidlinux`),
 then:
 
 ```sh
-mkdir -p /mnt/share
-mount -t 9p -o trans=virtio slshare /mnt/share
+# Mount the share OUTSIDE /mnt: slinstaller installs the target at /mnt, so
+# anything under it (e.g. a --local-repo) would be hidden once the target is
+# mounted. /run/slshare is safe.
+mkdir -p /run/slshare
+mount -t 9p -o trans=virtio slshare /run/slshare
 
 # The base live ISO ships mkfs.*, mkswap, grub and efibootmgr, but not
 # parted. guest-prep.sh refreshes xbps and installs it.
-sh /mnt/share/guest-prep.sh
+sh /run/slshare/guest-prep.sh
 
-/mnt/share/slinstaller /mnt/share/config.yaml           # dry run: print the plan
-/mnt/share/slinstaller --apply /mnt/share/config.yaml   # do it (retype /dev/vda to confirm)
+/run/slshare/slinstaller /run/slshare/config.yaml           # dry run: print the plan
+/run/slshare/slinstaller --apply /run/slshare/config.yaml   # do it (retype /dev/vda to confirm)
 poweroff
 ```
 

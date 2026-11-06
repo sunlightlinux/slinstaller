@@ -5,17 +5,17 @@
 # parted — nor cryptsetup/lvm2/mdadm for the encrypted, LVM and RAID
 # configs. This refreshes xbps and installs the tools the installs need.
 #
-#   sh /mnt/share/guest-prep.sh
+#   sh /run/slshare/guest-prep.sh
 set -eu
 
 xbps-install -Suy xbps
 xbps-install -Sy parted cryptsetup lvm2 mdadm
 
 echo "Ready. Now, e.g.:"
-echo "  /mnt/share/slinstaller --apply /mnt/share/config.yaml           # basic"
-echo "  /mnt/share/slinstaller --apply /mnt/share/config-luks.yaml      # encrypted root"
-echo "  /mnt/share/slinstaller --apply /mnt/share/config-luks-split.yaml # crypt / + crypt /home"
-echo "  /mnt/share/slinstaller --apply /mnt/share/config-lvm.yaml       # LVM"
-echo "  /mnt/share/slinstaller --apply /mnt/share/config-lvm-luks.yaml  # LVM-on-LUKS"
-echo "  /mnt/share/slinstaller --apply /mnt/share/config-raid1.yaml     # RAID1 (two disks)"
-echo "  /mnt/share/slinstaller                                          # interactive wizard"
+echo "  /run/slshare/slinstaller --apply /run/slshare/config.yaml           # basic"
+echo "  /run/slshare/slinstaller --apply /run/slshare/config-luks.yaml      # encrypted root"
+echo "  /run/slshare/slinstaller --apply /run/slshare/config-luks-split.yaml # crypt / + crypt /home"
+echo "  /run/slshare/slinstaller --apply /run/slshare/config-lvm.yaml       # LVM"
+echo "  /run/slshare/slinstaller --apply /run/slshare/config-lvm-luks.yaml  # LVM-on-LUKS"
+echo "  /run/slshare/slinstaller --apply /run/slshare/config-raid1.yaml     # RAID1 (two disks)"
+echo "  /run/slshare/slinstaller                                          # interactive wizard"
