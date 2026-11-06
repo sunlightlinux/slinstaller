@@ -428,3 +428,29 @@ func TestSaveConfigWritesFile(t *testing.T) {
 		t.Errorf("written config missing the user:\n%s", data)
 	}
 }
+
+func TestManageUserButtonsNavigate(t *testing.T) {
+	m := newModel(oneDisk())
+	m.users = []userEntry{{Login: "a", Password: "p", Admin: true}}
+	m.view = viewUserList
+	m.userCursor = 0 // on the user row
+
+	// Tab moves off the row onto the buttons; two Tabs reach Revert
+	// (row=0, Add=1, Revert=2 with one user).
+	m = send(m, tea.KeyMsg{Type: tea.KeyTab})
+	m = send(m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.userCursor != 2 {
+		t.Fatalf("after two Tabs cursor=%d, want 2 (Revert)", m.userCursor)
+	}
+	m = send(m, enter) // Revert clears the table
+	if len(m.users) != 0 {
+		t.Errorf("Revert did not clear users: %d left", len(m.users))
+	}
+
+	// Tab wraps around: from the last button one Tab returns to the top.
+	m.userCursor = len(m.users) + len(userButtons) - 1 // last button (Cancel)
+	m = send(m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.userCursor != 0 {
+		t.Errorf("Tab from last did not wrap to 0, got %d", m.userCursor)
+	}
+}

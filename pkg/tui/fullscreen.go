@@ -706,13 +706,19 @@ func (m model) updateUserList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		m.view = viewHub
-	case "up", "k":
+	// Move backward over rows + buttons; Tab/arrows wrap so every control is
+	// reachable (the four buttons sit on one line).
+	case "up", "k", "left", "h", "shift+tab":
 		if m.userCursor > 0 {
 			m.userCursor--
+		} else {
+			m.userCursor = last
 		}
-	case "down", "j":
+	case "down", "j", "right", "l", "tab":
 		if m.userCursor < last {
 			m.userCursor++
+		} else {
+			m.userCursor = 0
 		}
 	case "a":
 		return m.startUserForm()
@@ -1573,7 +1579,7 @@ func (m model) userListView() string {
 		btns = append(btns, style.Render(b))
 	}
 	body = append(body, lineBG.Width(w).Render("  "+strings.Join(btns, "  ")))
-	return m.screen(body, "[Up/Down] move · [a] add · [Enter] edit · [d] delete · [Esc] back")
+	return m.screen(body, "[Tab/Arrows] move · [Enter] select/edit · [a] add · [d] delete · [Esc] back")
 }
 
 // userFormView renders the Add/Edit User form: one field at a time, then the
