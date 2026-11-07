@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strings"
 )
 
 // SinkRunner returns a Runner that echoes each command and streams its
@@ -22,7 +21,7 @@ func SinkRunner(sink func(line string)) Runner {
 		if len(args) == 0 {
 			return fmt.Errorf("empty command")
 		}
-		sink("+ " + strings.Join(args, " "))
+		sink("+ " + ShowCommand(args))
 
 		c := exec.Command(args[0], args[1:]...)
 		pr, pw := io.Pipe()

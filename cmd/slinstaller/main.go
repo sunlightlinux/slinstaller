@@ -102,12 +102,36 @@ func run(args []string) error {
 		"skip the minimum-size and disk-fit checks (same as the config's skipValidationSize)")
 	fs.BoolVar(&skipAll, "skip-validation-all", false,
 		"skip all config validation (same as the config's skipValidationAll); use with care")
+	var forceDestructive bool
+	fs.BoolVar(&forceDestructive, "force-destructive", false,
+		"wipe a target disk even when a RAID array or LVM volume group on it also uses another disk, which that breaks (clr-installer's flag)")
 	var reboot bool
 	fs.BoolVar(&reboot, "reboot", false,
 		"reboot into the installed system when the install finishes (same as the config's postReboot)")
 	var logFile string
 	fs.StringVar(&logFile, "log", "",
 		"also write the install's output to this file (for debugging an unattended or serial install)")
+
+	// clr-installer's options, under its names, so a command line written
+	// for it runs here too.
+	var configPath string
+	fs.StringVar(&configPath, "config", "", "the config file (the same as giving it as the argument)")
+	fs.StringVar(&configPath, "c", "", "short for --config")
+	var cryptFile string
+	fs.StringVar(&cryptFile, "crypt-file", "", "read the LUKS passphrase from this file")
+	var genpass string
+	fs.StringVar(&genpass, "genpass", "",
+		"print the crypt hash of this password for a config's users, and exit; \"-\" reads it without echo")
+	var aliases aliasFlag
+	fs.Var(&aliases, "block-device", "name:file, a storage alias for the config's targetMedia (repeatable); replaces the config's alias of that name")
+	fs.Var(&aliases, "b", "short for --block-device")
+	var copyNetwork, allowInsecure bool
+	fs.BoolVar(&copyNetwork, "copy-network", false, "copy the live system's network configuration into the installed system (the config's copyNetwork)")
+	fs.BoolVar(&allowInsecure, "allow-insecure-http", false, "allow a plain http:// repository (the config's allowInsecureHTTP)")
+	var swapFileSize string
+	fs.StringVar(&swapFileSize, "swap-file-size", "", "create a swap file of this size, e.g. 2G (the config's swapFileSize)")
+	var template string
+	fs.StringVar(&template, "template", "", "write a template config to this .yaml file, and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: slinstaller [--apply] [config.yaml]\n\n")
 		fmt.Fprintf(os.Stderr, "With a config file, reads a clr-installer-format config and prints its plan;\n")
@@ -127,11 +151,37 @@ func run(args []string) error {
 		return printDisks()
 	}
 
+	if genpass != "" {
+		pw := genpass
+		if pw == "-" {
+			pw = tui.ReadSecret(bufio.NewReader(os.Stdin), os.Stderr, "Password")
+		}
+		if err := config.ValidPassword(pw); err != nil {
+			return err
+		}
+		hash, err := tui.CryptHash(pw)
+		if err != nil {
+			return err
+		}
+		fmt.Println(hash)
+		return nil
+	}
+
+	if template != "" {
+		return writeTemplate(template)
+	}
+
 	// One reader for all terminal input, so the interactive front-end and
 	// the later prompts don't fight over buffered stdin.
 	stdin := bufio.NewReader(os.Stdin)
 
 	rest := fs.Args()
+	if configPath != "" {
+		if len(rest) > 0 {
+			return fmt.Errorf("give the config either with --config or as the argument, not both")
+		}
+		rest = []string{configPath}
+	}
 	// repoFlag preserves the original --repo so the full-screen "Back to
 	// installer" loop below can re-resolve it from a re-run wizard each time.
 	repoFlag := repo
@@ -143,7 +193,7 @@ restart:
 	repo = repoFlag
 	switch len(rest) {
 	case 1:
-		cfg, err = config.Load(rest[0])
+		cfg, err = config.LoadWith(rest[0], aliases)
 	case 0:
 		// No config file: drive the interactive front-end, which builds
 		// one. It installs, so it needs root.
@@ -187,6 +237,16 @@ restart:
 	if reboot {
 		cfg.PostReboot = true
 	}
+	// clr-installer's flags for config fields, likewise.
+	if copyNetwork {
+		cfg.CopyNetwork = true
+	}
+	if allowInsecure {
+		cfg.AllowInsecureHTTP = true
+	}
+	if swapFileSize != "" {
+		cfg.SwapFileSize = swapFileSize
+	}
 
 	// Validate before anything else: this is the last point at which
 	// nothing has been touched.
@@ -217,6 +277,7 @@ restart:
 	// own progress view instead, so the plain command list is skipped there.
 	if !fullscreen {
 		fmt.Print(storage.FormatCommands(cmds))
+		printRelease(plan)
 	}
 
 	if !apply {
@@ -312,6 +373,11 @@ restart:
 		Log:    logOut,
 		Output: logOut,
 	}
+	if len(rest) == 1 {
+		if abs, err := filepath.Abs(rest[0]); err == nil {
+			opts.ConfigDir = filepath.Dir(abs)
+		}
+	}
 
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("--apply must run as root")
@@ -388,6 +454,40 @@ restart:
 				return fmt.Errorf("target disk %s is not among the machine's block devices", disk)
 			case d.Type != "disk" && d.Type != "loop":
 				return fmt.Errorf("target %s is a %s, not a whole disk", disk, d.Type)
+			default:
+				// A mounted filesystem, active swap or the live medium on
+				// the target: installing would pull it from under the
+				// running system. No flag overrides this.
+				if why := d.InUse(); why != "" {
+					return fmt.Errorf("target disk %s is in use: %s", disk, why)
+				}
+			}
+		}
+
+		if plan.Wipe {
+			// Wiping a disk that shares a RAID array or volume group with a
+			// disk the install does not wipe breaks that one too.
+			vgs := blockdev.VolumeGroups()
+			var shared []string
+			for _, disk := range plan.DiskList() {
+				shared = append(shared, blockdev.Shared(devs, disk, plan.DiskList(), vgs)...)
+			}
+			if len(shared) > 0 && !forceDestructive {
+				return fmt.Errorf("wiping %s would break other disks:\n  %s\npass --force-destructive to wipe it anyway",
+					strings.Join(plan.DiskList(), ", "), strings.Join(shared, "\n  "))
+			}
+			// The tools that release the disks before partitioning.
+			var tools []string
+			for _, disk := range plan.DiskList() {
+				if d := blockdev.FindByPath(devs, disk); d != nil {
+					for _, c := range blockdev.Teardown(*d) {
+						tools = append(tools, c[0])
+					}
+				}
+			}
+			if missing := storage.MissingTools(tools); len(missing) > 0 {
+				return fmt.Errorf("missing tools on the live system to release the target disk: %s",
+					strings.Join(missing, ", "))
 			}
 		}
 
@@ -439,10 +539,18 @@ restart:
 	}
 
 	// LUKS passphrase, when the layout is encrypted. The interactive
-	// front-end already collected it; otherwise take it from the
-	// environment for an unattended install, or prompt.
+	// front-end already collected it; otherwise take it from --crypt-file
+	// or the environment for an unattended install, or prompt.
 	if encrypted {
 		opts.Passphrase = interactivePass
+		if opts.Passphrase == "" && cryptFile != "" {
+			data, err := os.ReadFile(cryptFile)
+			if err != nil {
+				return fmt.Errorf("--crypt-file: %w", err)
+			}
+			// The file's own trailing newline is not part of the passphrase.
+			opts.Passphrase = strings.TrimRight(string(data), "\r\n")
+		}
 		if opts.Passphrase == "" {
 			opts.Passphrase = os.Getenv("SLINSTALLER_LUKS_PASSPHRASE")
 		}
@@ -523,6 +631,33 @@ func rebootSystem() error {
 	return nil
 }
 
+// printRelease shows what a wiping install will release on its disks
+// before partitioning (blockdev.Teardown), as the controller finds them
+// now. It is read from the live system, so it is shown apart from the
+// plan's own commands.
+func printRelease(plan *storage.Plan) {
+	if !plan.Wipe {
+		return
+	}
+	devs, err := blockdev.List()
+	if err != nil {
+		return
+	}
+	for _, disk := range plan.DiskList() {
+		d := blockdev.FindByPath(devs, disk)
+		if d == nil {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "\nBefore partitioning %s, the install first runs:\n", disk)
+		for _, c := range blockdev.Teardown(*d) {
+			fmt.Fprintf(os.Stderr, "  %s\n", strings.Join(c, " "))
+		}
+		if why := d.InUse(); why != "" {
+			fmt.Fprintf(os.Stderr, "  (it will refuse: %s)\n", why)
+		}
+	}
+}
+
 // printDisks lists the machine's whole disks and their partitions.
 func printDisks() error {
 	devs, err := blockdev.List()
@@ -536,6 +671,9 @@ func printDisks() error {
 	}
 	for _, d := range disks {
 		fmt.Printf("%-14s %9s  %s\n", d.Path, humanSize(d.Size), d.Model)
+		if why := d.InUse(); why != "" {
+			fmt.Printf("  (not installable: %s)\n", why)
+		}
 		for _, p := range d.Children {
 			fmt.Printf("  %-12s %9s  %s\n", p.Path, humanSize(p.Size), p.Type)
 		}
@@ -721,5 +859,60 @@ func checkLocalPackages(packages, localRepos []string, tried string) error {
 			}
 		}
 	}
+	return nil
+}
+
+// aliasFlag collects --block-device name:file values.
+type aliasFlag []*config.StorageAlias
+
+func (a *aliasFlag) String() string {
+	var parts []string
+	for _, x := range *a {
+		parts = append(parts, x.Name+":"+x.File)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (a *aliasFlag) Set(v string) error {
+	name, file, ok := strings.Cut(v, ":")
+	if !ok || name == "" || file == "" {
+		return fmt.Errorf("want name:file, e.g. disk:/dev/nvme0n1")
+	}
+	*a = append(*a, &config.StorageAlias{Name: name, File: file})
+	return nil
+}
+
+// writeTemplate writes a starting config, as clr-installer's --template
+// does: the standard whole-disk layout (ESP, swap, root) on a disk named
+// by the alias "disk", so pointing it at a machine is one edit of the
+// alias (or --block-device disk:/dev/...). Accounts are left out: a user
+// needs a password hash, which --genpass prints.
+func writeTemplate(path string) error {
+	if filepath.Ext(path) != ".yaml" {
+		return fmt.Errorf("template file %q must end in .yaml", path)
+	}
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("%s exists; not overwriting it", path)
+	}
+	cfg := &config.Config{
+		BlockDevices: []*config.StorageAlias{{Name: "disk", File: "/dev/sda"}},
+		TargetMedia: []*config.Media{{
+			Name: "${disk}", Type: "disk",
+			Children: []*config.Media{
+				{Name: "${disk}1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+				{Name: "${disk}2", Type: "part", FsType: "swap", Size: "2G"},
+				{Name: "${disk}3", Type: "part", FsType: "ext4", Mountpoint: "/", Size: "0"},
+			},
+		}},
+		Hostname: "sunlight",
+		Timezone: "UTC",
+		Keyboard: "us",
+		Language: "en_US.UTF-8",
+		Version:  1,
+	}
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Wrote %s. Add users (password hashes from --genpass) and point the disk alias at the target.\n", path)
 	return nil
 }

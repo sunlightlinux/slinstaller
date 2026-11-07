@@ -16,7 +16,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Hostname writes /etc/hostname in the target. An empty name is a no-op.
@@ -321,6 +323,66 @@ func WheelSudo(root string) error {
 	return os.Chmod(path, 0o440)
 }
 
+// AutoUpdateServiceName is the slinit service that keeps an installed
+// system updated.
+const AutoUpdateServiceName = "sunlight-autoupdate"
+
+// autoUpdateService updates the system once a day, the way Clear Linux's
+// swupd-update.timer does: a slinit calendar timer (cron-*) on an
+// otherwise idle process, run at a random but fixed time within the hour
+// after midnight so a fleet does not hit the mirror at once, and caught up
+// at the next boot when the machine was off. xbps updates itself first,
+// as it refuses a system update while a newer xbps is available; the
+// system update runs whatever that first step returns (an xbps already up
+// to date is not a reason to skip it).
+const autoUpdateService = `# sunlight-autoupdate -- updates the system from its xbps repositories
+# once a day, as Clear Linux's swupd-update.timer does. Written by
+# slinstaller (the config's autoUpdate).
+#
+#     slinitctl enable sunlight-autoupdate     # turn it on
+#     slinitctl disable sunlight-autoupdate    # turn it off
+#     slinitctl start sunlight-autoupdate      # for this boot only
+type = process
+command = /bin/sleep infinity
+cron-command = /bin/sh -c "xbps-install -Syu xbps; xbps-install -Suy"
+cron-calendar = daily
+cron-randomized-delay = 1h
+cron-fixed-random-delay = yes
+cron-persistent = yes
+cron-on-error = continue
+waits-for: network
+`
+
+// AutoUpdate writes the update service into the target's /etc/slinit.d
+// and, when on, enables it; off, the service is installed but not
+// enabled, so turning it on later is one slinitctl enable.
+func AutoUpdate(root string, on bool) error {
+	dir := filepath.Join(root, "etc", "slinit.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("system: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, AutoUpdateServiceName), []byte(autoUpdateService), 0o644); err != nil {
+		return fmt.Errorf("system: write %s: %w", AutoUpdateServiceName, err)
+	}
+	if !on {
+		return nil
+	}
+	return EnableSlinitService(root, AutoUpdateServiceName)
+}
+
+// LockRootCommands returns the chrooted commands that lock the target's
+// root password and stamp it as changed today, as clr-installer does once
+// an administrator account exists: root is then reached through sudo, and
+// nobody can log in as root with a password. The change date keeps sudo
+// and ssh from asking for a password change on an account that has none.
+func LockRootCommands(root string, today time.Time) [][]string {
+	days := today.UTC().Unix() / 86400
+	return [][]string{
+		{"chroot", root, "usermod", "--lock", "root"},
+		{"chroot", root, "chage", "--lastday", strconv.FormatInt(days, 10), "root"},
+	}
+}
+
 // EnableService enables a runit service in the target by symlinking it
 // into the default runsvdir, which is what runit scans at boot. It
 // points straight at /etc/runit/runsvdir/default rather than /var/service
@@ -370,11 +432,16 @@ func IsSlinitSystem(root string) bool {
 // it into /etc/slinit.d/boot.d, the directory slinit-services' boot
 // service reads its optional dependencies from. It is what `slinitctl
 // enable` does, without a running slinit. The service file must exist,
-// so a typo cannot leave a dangling link.
+// in /etc/slinit.d (the administrator's, which slinit reads first) or in
+// SlinitServicesDir (the packages'), so a typo cannot leave a dangling
+// link.
 func EnableSlinitService(root, name string) error {
-	target := filepath.Join(SlinitServicesDir, name)
+	target := filepath.Join("/etc/slinit.d", name)
 	if _, err := os.Stat(filepath.Join(root, target)); err != nil {
-		return fmt.Errorf("system: enable slinit service %s: %w", name, err)
+		target = filepath.Join(SlinitServicesDir, name)
+		if _, err := os.Stat(filepath.Join(root, target)); err != nil {
+			return fmt.Errorf("system: enable slinit service %s: %w", name, err)
+		}
 	}
 	dir := filepath.Join(root, "etc", "slinit.d", "boot.d")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

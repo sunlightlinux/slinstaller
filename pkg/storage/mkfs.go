@@ -34,6 +34,7 @@ func mkfsCommand(p Partition) ([]string, error) {
 	if p.Filesystem == "swap" {
 		cmd := []string{"mkswap"}
 		cmd = append(cmd, labelArgs(p)...)
+		cmd = append(cmd, p.Options...)
 		return append(cmd, p.EffectiveDevice()), nil
 	}
 
@@ -45,6 +46,7 @@ func mkfsCommand(p Partition) ([]string, error) {
 	cmd := []string{"mkfs." + p.Filesystem}
 	cmd = append(cmd, labelArgs(p)...)
 	cmd = append(cmd, args...)
+	cmd = append(cmd, p.Options...)
 	return append(cmd, p.EffectiveDevice()), nil
 }
 

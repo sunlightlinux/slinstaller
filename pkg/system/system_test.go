@@ -1,10 +1,12 @@
 package system
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHostname(t *testing.T) {
@@ -405,4 +407,34 @@ func contains(ss []string, v string) bool {
 		}
 	}
 	return false
+}
+
+func TestLockRootCommands(t *testing.T) {
+	got := LockRootCommands("/mnt", time.Date(2026, 11, 7, 21, 0, 0, 0, time.UTC))
+	want := "[[chroot /mnt usermod --lock root] [chroot /mnt chage --lastday 20764 root]]"
+	if fmt.Sprint(got) != want {
+		t.Errorf("LockRootCommands = %v, want %s", got, want)
+	}
+}
+
+// The update service is written to /etc/slinit.d either way and enabled
+// (linked from boot.d) only when automatic updates are on.
+func TestAutoUpdate(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		root := t.TempDir()
+		if err := AutoUpdate(root, on); err != nil {
+			t.Fatal(err)
+		}
+		svc, err := os.ReadFile(filepath.Join(root, "etc", "slinit.d", AutoUpdateServiceName))
+		if err != nil || !strings.Contains(string(svc), "cron-calendar = daily") {
+			t.Fatalf("on=%v: service file %q, %v", on, svc, err)
+		}
+		target, err := os.Readlink(filepath.Join(root, "etc", "slinit.d", "boot.d", AutoUpdateServiceName))
+		if on && target != "/etc/slinit.d/"+AutoUpdateServiceName {
+			t.Errorf("on: boot.d link = %q, %v", target, err)
+		}
+		if !on && err == nil {
+			t.Errorf("off: service is enabled (link to %q)", target)
+		}
+	}
 }

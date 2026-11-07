@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -211,11 +212,28 @@ func VerboseRunner(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("empty command")
 	}
-	fmt.Fprintf(os.Stderr, "    + %s\n", strings.Join(args, " "))
+	fmt.Fprintf(os.Stderr, "    + %s\n", ShowCommand(args))
 	c := exec.Command(args[0], args[1:]...)
 	c.Stdout = os.Stderr
 	c.Stderr = os.Stderr
 	return c.Run()
+}
+
+// cryptHashRe matches a crypt(3) password hash ($6$salt$..., $y$..., ...).
+var cryptHashRe = regexp.MustCompile(`^\$(1|2[abxy]?|5|6|7|y|gy|sha1|md5)\$`)
+
+// ShowCommand renders a command for an operator or a log, with any
+// password hash in it (useradd -p) masked: the install log is kept on the
+// installed system, and a hash there is one more copy to crack.
+func ShowCommand(args []string) string {
+	shown := make([]string, len(args))
+	for i, a := range args {
+		if cryptHashRe.MatchString(a) {
+			a = "<password hash>"
+		}
+		shown[i] = a
+	}
+	return strings.Join(shown, " ")
 }
 
 // FormatCommands renders a command list one per line, for showing a dry

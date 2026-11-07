@@ -104,6 +104,12 @@ type Config struct {
 	// the first boot.
 	CopyNetwork bool `yaml:"copyNetwork,omitempty"`
 
+	// AutoUpdate keeps the installed system updated from its xbps
+	// repositories once a day (clr-installer's autoUpdate, which leaves
+	// swupd's update timer on or turns it off). Unset means on, as in
+	// clr-installer; false installs the update service disabled.
+	AutoUpdate *bool `yaml:"autoUpdate,omitempty"`
+
 	// PostReboot reboots the machine when the install finishes
 	// (clr-installer's postReboot), for an unattended install that should
 	// come up into the new system without an operator at the console.
@@ -127,6 +133,10 @@ type Config struct {
 	Version uint `yaml:"version,omitempty"`
 }
 
+// AutoUpdates reports whether the installed system updates itself: the
+// config's autoUpdate, on when it is not set.
+func (c *Config) AutoUpdates() bool { return c.AutoUpdate == nil || *c.AutoUpdate }
+
 // StorageAlias binds a name to a device file so targetMedia can refer to a
 // disk by alias. In clr-installer a disk is named `${alias}` and its
 // partitions `${alias}1`, `${alias}2`; the alias expands to the device's
@@ -149,6 +159,16 @@ type Media struct {
 	FsType     string   `yaml:"fstype,omitempty"`
 	Mountpoint string   `yaml:"mountpoint,omitempty"`
 	Children   []*Media `yaml:"children,omitempty"`
+
+	// Label is the filesystem label mkfs gives the partition or logical
+	// volume (truncated to what the filesystem allows), as clr-installer
+	// does. Mounts still go by UUID.
+	Label string `yaml:"label,omitempty"`
+
+	// Options are extra mkfs options, space-separated, added after
+	// slinstaller's own and before the device (clr-installer's options),
+	// e.g. "-O ^metadata_csum" or "-m 1".
+	Options string `yaml:"options,omitempty"`
 
 	// VolumeGroup names the LVM volume group a `type: lvm` partition
 	// hosts; its children are the logical volumes.
@@ -233,7 +253,13 @@ type Hook struct {
 }
 
 // Load reads and parses a config file.
-func Load(path string) (*Config, error) {
+func Load(path string) (*Config, error) { return LoadWith(path, nil) }
+
+// LoadWith is Load with storage aliases given outside the file
+// (clr-installer's --block-device name:file): each replaces the file's
+// alias of the same name, or adds one, before targetMedia is expanded, so
+// one config can be pointed at another disk without editing it.
+func LoadWith(path string, aliases []*StorageAlias) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -241,6 +267,16 @@ func Load(path string) (*Config, error) {
 	var c Config
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+next:
+	for _, a := range aliases {
+		for _, have := range c.BlockDevices {
+			if have != nil && have.Name == a.Name {
+				have.File = a.File
+				continue next
+			}
+		}
+		c.BlockDevices = append(c.BlockDevices, a)
 	}
 	c.expandAliases()
 	return &c, nil
@@ -348,6 +384,57 @@ var hostnameRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
 // loginRe is what useradd accepts for a login name.
 var loginRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 
+// Limits on accounts, clr-installer's: a login of at most 31 characters,
+// and a password of 8 to 255.
+const (
+	MaxLoginLength    = 31
+	MinPasswordLength = 8
+	MaxPasswordLength = 255
+)
+
+// reservedLogins are the names the base system already uses for an
+// account or a group (base-files' passwd and group). useradd makes a group
+// named after each new account, so a login taking one of these fails
+// partway through the install; clr-installer refuses such names too.
+var reservedLogins = map[string]bool{}
+
+func init() {
+	for _, n := range strings.Fields(`root nobody bin sys kmem wheel tty tape daemon floppy disk lp
+		dialout audio video utmp adm cdrom optical mail storage scanner network kvm input plugdev
+		usbmon sgx nogroup users xbuilder`) {
+		reservedLogins[n] = true
+	}
+}
+
+// ValidLogin checks a login name as clr-installer does: present, a valid
+// Unix name, no longer than MaxLoginLength, and not one the base system
+// already uses.
+func ValidLogin(login string) error {
+	switch {
+	case login == "":
+		return fmt.Errorf("no login")
+	case !loginRe.MatchString(login):
+		return fmt.Errorf("login %q must be a valid Unix name (lowercase letter or _ then letters, digits, - or _)", login)
+	case len(login) > MaxLoginLength:
+		return fmt.Errorf("login %q is longer than %d characters", login, MaxLoginLength)
+	case reservedLogins[login]:
+		return fmt.Errorf("login %q is already a system account or group", login)
+	}
+	return nil
+}
+
+// ValidPassword checks a plaintext password against clr-installer's length
+// limits, before it is hashed (the TUI's account form, --genpass).
+func ValidPassword(pw string) error {
+	switch n := len(pw); {
+	case n < MinPasswordLength:
+		return fmt.Errorf("password must be at least %d characters", MinPasswordLength)
+	case n > MaxPasswordLength:
+		return fmt.Errorf("password must be at most %d characters", MaxPasswordLength)
+	}
+	return nil
+}
+
 // looksHashed reports whether s is a crypt(3) hash ($id$...$...) rather
 // than a plaintext password, so a config cannot carry a password in the
 // clear even by accident.
@@ -375,6 +462,16 @@ func (c *Config) Validate() error {
 
 	var probs []string
 	add := func(format string, a ...any) { probs = append(probs, fmt.Sprintf(format, a...)) }
+
+	// A clr-installer alias whose file is not a device asks for an install
+	// into an image file (made, loop-mounted, kept with keepImage), which
+	// slinstaller does not do. Said here, rather than reading the file name
+	// as a device path (/dev/release.img) and failing later.
+	for _, al := range c.BlockDevices {
+		if al != nil && al.File != "" && !strings.HasPrefix(al.File, "/dev/") {
+			add("block-devices: %s points at %s, an image file; installing into an image is not supported (name a device such as /dev/sda)", al.Name, al.File)
+		}
+	}
 
 	// checkMin flags a fixed partition/volume size below a floor, unless size
 	// validation is turned off. A missing size, 0 or "rest" (fill) is not a
@@ -563,8 +660,8 @@ func (c *Config) Validate() error {
 			add("users[%d]: no login", i)
 			continue
 		}
-		if !loginRe.MatchString(u.Login) {
-			add("users[%d]: login %q must be a valid Unix name (lowercase letter or _ then letters, digits, - or _)", i, u.Login)
+		if err := ValidLogin(u.Login); err != nil {
+			add("users[%d]: %v", i, err)
 		}
 		if logins[u.Login] {
 			add("users[%d]: login %q is used more than once", i, u.Login)
@@ -690,6 +787,8 @@ func (c *Config) Plan() (*storage.Plan, error) {
 				Disk:       device,
 				Mountpoint: ch.Mountpoint,
 				Filesystem: ch.FsType,
+				Label:      ch.Label,
+				Options:    strings.Fields(ch.Options),
 				Size:       size,
 				Encrypted:  encrypted,
 			}
@@ -790,6 +889,8 @@ func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 				Disk:       device,
 				Mountpoint: ch.Mountpoint,
 				Filesystem: ch.FsType,
+				Label:      ch.Label,
+				Options:    strings.Fields(ch.Options),
 				Preserve:   ch.Preserve,
 			})
 		}
@@ -871,6 +972,7 @@ func lvmParts(disk string, i int, ch *Media) (storage.Partition, []storage.Parti
 		lvs = append(lvs, storage.Partition{
 			LV: true, VGName: ch.VolumeGroup, LVName: lv.Name,
 			Mountpoint: lv.Mountpoint, Filesystem: lv.FsType, Size: lvSize,
+			Label: lv.Label, Options: strings.Fields(lv.Options),
 		})
 	}
 	return pv, lvs, nil

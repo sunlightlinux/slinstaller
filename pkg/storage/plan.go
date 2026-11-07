@@ -22,6 +22,7 @@ type Partition struct {
 	Mountpoint string
 	Filesystem string
 	Label      string
+	Options    []string // extra mkfs options, after slinstaller's own
 
 	// Size is a byte count, a human size such as "512M", or SizeRest for
 	// the partition that takes whatever space is left.

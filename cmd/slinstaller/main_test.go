@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,5 +92,62 @@ func TestCheckLocale(t *testing.T) {
 		if err := checkLocale("UTC", ""); err != nil {
 			t.Errorf("UTC refused: %v", err)
 		}
+	}
+}
+
+// --template writes a config that loads, plans the standard layout on the
+// aliased disk, and that --block-device points elsewhere.
+func TestTemplate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.yaml")
+	if err := run([]string{"--template", path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"--template", path}); err == nil {
+		t.Error("--template overwrote an existing file")
+	}
+	if err := run([]string{"--template", path + ".txt"}); err == nil {
+		t.Error("--template accepted a file not ending in .yaml")
+	}
+	for alias, want := range map[string]string{"": "/dev/sda3", "disk:/dev/nvme0n1": "/dev/nvme0n1p3"} {
+		var over []*config.StorageAlias
+		if alias != "" {
+			var a aliasFlag
+			if err := a.Set(alias); err != nil {
+				t.Fatal(err)
+			}
+			over = a
+		}
+		cfg, err := config.LoadWith(path, over)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := cfg.Plan()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if root := plan.Parts[2]; root.Device != want || root.Mountpoint != "/" {
+			t.Errorf("alias %q: root is %s at %s, want %s", alias, root.Device, root.Mountpoint, want)
+		}
+	}
+}
+
+// -c and --config name the config as the argument does; both at once is
+// an error. A dry run of the template exercises the path end to end.
+func TestConfigFlag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.yaml")
+	if err := run([]string{"--template", path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"-c", path, path}); err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Errorf("-c with an argument: %v", err)
+	}
+	if err := run([]string{"--config", path}); err != nil {
+		t.Errorf("--config dry run: %v", err)
+	}
+}
+
+func TestGenpassRejectsShortPassword(t *testing.T) {
+	if err := run([]string{"--genpass", "short"}); err == nil || !strings.Contains(err.Error(), "at least 8") {
+		t.Errorf("--genpass short: %v", err)
 	}
 }

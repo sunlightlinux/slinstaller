@@ -54,8 +54,18 @@ func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
 	}
 
 	hostname := promptDefault(in, w, "Hostname", "sunlight")
+	// The account is checked as the full-screen form checks it.
 	login := promptDefault(in, w, "Username", "user")
-	hash, err := cryptHash(promptSecret(in, w, "Password for "+login))
+	for err := config.ValidLogin(login); err != nil; err = config.ValidLogin(login) {
+		fmt.Fprintf(w, "  %v, try again\n", err)
+		login = promptDefault(in, w, "Username", "user")
+	}
+	pw := promptSecret(in, w, "Password for "+login)
+	for err := config.ValidPassword(pw); err != nil; err = config.ValidPassword(pw) {
+		fmt.Fprintf(w, "  %v, try again\n", err)
+		pw = promptSecret(in, w, "Password for "+login)
+	}
+	hash, err := cryptHash(pw)
 	if err != nil {
 		return nil, "", err
 	}
@@ -78,9 +88,11 @@ func listDisks(w io.Writer) ([]blockdev.Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	disks := blockdev.Disks(devs)
+	// Only disks nothing on the running system uses: not the live medium,
+	// nothing mounted, no active swap.
+	disks := blockdev.Available(devs)
 	if len(disks) == 0 {
-		return nil, fmt.Errorf("tui: no disks found")
+		return nil, fmt.Errorf("tui: no disk to install to (disks that are mounted, in use as swap or the live medium are not offered)")
 	}
 	fmt.Fprintln(w, "Disks:")
 	for i, d := range disks {
@@ -162,6 +174,10 @@ func summarise(w io.Writer, disk blockdev.Device, fs string, encrypt bool, swap,
 
 // cryptHash turns a plaintext password into a crypt(3) SHA-512 hash with
 // openssl, feeding it on stdin so it never appears in the process list.
+// CryptHash returns the SHA-512 crypt(3) hash of a password, the form a
+// config's users carry (--genpass prints it).
+func CryptHash(pass string) (string, error) { return cryptHash(pass) }
+
 func cryptHash(pass string) (string, error) {
 	cmd := exec.Command("openssl", "passwd", "-6", "-stdin")
 	cmd.Stdin = strings.NewReader(pass + "\n")

@@ -24,7 +24,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/grub"
 	"github.com/sunlightlinux/slinstaller/pkg/luks"
@@ -70,6 +72,16 @@ type Options struct {
 	// Log, if set, receives a line announcing each stage as it starts, so
 	// an operator can see progress. nil is silent.
 	Log io.Writer
+
+	// ConfigDir is the directory of the config file the install came from,
+	// given to hooks as $yamlDir (clr-installer's), so a hook can reach
+	// files kept beside its config. Empty for an interactive install.
+	ConfigDir string
+
+	// Devices lists the machine's block devices, for releasing what the
+	// live system runs on a disk before it is repartitioned. nil uses
+	// blockdev.List; tests substitute their own.
+	Devices func() ([]blockdev.Device, error)
 
 	// LogFile, if set, is a file on the live system holding the install's
 	// log. A full run copies it to /root/slinstaller.log on the target
@@ -216,6 +228,12 @@ func (in *installer) run() error {
 }
 
 func (in *installer) partition() error {
+	// A disk about to be repartitioned is released first: arrays and
+	// volumes the live system brought up from an earlier install are
+	// stopped, and old signatures erased (blockdev.Teardown).
+	if err := in.releaseDisks(); err != nil {
+		return err
+	}
 	// The partition table first; then, on an encrypted disk, LUKS on each
 	// crypt partition before any filesystem is made — mkfs targets the
 	// mapper, not the raw partition.
@@ -286,6 +304,33 @@ func (in *installer) output() io.Writer {
 // was just partitioned or assembled exists before the next step opens it.
 // Best-effort: a live system without udevadm just skips it (and relies on
 // the kernel having created the nodes synchronously).
+// releaseDisks runs blockdev.Teardown on each disk a wiping install
+// repartitions. A reuse install keeps the table, and what is on it, as is.
+func (in *installer) releaseDisks() error {
+	if !in.plan.Wipe {
+		return nil
+	}
+	list := in.opts.Devices
+	if list == nil {
+		list = blockdev.List
+	}
+	devs, err := list()
+	if err != nil {
+		return err
+	}
+	for _, disk := range in.plan.DiskList() {
+		d := blockdev.FindByPath(devs, disk)
+		if d == nil {
+			continue // a loop device or image the listing does not show
+		}
+		if err := storage.RunCommands(blockdev.Teardown(*d), in.opts.Runner); err != nil {
+			return fmt.Errorf("release %s: %w", disk, err)
+		}
+	}
+	in.settle()
+	return nil
+}
+
 func (in *installer) settle() {
 	if _, err := exec.LookPath("udevadm"); err != nil {
 		return
@@ -803,9 +848,13 @@ func (in *installer) firstBoot() error {
 	}
 
 	// An admin account is added to wheel; this is what actually gives
-	// wheel sudo (with a password).
+	// wheel sudo (with a password). With an administrator to reach it
+	// through, root's own password login is locked, as clr-installer does.
 	if anyAdmin {
 		if err := system.WheelSudo(root); err != nil {
+			return err
+		}
+		if err := storage.RunCommands(system.LockRootCommands(root, time.Now()), in.opts.Runner); err != nil {
 			return err
 		}
 	}
@@ -853,9 +902,14 @@ func (in *installer) network() error {
 	// service, which boot already depends on; runit's dhcpcd service is
 	// for a runit system. It gets sshd enabled too, so a machine
 	// installed for remote use (a VM, a headless box) can be reached
-	// after its first boot without a trip to the console.
+	// after its first boot without a trip to the console. Its daily
+	// update service is installed here as well, enabled unless the config
+	// turns autoUpdate off.
 	if system.IsSlinitSystem(in.opts.Root) {
-		return system.EnableSlinitService(in.opts.Root, "sshd")
+		if err := system.EnableSlinitService(in.opts.Root, "sshd"); err != nil {
+			return err
+		}
+		return system.AutoUpdate(in.opts.Root, in.cfg.AutoUpdates())
 	}
 	return system.EnableService(in.opts.Root, "dhcpcd")
 }
@@ -959,41 +1013,91 @@ func (in *installer) preHooks() error  { return in.runHooks(in.cfg.PreInstall) }
 func (in *installer) postHooks() error { return in.runHooks(in.cfg.PostInstall) }
 
 // runHooks runs each hook command, chrooted into the target when the
-// hook asks for it, on the live system otherwise.
+// hook asks for it, on the live system otherwise, the way clr-installer
+// runs them: the hook variables ($chrootDir, $chrooted, $yamlDir and the
+// config's env) are substituted into the command, in both $name and
+// ${name} forms, and also set in its environment, and the command runs
+// under bash as a login shell (sh where there is no bash), so a hook
+// written for clr-installer, bash syntax and all, runs unchanged.
+//
+// One difference is kept on purpose: inside a chroot hook $chrootDir is
+// "/", the target's root as the hook sees it, where clr-installer passes
+// the live system's mount path, which does not exist inside the chroot.
 func (in *installer) runHooks(hooks []*config.Hook) error {
-	// The config's env variables are made available to every hook, sorted
-	// for a deterministic command line, on top of the fixed $chrootDir and
-	// $chrooted the installer always sets.
-	var extraEnv []string
-	keys := make([]string, 0, len(in.cfg.Environment))
-	for k := range in.cfg.Environment {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		extraEnv = append(extraEnv, k+"="+in.cfg.Environment[k])
-	}
-
 	for _, h := range hooks {
 		if h == nil || h.Cmd == "" {
 			continue
 		}
-		// clr-installer expands $chrootDir and $chrooted in hook commands;
-		// pass them as environment so the shell does the same. Inside the
-		// chroot the target root is /; outside it is the mount tree.
+		vars := map[string]string{"yamlDir": in.opts.ConfigDir}
+		for k, v := range in.cfg.Environment {
+			vars[k] = v
+		}
 		cmd := []string{}
 		if h.Chroot {
-			cmd = append(cmd, "chroot", in.opts.Root, "env", "chrootDir=/", "chrooted=1")
+			vars["chrootDir"], vars["chrooted"] = "/", "1"
+			cmd = append(cmd, "chroot", in.opts.Root)
 		} else {
-			cmd = append(cmd, "env", "chrootDir="+in.opts.Root, "chrooted=0")
+			vars["chrootDir"], vars["chrooted"] = in.opts.Root, "0"
 		}
-		cmd = append(cmd, extraEnv...)
-		cmd = append(cmd, "sh", "-c", h.Cmd)
+		// Sorted, for a deterministic command line.
+		keys := make([]string, 0, len(vars))
+		for k := range vars {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		cmd = append(cmd, "env")
+		for _, k := range keys {
+			cmd = append(cmd, k+"="+vars[k])
+		}
+		cmd = append(cmd, in.hookShell(h.Chroot)...)
+		cmd = append(cmd, expandHookVars(vars, h.Cmd))
 		if err := storage.RunCommands([][]string{cmd}, in.opts.Runner); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// hookShell is how a hook command is run: "bash -l -c" as clr-installer
+// does, where bash exists (in the target for a chroot hook, on the live
+// system otherwise), "sh -c" where it does not.
+func (in *installer) hookShell(chroot bool) []string {
+	has := false
+	if chroot {
+		for _, p := range []string{"usr/bin/bash", "bin/bash"} {
+			if _, err := os.Stat(filepath.Join(in.opts.Root, p)); err == nil {
+				has = true
+			}
+		}
+	} else {
+		_, err := exec.LookPath("bash")
+		has = err == nil
+	}
+	if has {
+		return []string{"bash", "-l", "-c"}
+	}
+	return []string{"sh", "-c"}
+}
+
+// expandHookVars substitutes the hook variables into a command, $name and
+// ${name}, as clr-installer does before handing it to the shell. Longer
+// names go first, so one name that begins another is not cut short.
+func expandHookVars(vars map[string]string, cmd string) string {
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(a, b int) bool {
+		if len(keys[a]) != len(keys[b]) {
+			return len(keys[a]) > len(keys[b])
+		}
+		return keys[a] < keys[b]
+	})
+	for _, k := range keys {
+		cmd = strings.ReplaceAll(cmd, "${"+k+"}", vars[k])
+		cmd = strings.ReplaceAll(cmd, "$"+k, vars[k])
+	}
+	return cmd
 }
 
 func stageNames(stages []stage) string {

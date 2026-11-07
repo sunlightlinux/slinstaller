@@ -12,6 +12,41 @@ for what will and will not be allowed to change once releases begin.
 
 ### Changed
 
+- A disk that is in use is no longer offered or installed to: one with a
+  mounted filesystem, active swap, or the live medium itself (the TUI and
+  the text flow leave it out; a config naming it is refused before
+  anything is touched; `--list-disks` marks it). clr-installer leaves such
+  disks out too. *Compatibility:* a config targeting a disk the running
+  system uses now stops with the reason instead of wiping it.
+- Wiping a disk that shares a RAID array or LVM volume group with a disk
+  the install does not wipe is refused unless `--force-destructive` is
+  given (clr-installer's flag), as wiping one member breaks the others.
+- Hooks run the way clr-installer runs them: `$chrootDir`, `$chrooted`,
+  `$yamlDir` (new: the config file's directory) and the config's `env` are
+  substituted into the command, in `$name` and `${name}` forms, as well as
+  set in its environment, and the command runs under `bash -l -c` (`sh -c`
+  where there is no bash). *Compatibility:* a hook written for `sh` that
+  relied on `$name` reaching the shell unexpanded, or on sh-only
+  behaviour, sees the clr-installer behaviour now. Inside a chroot hook
+  `$chrootDir` stays `/`, where clr-installer passes the live mount path.
+- When an administrator account is created, root's password login is
+  locked (`usermod --lock`, with today as its last change), as
+  clr-installer does: root is reached through sudo. *Compatibility:* an
+  install that relied on root's state from the base system now has it
+  locked; one with no admin account is unchanged.
+- Logins are checked as clr-installer checks them: at most 31 characters,
+  and not a name the base system already uses for an account or group
+  (root, wheel, users, audio, ...), which useradd would fail on partway
+  through the install. The TUI's account form also asks for the password
+  twice and requires 8 to 255 characters, saying why on the form itself;
+  the text flow applies the same rules.
+- A passing network test in the TUI sets `copyNetwork`, as clr-installer's
+  does, so the network set up on the live system (Wi-Fi included) carries
+  into the installed one; the result popup says so.
+- A config whose storage alias names an image file (clr-installer's
+  install into an image) is refused by name; it used to be read as a
+  device path such as `/dev/release.img`.
+
 - The full-screen dialog is clr-installer's window: 80x24, centred, whatever
   the size of the terminal (smaller only on a smaller one). It used to grow
   with the terminal to 90x36, which made it much taller than clr-installer's.
@@ -59,6 +94,31 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Automatic OS Updates is wired up: the config's `autoUpdate` (on unless
+  set to false, as in clr-installer) installs a `sunlight-autoupdate` slinit
+  service that updates the system from its xbps repositories once a day,
+  the counterpart of Clear Linux's swupd update timer. It is a slinit
+  calendar timer (`cron-calendar = daily`) at a fixed random time within
+  the hour after midnight, caught up at the next boot if the machine was
+  off; it updates xbps first, then the system. With `autoUpdate: false`
+  the service is installed but not enabled (`slinitctl enable
+  sunlight-autoupdate` turns it on). The TUI's Automatic OS Updates
+  section sets it.
+- Before a disk is repartitioned, what the live system runs on it is
+  released: RAID arrays assembled from an earlier install are stopped,
+  LVM and LUKS device-mapper volumes removed, and old signatures erased
+  with `wipefs`, as clr-installer clears them before partitioning. Left in
+  place they kept the disk busy for `parted`, or came back on the next
+  boot. A dry run lists these commands as they stand on the machine.
+- A partition's `label` and `options` in a clr-installer config are
+  honoured: the label goes to mkfs (with each filesystem's flag, cut to its
+  length limit), the options after slinstaller's own mkfs options.
+- clr-installer's command-line options: `-c`/`--config`, `--crypt-file`
+  (the LUKS passphrase from a file), `--genpass` (print a password hash
+  for a config's users; `-` reads it without echo),
+  `-b`/`--block-device name:file` (point a storage alias at a disk),
+  `--template` (write a starting config), `--copy-network`,
+  `--allow-insecure-http`, `--swap-file-size` and `--force-destructive`.
 - The full-screen install writes its log to `/tmp/slinstaller.log` on the
   live system as it runs, and a completed install copies it to
   `/root/slinstaller.log` on the installed system (mode 0600, beside the
@@ -68,6 +128,9 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- A password hash no longer appears in the install log: the `useradd -p`
+  command is shown with `<password hash>` in its place, in the log view,
+  the log file and `--log`.
 - Filled boxes in on-screen text on the Linux console: its font has no em
   dash, ellipsis, tick or cross, so "Installing — step", "Finishing…", the
   network test's ✓/✗ and many descriptions showed a box. The installer's

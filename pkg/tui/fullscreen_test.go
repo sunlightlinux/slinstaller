@@ -333,7 +333,9 @@ func TestManageUserTableAddsUser(t *testing.T) {
 	m = send(m, enter)
 	m = send(m, runes("Ionut N")) // User Name
 	m = send(m, enter)
-	m = send(m, runes("secret")) // Password
+	m = send(m, runes("secret123")) // Password
+	m = send(m, enter)
+	m = send(m, runes("secret123")) // Confirm
 	m = send(m, enter)
 	m = send(m, enter) // Admin: Yes (default) -> append
 
@@ -341,7 +343,7 @@ func TestManageUserTableAddsUser(t *testing.T) {
 		t.Fatalf("got %d users, want 1", len(m.users))
 	}
 	u := m.users[0]
-	if u.Login != "ionut" || u.UserName != "Ionut N" || u.Password != "secret" || !u.Admin {
+	if u.Login != "ionut" || u.UserName != "Ionut N" || u.Password != "secret123" || !u.Admin {
 		t.Fatalf("user = %+v", u)
 	}
 	// The table now lists the user, masked password, admin yes.
@@ -394,7 +396,7 @@ func TestManageUserEditsRow(t *testing.T) {
 	// Start with one admin user, then edit it: change the name and make it
 	// non-admin, keeping the count at one.
 	m := newModel(oneDisk())
-	m.users = []userEntry{{Login: "ionut", UserName: "Old", Password: "pw", Admin: true}}
+	m.users = []userEntry{{Login: "ionut", UserName: "Old", Password: "password1", Admin: true}}
 	m.view = viewUserList
 	m.userCursor = 0
 
@@ -407,6 +409,7 @@ func TestManageUserEditsRow(t *testing.T) {
 	m = send(m, runes("New Name"))
 	m = send(m, enter)      // user name -> password (prefilled)
 	m = send(m, enter)      // keep password
+	m = send(m, enter)      // its confirmation is prefilled too
 	m = send(m, runes("l")) // Admin toggle Yes -> No
 	m = send(m, enter)      // save
 
@@ -414,7 +417,7 @@ func TestManageUserEditsRow(t *testing.T) {
 		t.Fatalf("edit changed the count to %d", len(m.users))
 	}
 	u := m.users[0]
-	if u.Login != "ionut" || u.UserName != "New Name" || u.Password != "pw" || u.Admin {
+	if u.Login != "ionut" || u.UserName != "New Name" || u.Password != "password1" || u.Admin {
 		t.Fatalf("edited user wrong: %+v", u)
 	}
 }
@@ -890,5 +893,69 @@ func TestButtonsAreUniform(t *testing.T) {
 		if w := lipgloss.Width(line); w > 80 {
 			t.Errorf("final screen line is %d cells wide: %q", w, stripANSIForTest(line))
 		}
+	}
+}
+
+// The account form refuses what clr-installer's refuses, on the step
+// itself, with the reason: a reserved or repeated login, a short password,
+// and a confirmation that does not match (which goes back to the password).
+func TestUserFormChecksEntries(t *testing.T) {
+	m := newModel(oneDisk())
+	m.users = []userEntry{{Login: "taken", Password: "password1", Admin: true}}
+	m.view, m.width, m.height = viewUserList, 80, 24
+	m = send(m, runes("a"))
+
+	for _, bad := range []struct{ login, why string }{{"root", "system account"}, {"taken", "already in the list"}, {"Bad", "valid Unix name"}} {
+		m.input.SetValue(bad.login)
+		m = send(m, enter)
+		if m.formStep != userStepLogin || !strings.Contains(m.View(), bad.why) {
+			t.Errorf("login %q: step %d, view lacks %q:\n%s", bad.login, m.formStep, bad.why, m.View())
+		}
+	}
+	m.input.SetValue("ionut")
+	m = send(m, enter)
+	m = send(m, enter) // no user name
+	m = send(m, runes("short"))
+	m = send(m, enter)
+	if m.formStep != userStepPassword || !strings.Contains(m.View(), "at least 8 characters") {
+		t.Errorf("short password accepted: step %d", m.formStep)
+	}
+	m.input.SetValue("longenough")
+	m = send(m, enter)
+	m = send(m, runes("different1"))
+	m = send(m, enter)
+	if m.formStep != userStepPassword || !strings.Contains(m.View(), "do not match") || m.input.Value() != "" {
+		t.Errorf("mismatch: step %d, input %q", m.formStep, m.input.Value())
+	}
+	m = send(m, runes("longenough"))
+	m = send(m, enter)
+	m = send(m, runes("longenough"))
+	m = send(m, enter)
+	m = send(m, enter) // admin
+	if len(m.users) != 2 || m.users[1].Login != "ionut" || m.users[1].Password != "longenough" {
+		t.Errorf("users = %+v", m.users)
+	}
+}
+
+// A passing network test carries the live network into the install, as
+// clr-installer's does; a failing one does not.
+func TestNetworkTestSetsCopyNetwork(t *testing.T) {
+	m := newModel(oneDisk())
+	m.users = []userEntry{{Login: "me", Password: "password1", Admin: true}}
+	nm, _ := m.Update(netTestDoneMsg{result: "[FAIL] no", ok: false})
+	if nm.(model).copyNetwork {
+		t.Error("a failed test set copyNetwork")
+	}
+	nm, _ = m.Update(netTestDoneMsg{result: "[ OK ] yes", ok: true})
+	m = nm.(model)
+	if !m.copyNetwork {
+		t.Fatal("a passed test did not set copyNetwork")
+	}
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.CopyNetwork {
+		t.Error("buildConfig dropped copyNetwork")
 	}
 }

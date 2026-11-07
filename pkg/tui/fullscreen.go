@@ -27,7 +27,10 @@ import (
 const netTestTarget = "https://repo-default.voidlinux.org/current"
 
 type spinnerTickMsg struct{}
-type netTestDoneMsg struct{ result string }
+type netTestDoneMsg struct {
+	result string
+	ok     bool
+}
 
 var spinnerFrames = []string{"|", "/", "-", "\\"}
 
@@ -43,7 +46,7 @@ func testNetCmd() tea.Cmd {
 		if err := network.VerifyConnectivity(netTestTarget); err != nil {
 			return netTestDoneMsg{result: "[FAIL] No connectivity: " + err.Error()}
 		}
-		return netTestDoneMsg{result: "[ OK ] Network is reachable."}
+		return netTestDoneMsg{result: "[ OK ] Network is reachable.", ok: true}
 	}
 }
 
@@ -65,9 +68,11 @@ func RunFullscreen() (*config.Config, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	disks := blockdev.Disks(devs)
+	// Only disks nothing on the running system uses: not the live medium,
+	// nothing mounted, no active swap.
+	disks := blockdev.Available(devs)
 	if len(disks) == 0 {
-		return nil, "", fmt.Errorf("tui: no disks found")
+		return nil, "", fmt.Errorf("tui: no disk to install to (disks that are mounted, in use as swap or the live medium are not offered)")
 	}
 
 	final, err := tea.NewProgram(newModel(disks), tea.WithAltScreen()).Run()
@@ -107,6 +112,8 @@ func (m model) buildConfig() (*config.Config, error) {
 		Users:             users,
 		Kernel:            m.kernel,
 		HTTPSProxy:        strings.TrimSpace(m.proxy),
+		CopyNetwork:       m.copyNetwork,
+		AutoUpdate:        boolPtr(m.autoUpdate != 2),
 		SwupdMirror:       strings.TrimSpace(m.mirror),
 		AllowInsecureHTTP: m.allowInsecure,
 	}
@@ -124,6 +131,8 @@ func (m model) buildConfig() (*config.Config, error) {
 	}
 	return cfg, nil
 }
+
+func boolPtr(b bool) *bool { return &b }
 
 // saveConfigPath is where the Save Configuration Settings section writes the
 // config. A variable so a test can point it elsewhere.
@@ -387,8 +396,8 @@ type model struct {
 	netEdit   int // interface being configured in the form
 
 	// Tri-state clr toggles: 0 = no choice, 1 = enabled, 2 = disabled.
-	// telemetry and autoUpdate are presented for clr fidelity; autoUpdate
-	// defaults to enabled as clr does.
+	// telemetry is presented for clr fidelity only; autoUpdate sets the
+	// config's autoUpdate, and defaults to enabled as clr does.
 	telemetry, autoUpdate int
 
 	// Test Network Settings runs a connectivity check with a small spinner
@@ -449,6 +458,10 @@ type model struct {
 	userCursor  int
 	userForm    userEntry
 	editUserIdx int
+	formErr     string // why the user form's last entry was refused
+	pwConfirm   string // the password typed a second time
+
+	copyNetwork bool // the network test passed: copy the live network config
 
 	confirmed bool
 }
@@ -620,6 +633,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.netResult = msg.result
 		m.popup = popupMessage
 		m.popupMsg = []string{"Test Network Settings", "", msg.result}
+		if msg.ok {
+			// As clr-installer does: a network shown to work on the live
+			// system is carried into the installed one (copyNetwork), so a
+			// Wi-Fi or hand-set connection still works after the reboot.
+			m.copyNetwork = true
+			m.popupMsg = append(m.popupMsg, "", "This network setup will be copied to the installed system.")
+		}
 		return m, nil
 	}
 	key, ok := msg.(tea.KeyMsg)
@@ -758,7 +778,7 @@ func (m model) updateMedia(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.partCursor = 0
 			case 2: // Rescan Media
 				if devs, err := blockdev.List(); err == nil {
-					if disks := blockdev.Disks(devs); len(disks) > 0 {
+					if disks := blockdev.Available(devs); len(disks) > 0 {
 						m.disks = disks
 						if m.diskIdx >= len(m.disks) {
 							m.diskIdx = 0
@@ -1223,6 +1243,7 @@ func (m model) openUserForm(idx int, u userEntry) (tea.Model, tea.Cmd) {
 	m.edCursor = 0
 	m.editUserIdx = idx
 	m.userForm = u
+	m.formErr, m.pwConfirm = "", ""
 	ti := textinput.New()
 	ti.Focus()
 	ti.SetValue(u.Login)
@@ -1230,14 +1251,26 @@ func (m model) openUserForm(idx int, u userEntry) (tea.Model, tea.Cmd) {
 	return m, textinput.Blink
 }
 
-// updateUserForm drives the Add New User form: Login, User Name, Password
-// (masked), then an Admin yes/no choice, appended to the table.
+// The steps of the Add/Edit User form.
+const (
+	userStepLogin = iota
+	userStepName
+	userStepPassword
+	userStepConfirm
+	userStepAdmin
+)
+
+// updateUserForm drives the Add/Edit User form: Login, User Name,
+// Password, the password again, then an Admin yes/no choice. Each entry is
+// checked as clr-installer's form checks it (config.ValidLogin, the
+// password length, the two passwords matching), and a refused one stays
+// on its step with the reason shown, rather than failing the install.
 func (m model) updateUserForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.String() == "esc" {
 		m.view = viewUserList
 		return m, nil
 	}
-	if m.formStep == 3 { // Admin choice
+	if m.formStep == userStepAdmin {
 		switch key.String() {
 		case "up", "k", "down", "j", "left", "h", "right", "l", "tab":
 			m.edCursor = 1 - m.edCursor
@@ -1255,23 +1288,40 @@ func (m model) updateUserForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if key.String() == "enter" {
+		m.formErr = ""
 		switch m.formStep {
-		case 0: // login (required)
+		case userStepLogin:
 			v := strings.TrimSpace(m.input.Value())
-			if v == "" {
+			if err := config.ValidLogin(v); err != nil {
+				m.formErr = err.Error()
 				return m, nil
 			}
+			for i, u := range m.users {
+				if i != m.editUserIdx && u.Login == v {
+					m.formErr = fmt.Sprintf("login %q is already in the list", v)
+					return m, nil
+				}
+			}
 			m.userForm.Login = v
-		case 1: // user name (optional)
+		case userStepName: // optional
 			m.userForm.UserName = strings.TrimSpace(m.input.Value())
-		case 2: // password (required; not trimmed)
-			if m.input.Value() == "" {
+		case userStepPassword: // not trimmed
+			if err := config.ValidPassword(m.input.Value()); err != nil {
+				m.formErr = err.Error()
 				return m, nil
 			}
 			m.userForm.Password = m.input.Value()
+		case userStepConfirm:
+			if m.input.Value() != m.userForm.Password {
+				// Back to the first entry: either may hold the typo.
+				m.formErr = "the passwords do not match; type it again"
+				m.formStep = userStepPassword
+				m.input = passwordInput("")
+				return m, textinput.Blink
+			}
 		}
 		m.formStep++
-		if m.formStep == 3 {
+		if m.formStep == userStepAdmin {
 			// A new account defaults to administrator; editing keeps the
 			// account's current value.
 			m.edCursor = 0
@@ -1280,21 +1330,38 @@ func (m model) updateUserForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		ti := textinput.New()
-		ti.Focus()
 		switch m.formStep {
-		case 1:
-			ti.SetValue(m.userForm.UserName)
-		case 2:
-			ti.EchoMode = textinput.EchoPassword
-			ti.SetValue(m.userForm.Password)
+		case userStepName:
+			m.input = textInputWith(m.userForm.UserName)
+		case userStepPassword:
+			m.input = passwordInput(m.userForm.Password)
+		case userStepConfirm:
+			// Editing an account keeps its password unless it is changed:
+			// the confirmation starts filled in with the same one.
+			pre := ""
+			if m.editUserIdx >= 0 && m.editUserIdx < len(m.users) && m.users[m.editUserIdx].Password == m.userForm.Password {
+				pre = m.userForm.Password
+			}
+			m.input = passwordInput(pre)
 		}
-		m.input = ti
 		return m, textinput.Blink
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(key)
 	return m, cmd
+}
+
+func textInputWith(v string) textinput.Model {
+	ti := textinput.New()
+	ti.Focus()
+	ti.SetValue(v)
+	return ti
+}
+
+func passwordInput(v string) textinput.Model {
+	ti := textInputWith(v)
+	ti.EchoMode = textinput.EchoPassword
+	return ti
 }
 
 // --- hub ---
@@ -2200,7 +2267,7 @@ func (m model) userFormView() string {
 		heading = "Edit User"
 		done = "save user"
 	}
-	if m.formStep == 3 {
+	if m.formStep == userStepAdmin {
 		body := []string{
 			itemLabel.Width(w).Render("  " + heading),
 			rule(w),
@@ -2218,8 +2285,10 @@ func (m model) userFormView() string {
 		title, hint = "Login", "the account name, e.g. ionut"
 	case 1:
 		title, hint = "User Name", "the full name (optional)"
-	case 2:
-		title, hint = "Password", "not shown as you type"
+	case userStepPassword:
+		title, hint = "Password", fmt.Sprintf("at least %d characters, not shown as you type", config.MinPasswordLength)
+	case userStepConfirm:
+		title, hint = "Confirm Password", "type the password again"
 	}
 	body := []string{
 		itemLabel.Width(w).Render("  " + heading),
@@ -2228,6 +2297,9 @@ func (m model) userFormView() string {
 		footer.Width(w).Render("  " + hint),
 		lineBG.Width(w).Render(""),
 		lineBG.Width(w).Render("  " + m.input.View()),
+	}
+	if m.formErr != "" {
+		body = append(body, lineBG.Width(w).Render(""), warnText.Width(w).Render("  "+m.formErr))
 	}
 	return m.screen(body, "type · [Enter] next · [Esc] cancel")
 }
@@ -2383,7 +2455,8 @@ func choiceBlurb(s section) []string {
 		return []string{
 			"Allow the system to update automatically as new versions",
 			"are released - the recommended default. Disabling it risks",
-			"missing security fixes. (Presented for parity; not yet wired.)",
+			"missing security fixes. Updates run once a day; turn them",
+			"on or off later with slinitctl enable/disable sunlight-autoupdate.",
 		}
 	}
 	return nil

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 )
 
@@ -42,7 +43,7 @@ func (r *recorder) flat() string {
 
 func TestInstallUnknownStage(t *testing.T) {
 	var r recorder
-	err := Install(twoPartConfig(), Options{Through: "nope", Runner: r.run})
+	err := Install(twoPartConfig(), Options{Through: "nope", Runner: r.run, Devices: noDevices})
 	if err == nil || !strings.Contains(err.Error(), "unknown stage") {
 		t.Fatalf("unknown stage error = %v, want 'unknown stage'", err)
 	}
@@ -55,7 +56,7 @@ func TestInstallThroughPartition(t *testing.T) {
 	var r recorder
 	// Through "partition" runs pre-install (no hooks here) and partition,
 	// then stops before mount, which would make real syscalls.
-	if err := Install(twoPartConfig(), Options{Through: "partition", Runner: r.run}); err != nil {
+	if err := Install(twoPartConfig(), Options{Through: "partition", Runner: r.run, Devices: noDevices}); err != nil {
 		t.Fatalf("Install through partition: %v", err)
 	}
 	flat := r.flat()
@@ -75,11 +76,11 @@ func TestInstallThroughPreInstallRunsHooks(t *testing.T) {
 
 	var r recorder
 	// Stopping at pre-install runs the hook and nothing destructive.
-	if err := Install(cfg, Options{Through: "pre-install", Runner: r.run}); err != nil {
+	if err := Install(cfg, Options{Through: "pre-install", Runner: r.run, Devices: noDevices}); err != nil {
 		t.Fatalf("Install through pre-install: %v", err)
 	}
 	got := r.flat()
-	if !strings.Contains(got, "sh -c echo hello") {
+	if !strings.Contains(got, " -c echo hello") {
 		t.Errorf("pre-install hook not run: %q", got)
 	}
 	// clr-style hook variables are passed as environment.
@@ -237,12 +238,12 @@ func TestHooksReceiveConfigEnv(t *testing.T) {
 	cfg.Environment = map[string]string{"FOO": "bar", "BAZ": "qux"}
 
 	var r recorder
-	if err := Install(cfg, Options{Through: "pre-install", Runner: r.run}); err != nil {
+	if err := Install(cfg, Options{Through: "pre-install", Runner: r.run, Devices: noDevices, ConfigDir: "/cfg"}); err != nil {
 		t.Fatalf("Install through pre-install: %v", err)
 	}
 	got := r.flat()
-	// Config env is injected, sorted, between the fixed vars and sh -c.
-	if !strings.Contains(got, "BAZ=qux FOO=bar sh -c echo hi") {
+	// Config env is injected, sorted with the hook variables.
+	if !strings.Contains(got, "env BAZ=qux FOO=bar chrootDir=/mnt chrooted=0 yamlDir=/cfg ") {
 		t.Errorf("config env not injected in sorted order: %q", got)
 	}
 }
@@ -268,5 +269,53 @@ func TestArchiveLog(t *testing.T) {
 	// No log file set: nothing to do.
 	if err := (&installer{opts: Options{Root: root}}).archiveLog(); err != nil {
 		t.Errorf("no LogFile: %v", err)
+	}
+}
+
+// A wiping install releases the disk before it rewrites the table: an old
+// install's RAID array is stopped and the signatures erased, all before
+// parted touches it. A reuse install leaves the disk alone.
+func TestPartitionReleasesTheDiskFirst(t *testing.T) {
+	devs := func() ([]blockdev.Device, error) {
+		return []blockdev.Device{{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []blockdev.Device{
+			{Name: "sda1", Path: "/dev/sda1", Type: "part", Children: []blockdev.Device{
+				{Name: "md127", Path: "/dev/md127", Type: "raid1"},
+			}},
+		}}}, nil
+	}
+	var r recorder
+	if err := Install(twoPartConfig(), Options{Through: "partition", Runner: r.run, Devices: devs}); err != nil {
+		t.Fatal(err)
+	}
+	flat := r.flat()
+	stop := strings.Index(flat, "mdadm --stop /dev/md127")
+	wipe := strings.Index(flat, "wipefs -a /dev/sda\n")
+	mklabel := strings.Index(flat, "parted -s /dev/sda mklabel gpt")
+	if stop < 0 || wipe < 0 || !(stop < wipe && wipe < mklabel) {
+		t.Errorf("want mdadm --stop, then wipefs, then mklabel:\n%s", flat)
+	}
+
+	cfg := twoPartConfig()
+	cfg.ReusePartitions = true
+	r = recorder{}
+	if err := Install(cfg, Options{Through: "partition", Runner: r.run, Devices: devs}); err != nil {
+		t.Fatal(err)
+	}
+	if f := r.flat(); strings.Contains(f, "wipefs") || strings.Contains(f, "mdadm --stop") {
+		t.Errorf("a reuse install released the disk:\n%s", f)
+	}
+}
+
+// noDevices is a machine with no block devices, so a test's install finds
+// nothing to release and never consults the host's lsblk.
+func noDevices() ([]blockdev.Device, error) { return nil, nil }
+
+// Hook variables are substituted into the command as clr-installer does,
+// both forms, a longer name before one it begins with.
+func TestExpandHookVars(t *testing.T) {
+	vars := map[string]string{"chrootDir": "/mnt", "chrooted": "0", "yamlDir": "/media/cfg", "chroot": "X"}
+	got := expandHookVars(vars, `cp ${yamlDir}/motd $chrootDir/etc/motd; echo $chrooted ${chroot}`)
+	if want := `cp /media/cfg/motd /mnt/etc/motd; echo 0 X`; got != want {
+		t.Errorf("expandHookVars = %q, want %q", got, want)
 	}
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -755,5 +756,98 @@ func TestSaveRoundTrip(t *testing.T) {
 	}
 	if back.Hostname != "box" || len(back.Users) != 1 || back.Users[0].Login != "me" {
 		t.Errorf("round-trip lost data: %+v", back)
+	}
+}
+
+// A clr config's label and options reach mkfs: the label with the flag
+// each filesystem takes, cut to its limit, and the options after
+// slinstaller's own, before the device.
+func TestLabelAndOptionsReachMkfs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	if err := os.WriteFile(path, []byte(`
+targetMedia:
+- name: sda
+  type: disk
+  children:
+  - {name: sda1, type: part, fstype: vfat, mountpoint: /boot, size: 512M, label: SUNLIGHT_BOOT_ESP}
+  - {name: sda2, type: part, fstype: ext4, mountpoint: /, size: 0, label: root, options: "-m 1 -O ^metadata_csum"}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := cfg.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmds, err := plan.Commands()
+	if err != nil {
+		t.Fatal(err)
+	}
+	flat := storage.FormatCommands(cmds)
+	for _, want := range []string{
+		"mkfs.vfat -n SUNLIGHT_BO -F32 /dev/sda1\n",
+		"mkfs.ext4 -L root -v -F -b 4096 -m 1 -O ^metadata_csum /dev/sda2\n",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("missing %q in:\n%s", want, flat)
+		}
+	}
+}
+
+func TestValidLoginAndPassword(t *testing.T) {
+	for login, ok := range map[string]bool{
+		"ionut": true, "_svc": true, "a-b_c1": true,
+		"": false, "Ionut": false, "1abc": false, "root": false, "wheel": false, "users": false,
+		strings.Repeat("a", 31): true, strings.Repeat("a", 32): false,
+	} {
+		if err := ValidLogin(login); (err == nil) != ok {
+			t.Errorf("ValidLogin(%q) = %v, want ok=%v", login, err, ok)
+		}
+	}
+	for pw, ok := range map[string]bool{"1234567": false, "12345678": true, strings.Repeat("x", 255): true, strings.Repeat("x", 256): false} {
+		if err := ValidPassword(pw); (err == nil) != ok {
+			t.Errorf("ValidPassword(len %d) = %v, want ok=%v", len(pw), err, ok)
+		}
+	}
+}
+
+// An alias naming an image file (clr-installer's image install) is
+// refused by name, not mistaken for a device.
+func TestImageAliasRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(path, []byte(`
+block-devices: [{name: release, file: release.img}]
+targetMedia:
+- name: ${release}
+  type: disk
+  children:
+  - {name: "${release}1", type: part, fstype: vfat, mountpoint: /boot, size: 512M}
+  - {name: "${release}2", type: part, fstype: ext4, mountpoint: /, size: 0}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "installing into an image is not supported") {
+		t.Errorf("Validate = %v", err)
+	}
+}
+
+// autoUpdate is on unless a config turns it off, as in clr-installer.
+func TestAutoUpdatesDefaultsOn(t *testing.T) {
+	off, on := false, true
+	for _, c := range []struct {
+		v    *bool
+		want bool
+	}{{nil, true}, {&on, true}, {&off, false}} {
+		if got := (&Config{AutoUpdate: c.v}).AutoUpdates(); got != c.want {
+			t.Errorf("AutoUpdate %v: AutoUpdates = %v, want %v", c.v, got, c.want)
+		}
 	}
 }
