@@ -79,7 +79,7 @@ func run(args []string) error {
 	fs.BoolVar(&apply, "apply", false,
 		"carry out the plan (destructive); without it, the plan is only printed")
 	fs.StringVar(&through, "through", "",
-		"with --apply, run only up to this install stage (partition, mount, meta-fs, base-install, fstab) — for VM testing")
+		"with --apply, run only up to this install stage (partition, mount, meta-fs, base-install, fstab) - for VM testing")
 	fs.StringVar(&root, "root", "/mnt", "with --apply, the target mount tree")
 	fs.StringVar(&repo, "repo", "",
 		"xbps repository for the base system (default: the config's swupdMirror, else Void's official repo)")
@@ -222,11 +222,11 @@ restart:
 	if !apply {
 		if plan.Wipe {
 			fmt.Fprintf(os.Stderr,
-				"\nDry run. Re-run with --apply to partition %s — this destroys its contents.\n",
+				"\nDry run. Re-run with --apply to partition %s - this destroys its contents.\n",
 				plan.Disk)
 		} else {
 			fmt.Fprintf(os.Stderr,
-				"\nDry run (reusePartitions). Re-run with --apply to format the listed partitions on %s — the table is kept, but formatted partitions lose their data.\n",
+				"\nDry run (reusePartitions). Re-run with --apply to format the listed partitions on %s - the table is kept, but formatted partitions lose their data.\n",
 				plan.Disk)
 		}
 		return nil
@@ -278,7 +278,7 @@ restart:
 	// disk is touched and say where to move the repo.
 	for _, r := range localRepos {
 		if underRoot(r, root) {
-			return fmt.Errorf("local repository %s is under the target root %s and would be hidden when the target is mounted there — move it outside %s (e.g. mount the share at /run/slshare)", r, root, root)
+			return fmt.Errorf("local repository %s is under the target root %s and would be hidden when the target is mounted there - move it outside %s (e.g. mount the share at /run/slshare)", r, root, root)
 		}
 	}
 
@@ -334,7 +334,7 @@ restart:
 		// /sys/firmware/efi, so grub-install/efibootmgr would fail at the
 		// bootloader stage — after the disk is wiped. Fail here instead.
 		if !system.IsUEFI() {
-			return fmt.Errorf("the installer medium is not booted in UEFI mode (%s is absent); Sunlight Linux is UEFI-only — reboot it in UEFI mode",
+			return fmt.Errorf("the installer medium is not booted in UEFI mode (%s is absent); Sunlight Linux is UEFI-only - reboot it in UEFI mode",
 				"/sys/firmware/efi")
 		}
 
@@ -364,7 +364,7 @@ restart:
 			required = append(required, "mdadm")
 		}
 		if missing := storage.MissingTools(required); len(missing) > 0 {
-			return fmt.Errorf("missing tools on the live system: %s — install them and retry",
+			return fmt.Errorf("missing tools on the live system: %s - install them and retry",
 				strings.Join(missing, ", "))
 		}
 
@@ -400,7 +400,7 @@ restart:
 				}
 				d := blockdev.FindByPath(devs, p.Device)
 				if d == nil {
-					return fmt.Errorf("reusePartitions: %s does not exist — create the partitions first, or drop reusePartitions to repartition", p.Device)
+					return fmt.Errorf("reusePartitions: %s does not exist - create the partitions first, or drop reusePartitions to repartition", p.Device)
 				}
 				if d.Type != "part" {
 					return fmt.Errorf("reusePartitions: %s is a %s, not a partition", p.Device, d.Type)
@@ -421,7 +421,7 @@ restart:
 				}
 				need := fixed[disk] + storage.GPTReserveBytes
 				if need > d.Size {
-					return fmt.Errorf("layout needs %s on %s but the disk is only %s — reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
+					return fmt.Errorf("layout needs %s on %s but the disk is only %s - reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
 						humanSize(need), disk, humanSize(d.Size))
 				}
 			}
@@ -433,7 +433,7 @@ restart:
 		if strings.HasPrefix(repo, "http") {
 			waiting := func() { fmt.Fprintln(os.Stderr, "waiting for the network...") }
 			if err := network.WaitForConnectivity(repo, time.Minute, waiting); err != nil {
-				return fmt.Errorf("%w — check the network/proxy, or pass --repo", err)
+				return fmt.Errorf("%w - check the network/proxy, or pass --repo", err)
 			}
 		}
 	}
@@ -468,7 +468,7 @@ restart:
 			// The operator chose "Back to installer": re-run the wizard and
 			// everything downstream of it (reboot/power-off already happened
 			// inside RunInstall when chosen).
-			fmt.Fprintln(os.Stderr, "\nReturning to the configuration menu…")
+			fmt.Fprintln(os.Stderr, "\nReturning to the configuration menu...")
 			goto restart
 		}
 		return nil
@@ -665,7 +665,7 @@ func confirm(in *bufio.Reader, plan *storage.Plan) bool {
 // orDash renders an empty mountpoint as a dash.
 func orDash(s string) string {
 	if s == "" {
-		return "—"
+		return "-"
 	}
 	return s
 }
@@ -716,7 +716,7 @@ func checkLocalPackages(packages, localRepos []string, tried string) error {
 	for _, p := range packages {
 		for _, l := range localOnlyPackages {
 			if p == l {
-				return fmt.Errorf("%s is only in the live medium's repository, and none was found at %s — "+
+				return fmt.Errorf("%s is only in the live medium's repository, and none was found at %s - "+
 					"pass --local-repo, or leave it out of --packages to install a runit system", p, tried)
 			}
 		}

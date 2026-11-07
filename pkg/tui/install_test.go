@@ -2,12 +2,18 @@ package tui
 
 import (
 	"fmt"
+	"github.com/sunlightlinux/slinstaller/pkg/config"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
 )
@@ -158,5 +164,157 @@ func TestLogLinesAreCleaned(t *testing.T) {
 	got := nm.(installModel).logs
 	if len(got) != 1 || got[0] != "Creating journal (16384 blocks): done" {
 		t.Errorf("log = %q, want the line as a terminal shows it", got)
+	}
+}
+
+// On the console the bar is bright yellow, not the bright red its own
+// nearest-colour match made of amber.
+func TestBarFillOnTheConsole(t *testing.T) {
+	bar := progress.New(progress.WithSolidFill(barFill(termenv.ANSI)), progress.WithColorProfile(termenv.ANSI))
+	bar.Width = 20
+	if v := bar.ViewAs(0.5); !strings.Contains(v, "\x1b[93m") {
+		t.Errorf("console bar is not bright yellow: %q", v)
+	}
+	if barFill(termenv.TrueColor) != "#ffc23d" {
+		t.Error("a full-colour terminal should get the amber")
+	}
+}
+
+// The running stage is set apart: its name is drawn in the running style,
+// the others' are not.
+func TestRunningStageStandsOut(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	m := installModel{width: 80, height: 24, phase: phaseRunning, ch: make(chan tea.Msg, 1),
+		bar: progress.New(), spin: spinner.New(spinner.WithSpinner(spinner.Line)), steps: newSteps()}
+	nm, _ := m.Update(stageMsg{done: 4, total: 12, name: "base-install"})
+	v := nm.(installModel).View()
+	if !strings.Contains(v, stepRun.Render(stageLabel("base-install"))) {
+		t.Error("the running stage's name is not highlighted")
+	}
+	if strings.Contains(v, stepRun.Render(stageLabel("fstab"))) {
+		t.Error("a waiting stage is highlighted")
+	}
+}
+
+// The log view leaves out xbps's progress lines, colours stage markers,
+// errors and warnings, and wraps a long line instead of clipping it.
+func TestLogViewRows(t *testing.T) {
+	m := installModel{width: 80, height: 24, phase: phaseRunning, ch: make(chan tea.Msg, 1)}
+	long := "grub-install: error: " + strings.Repeat("x", 150)
+	for _, l := range []string{
+		"==> base-install",
+		"inih-62_1.x86_64.xbps: [17KB 23%] 115MB/s ETA: 00m00s",
+		"inih-62_1.x86_64.xbps.sig2: [512B 100%] 19MB/s ETA: 00m00s",
+		"inih-62_1.x86_64.xbps: 17KB [avg rate: 489MB/s]",
+		"WARNING: the clock is off",
+		long,
+	} {
+		nm, _ := m.Update(logMsg(l))
+		m = nm.(installModel)
+	}
+	if len(m.logs) != 4 {
+		t.Fatalf("logs = %q, want the two xbps progress lines left out", m.logs)
+	}
+	rows := m.logView()
+	kinds := []int{logStage, logPlain, logWarn, logError, logError, logError}
+	if len(rows) != len(kinds) {
+		t.Fatalf("%d rows, want %d (the long line in three): %q", len(rows), len(kinds), rows)
+	}
+	for i, r := range rows {
+		if r.kind != kinds[i] {
+			t.Errorf("row %d %q: kind %d, want %d", i, r.text, r.kind, kinds[i])
+		}
+		if len([]rune(r.text)) > m.logWidth() {
+			t.Errorf("row %d is %d cells, wider than %d", i, len([]rune(r.text)), m.logWidth())
+		}
+	}
+	var joined string
+	for i, r := range rows[3:] {
+		if i > 0 {
+			if !strings.HasPrefix(r.text, "  ") {
+				t.Errorf("continuation row %q is not indented", r.text)
+			}
+			r.text = r.text[2:]
+		}
+		joined += r.text
+	}
+	if joined != long {
+		t.Errorf("wrapped rows do not rejoin to the line:\n%q\n%q", joined, long)
+	}
+}
+
+// The progress screen shows how long the install has run and each stage's
+// time; the final screen says how long it took.
+func TestInstallTimer(t *testing.T) {
+	at := time.Date(2026, 11, 7, 20, 0, 0, 0, time.UTC)
+	m := installModel{width: 80, height: 24, phase: phaseConfirm, ch: make(chan tea.Msg, 1),
+		bar: progress.New(), spin: spinner.New(spinner.WithSpinner(spinner.Line)),
+		clock: func() time.Time { return at }}
+	m.phase, m.steps, m.started = phaseRunning, newSteps(), at
+	step := func(done int, name string, after time.Duration) {
+		at = at.Add(after)
+		nm, _ := m.Update(stageMsg{done: done, total: 12, name: name})
+		m = nm.(installModel)
+	}
+	step(0, "pre-install", 0)
+	step(1, "partition", 3*time.Second)
+	step(2, "mount", 42*time.Second)
+	at = at.Add(5 * time.Second)
+
+	v := stripANSIForTest(m.View())
+	if !strings.Contains(lineWith(v, "Installing - step 3 of 12"), "elapsed 0:50") {
+		t.Errorf("header has no elapsed 0:50:\n%s", v)
+	}
+	for label, want := range map[string]string{
+		"Running pre-install hooks": "0:03", "Partitioning the disk": "0:42", "Mounting the target": "0:05",
+	} {
+		if l := lineWith(v, label); !strings.HasSuffix(strings.TrimRight(l, " "), want) {
+			t.Errorf("%s: %q, want it to end in %s", label, l, want)
+		}
+	}
+	if l := lineWith(v, "Writing fstab"); strings.Contains(l, ":") {
+		t.Errorf("a waiting stage shows a time: %q", l)
+	}
+
+	at = at.Add(time.Hour + 10*time.Minute)
+	nm, _ := m.Update(doneMsg{})
+	m = nm.(installModel)
+	if v := stripANSIForTest(m.View()); !strings.Contains(v, "Install complete in 1:10:50.") {
+		t.Errorf("final screen has no duration:\n%s", v)
+	}
+}
+
+// The install writes its log to a file as it goes, with the stage markers,
+// and passes the file to the controller to archive.
+func TestInstallWritesLogFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "slinstaller.log")
+	defer func(p string) { installLogPath = p }(installLogPath)
+	installLogPath = path
+
+	cfg := &config.Config{} // no media: Plan fails before any command runs
+	if _, err := cfg.Plan(); err == nil {
+		t.Fatal("an empty config plans; this test would install")
+	}
+	m := installModel{cfg: cfg, ch: make(chan tea.Msg, 16)}
+	m.start()
+	if m.logPath != path {
+		t.Errorf("logPath = %q, want %q", m.logPath, path)
+	}
+	for msg := range m.ch {
+		if _, ok := msg.(doneMsg); ok {
+			break
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "install log, started") || !strings.Contains(string(data), "install log, ended") {
+		t.Errorf("log file = %q", data)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Errorf("log file mode %v, want 0600", fi.Mode().Perm())
 	}
 }

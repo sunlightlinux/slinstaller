@@ -16,16 +16,30 @@ for what will and will not be allowed to change once releases begin.
   the size of the terminal (smaller only on a smaller one). It used to grow
   with the terminal to 90x36, which made it much taller than clr-installer's.
   As there, the Required tab's section list now scrolls.
+- The install log view is easier to read: each stage starts with its
+  `==> stage` marker on a grey bar (the full-screen install used to leave
+  the markers out), lines with an error are on a red bar and warnings in
+  yellow, a line too long for the panel continues on the next row instead
+  of being cut, and xbps's download progress lines are left out, as each is
+  followed by the download's final line. A blank row now separates the log
+  from its Back button.
+- The install progress screen shows how long the install has run, and each
+  stage how long it took (or has been running); the final screen says how
+  long the install took.
+
 - The full-screen interface takes Sunlight Linux's orange-to-red colours
   in place of clr-installer's blue: a burnt orange dialog, an amber accent
   for the selection, active tab, buttons and progress bar, and dark red for
   popups and failures. The layout is unchanged. Each colour names its
   16-colour console form too, since the console has no orange and the
   nearest match turned every orange into bright red; there it is the VGA
-  brown (dark orange) with bright yellow.
+  brown (dark orange) with a red accent, as the console has only 8
+  background colours and shows a bright one (the amber's nearest) as black. The
+  progress bar picks its own console colour, and made bright red of the
+  amber; it is named outright there too, as bright yellow.
 - The install progress screen lists the stages instead of the raw command
   output: each is marked `[ OK ]` when done, with a turning spinner while it
-  runs, `[FAIL]` if it fails, and blank while it waits. The full command log
+  runs (that stage's line in bold yellow), `[FAIL]` if it fails, and blank while it waits. The full command log
   is behind a **Details** button (Enter or `d`), scrollable with the arrows,
   PgUp/PgDn and Home/End, and on the final screen too (`d`); it keeps the
   last 10000 lines, where only 500 were kept. The marks are ASCII because
@@ -37,8 +51,26 @@ for what will and will not be allowed to change once releases begin.
 - The hub's section list reaches down to the buttons: five sections in the
   80x24 dialog, where it showed four with three empty rows below them.
 
+### Added
+
+- The full-screen install writes its log to `/tmp/slinstaller.log` on the
+  live system as it runs, and a completed install copies it to
+  `/root/slinstaller.log` on the installed system (mode 0600, beside the
+  saved config), as clr-installer archives its own log. Until now the log
+  lived only in the view and was gone once the installer exited.
+  `controller.Options.LogFile` names the file to archive.
+
 ### Fixed
 
+- Filled boxes in on-screen text on the Linux console: its font has no em
+  dash, ellipsis, tick or cross, so "Installing — step", "Finishing…", the
+  network test's ✓/✗ and many descriptions showed a box. The installer's
+  on-screen text, its messages and the config's validation errors use
+  "-", "..." and [ OK ]/[FAIL] instead; a clipped log line ends in "...".
+- Space did nothing on a disk row of the Installation Media page, though
+  the footer offers it to choose; it now picks the disk, as Enter does.
+- Black blocks between buttons: the spaces after a button's style reset
+  fell back to the terminal's background. They keep the dialog's colour.
 - Black cells at the right of the install screen, and half-redrawn lines in
   its log: command output reached the log with its control characters.
   mke2fs prints its progress with backspaces ("0/16" erased and overwritten

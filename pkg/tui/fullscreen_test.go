@@ -2,6 +2,8 @@ package tui
 
 import (
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -795,5 +797,75 @@ func TestBundlesCancelIsReachable(t *testing.T) {
 	m = send(m, enter)
 	if m.view != viewHub || m.packages != "" {
 		t.Errorf("Enter on Cancel: view %v packages %q, want the hub and no packages", m.view, m.packages)
+	}
+}
+
+// The Linux console has 8 background colours; a bright one (SGR 100-107)
+// shows as black there, which hid the active tab, the selection bar and
+// the disabled Install button. No style may ask the console for one.
+func TestNoBrightBackgroundsOnTheConsole(t *testing.T) {
+	r := lipgloss.NewRenderer(io.Discard)
+	r.SetColorProfile(termenv.ANSI)
+	styles := map[string]lipgloss.Style{
+		"boxStyle": boxStyle, "lineBG": lineBG, "selBG": selBG, "titleBar": titleBar,
+		"footer": footer, "ruleBG": ruleBG, "tabStrip": tabStrip, "tabActive": tabActive,
+		"tabInactive": tabInactive, "itemLabel": itemLabel, "itemValue": itemValue,
+		"itemSelLabel": itemSelLabel, "itemSelValue": itemSelValue, "btnSel": btnSel,
+		"btnIdle": btnIdle, "btnOff": btnOff, "warnText": warnText, "popupBoxStyle": popupBoxStyle,
+		"popupTitle": popupTitle, "popupHint": popupHint, "popupInput": popupInput,
+		"scrollStyle": scrollStyle, "stepOKStyle": stepOKStyle, "stepFailStyle": stepFailStyle,
+		"stepRun": stepRun, "stepWait": stepWait,
+	}
+	bright := regexp.MustCompile(`(^|;)10[0-7](;|$)`)
+	for name, st := range styles {
+		out := st.Renderer(r).Render("x")
+		for _, m := range regexp.MustCompile(`\x1b\[([0-9;]+)m`).FindAllStringSubmatch(out, -1) {
+			if bright.MatchString(m[1]) {
+				t.Errorf("%s asks the console for a bright background: SGR %s", name, m[1])
+			}
+		}
+		if !strings.Contains(out, "\x1b[") && name != "tabStrip" {
+			t.Errorf("%s rendered no colour at all; the test is not seeing the console profile", name)
+		}
+	}
+}
+
+// Space picks the disk under the cursor on the media page, as Enter does.
+func TestMediaSpaceChoosesDisk(t *testing.T) {
+	m := newModel([]blockdev.Device{{Name: "vda", Path: "/dev/vda"}, {Name: "vdb", Path: "/dev/vdb"}})
+	m.view, m.width, m.height = viewMedia, 80, 24
+	m.mediaCursor = len(mediaModes) + 1 // the second disk
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	got := nm.(model)
+	if !got.diskSet || got.diskIdx != 1 {
+		t.Errorf("Space on /dev/vdb: diskSet=%v diskIdx=%d, want the second disk chosen", got.diskSet, got.diskIdx)
+	}
+}
+
+// The space between buttons keeps the dialog's colour. Plain spaces after
+// a button's reset fell back to the terminal's background: black blocks
+// between Confirm, Partition, Rescan Media and Cancel.
+func TestButtonGapsKeepTheDialogColour(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	bare := regexp.MustCompile(`\x1b\[0m +\x1b\[`) // a reset, raw spaces, the next style
+	m := newModel(oneDisk())
+	m.width, m.height = 80, 24
+	views := map[string]func() string{
+		"hub":   m.View,
+		"media": func() string { m2 := m; m2.view = viewMedia; return m2.View() },
+	}
+	im := installModel{width: 80, height: 24, phase: phaseDone, disk: "/dev/sda"}
+	views["install-done"] = im.View
+	im.phase = phaseConfirm
+	views["install-confirm"] = im.View
+	for name, v := range views {
+		for _, l := range strings.Split(v(), "\n") {
+			if bare.MatchString(l) {
+				t.Errorf("%s: unstyled gap in %q", name, l)
+			}
+		}
 	}
 }

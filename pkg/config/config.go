@@ -571,7 +571,7 @@ func (c *Config) Validate() error {
 		}
 		logins[u.Login] = true
 		if u.Password != "" && !looksHashed(u.Password) {
-			add("users[%d] (%s): password does not look like a crypt(3) hash — a config must carry a hash, not a plaintext password", i, u.Login)
+			add("users[%d] (%s): password does not look like a crypt(3) hash - a config must carry a hash, not a plaintext password", i, u.Login)
 		}
 	}
 

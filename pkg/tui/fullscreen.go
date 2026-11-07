@@ -41,9 +41,9 @@ func spinnerTickCmd() tea.Cmd {
 func testNetCmd() tea.Cmd {
 	return func() tea.Msg {
 		if err := network.VerifyConnectivity(netTestTarget); err != nil {
-			return netTestDoneMsg{result: "✗ No connectivity: " + err.Error()}
+			return netTestDoneMsg{result: "[FAIL] No connectivity: " + err.Error()}
 		}
-		return netTestDoneMsg{result: "✓ Network is reachable."}
+		return netTestDoneMsg{result: "[ OK ] Network is reachable."}
 	}
 }
 
@@ -318,7 +318,7 @@ const (
 var mediaModes = []struct{ name, desc string }{
 	{"Destructive Installation", "Erase the whole disk and install with a standard layout."},
 	{"Advanced Installation", "Lay out or reuse partitions yourself (the partition editor)."},
-	{"Safe Installation", "Install alongside existing partitions — not yet supported."},
+	{"Safe Installation", "Install alongside existing partitions - not yet supported."},
 }
 
 // bundleEntry is one row of the Select Additional Bundles checklist: a short
@@ -332,18 +332,18 @@ type bundleEntry struct {
 }
 
 var bundleOptions = []bundleEntry{
-	{"vim", "Vi IMproved — improved text editor", []string{"vim"}},
-	{"nano", "Nano — simple text editor", []string{"nano"}},
-	{"git", "Git — version control", []string{"git"}},
-	{"curl", "curl — command-line data transfer", []string{"curl"}},
-	{"wget", "wget — file downloader", []string{"wget"}},
-	{"htop", "htop — interactive process viewer", []string{"htop"}},
-	{"tmux", "tmux — terminal multiplexer", []string{"tmux"}},
-	{"rsync", "rsync — fast file copy and sync", []string{"rsync"}},
+	{"vim", "Vi IMproved - improved text editor", []string{"vim"}},
+	{"nano", "Nano - simple text editor", []string{"nano"}},
+	{"git", "Git - version control", []string{"git"}},
+	{"curl", "curl - command-line data transfer", []string{"curl"}},
+	{"wget", "wget - file downloader", []string{"wget"}},
+	{"htop", "htop - interactive process viewer", []string{"htop"}},
+	{"tmux", "tmux - terminal multiplexer", []string{"tmux"}},
+	{"rsync", "rsync - fast file copy and sync", []string{"rsync"}},
 	{"man-pages", "Manual pages and reader", []string{"man-pages", "mandoc"}},
 	{"bash-completion", "Bash tab-completion", []string{"bash-completion"}},
 	{"openssh", "OpenSSH client and server", []string{"openssh"}},
-	{"sudo", "sudo — run commands as another user", []string{"sudo"}},
+	{"sudo", "sudo - run commands as another user", []string{"sudo"}},
 }
 
 // popupKind selects the bordered dialog drawn centred over the hub, the way
@@ -509,6 +509,10 @@ func newModel(disks []blockdev.Device) model {
 // orange in its 16 colours, and lipgloss's nearest match sends every orange
 // to bright red, while the console's colour 3 is the VGA brown (#aa5500), a
 // dark orange. Terminals with 256 colours or more get the real shade.
+//
+// The console also has only 8 background colours: a bright one (SGR
+// 100-107) shows as black. So there the accent is red with light text, not
+// amber with black, and every background's 16-colour form is 0-7.
 func tone(hex, c256, c16 string) lipgloss.CompleteColor {
 	return lipgloss.CompleteColor{TrueColor: hex, ANSI256: c256, ANSI: c16}
 }
@@ -516,13 +520,14 @@ func tone(hex, c256, c16 string) lipgloss.CompleteColor {
 var (
 	clrDialog  = tone("#c4410f", "166", "3")  // dialog background (burnt orange)
 	clrBlack   = lipgloss.Color("0")          // the screen around the dialog, and the tab strip
-	clrAccent  = tone("#ffc23d", "214", "11") // selection / active tab / buttons (amber)
+	clrAccent  = tone("#ffc23d", "214", "1")  // selection / active tab / buttons (amber; red on the console)
 	clrWhite   = tone("#ffffff", "231", "15") // primary text
 	clrValue   = tone("#ffe9a8", "229", "11") // "» value" text (light yellow)
-	clrDim     = tone("#ffd9bd", "223", "7")  // footer / log text
+	clrDim     = tone("#ffd9bd", "223", "15") // footer / log text
 	clrRule    = tone("#f2955a", "209", "7")  // separator rules
-	clrInk     = tone("#000000", "16", "0")   // dark text on the accent bar
-	clrSelText = tone("#8c1407", "88", "1")   // selected label (dark red)
+	clrInk     = tone("#000000", "16", "0")   // dark text on a light button
+	clrOnAcc   = tone("#000000", "16", "15")  // text on the accent bar (white on the console's red)
+	clrSelText = tone("#8c1407", "88", "11")  // selected label (dark red; yellow on the console's red)
 	clrRed     = tone("#a3150a", "124", "1")  // failure badges
 
 	// The dialog: a filled block, no border, centred on the black screen —
@@ -531,7 +536,7 @@ var (
 
 	// Full-width line backgrounds.
 	lineBG = lipgloss.NewStyle().Foreground(clrWhite).Background(clrDialog)
-	selBG  = lipgloss.NewStyle().Foreground(clrInk).Background(clrAccent)
+	selBG  = lipgloss.NewStyle().Foreground(clrOnAcc).Background(clrAccent)
 
 	titleBar = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrDialog)
 	footer   = lipgloss.NewStyle().Foreground(clrDim).Background(clrDialog)
@@ -539,19 +544,19 @@ var (
 
 	// Tabs sit on a black strip; the active one is an accent block.
 	tabStrip    = lipgloss.NewStyle().Foreground(clrWhite).Background(clrBlack)
-	tabActive   = lipgloss.NewStyle().Bold(true).Foreground(clrInk).Background(clrAccent)
+	tabActive   = lipgloss.NewStyle().Bold(true).Foreground(clrOnAcc).Background(clrAccent)
 	tabInactive = lipgloss.NewStyle().Foreground(clrWhite).Background(clrBlack)
 
 	// Hub items: a bold label then a "» value" line, highlighted when selected.
 	itemLabel    = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrDialog)
 	itemValue    = lipgloss.NewStyle().Foreground(clrValue).Background(clrDialog)
 	itemSelLabel = lipgloss.NewStyle().Bold(true).Foreground(clrSelText).Background(clrAccent)
-	itemSelValue = lipgloss.NewStyle().Foreground(clrInk).Background(clrAccent)
+	itemSelValue = lipgloss.NewStyle().Foreground(clrOnAcc).Background(clrAccent)
 
 	// Buttons.
-	btnSel   = lipgloss.NewStyle().Bold(true).Foreground(clrInk).Background(clrAccent).Padding(0, 2)
-	btnIdle  = lipgloss.NewStyle().Foreground(clrInk).Background(lipgloss.Color("250")).Padding(0, 2)
-	btnOff   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Background(lipgloss.Color("238")).Padding(0, 2)
+	btnSel   = lipgloss.NewStyle().Bold(true).Foreground(clrOnAcc).Background(clrAccent).Padding(0, 2)
+	btnIdle  = lipgloss.NewStyle().Foreground(clrInk).Background(tone("#bcbcbc", "250", "7")).Padding(0, 2)
+	btnOff   = lipgloss.NewStyle().Foreground(tone("#808080", "244", "8")).Background(tone("#444444", "238", "0")).Padding(0, 2)
 	warnText = lipgloss.NewStyle().Bold(true).Foreground(tone("#fff35c", "227", "11")).Background(clrDialog)
 
 	// Popup: a bordered window floated over the hub. A dark red fill and a
@@ -661,6 +666,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// gap is the space between two buttons. A button's style ends with a reset,
+// so plain spaces after it fall back to the terminal's own background, which
+// showed as a black block between buttons; gap keeps the dialog's colour.
+func gap(n int) string { return lineBG.Render(strings.Repeat(" ", n)) }
+
 // mediaButtons are the action buttons on the Installation Media dialog.
 var mediaButtons = []string{"Confirm", "Partition", "Rescan Media", "Cancel"}
 
@@ -694,6 +704,9 @@ func (m model) updateMedia(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case m.mediaCursor < nModes:
 			m.mediaMode = m.mediaCursor
+		case m.mediaCursor < encIdx: // a disk row, as Enter
+			m.diskIdx = m.mediaCursor - nModes
+			m.diskSet = true
 		case m.mediaCursor == encIdx:
 			m.encrypt = !m.encrypt
 		}
@@ -871,7 +884,7 @@ func (m model) cancelConfirm(w int) string {
 	case focusConfirm:
 		confirm = btnSel
 	}
-	return lineBG.Width(w).Render("  " + cancel.Render("Cancel") + "   " + confirm.Render("Confirm"))
+	return lineBG.Width(w).Render("  " + cancel.Render("Cancel") + gap(3) + confirm.Render("Confirm"))
 }
 
 func (m model) updateBundles(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1559,7 +1572,7 @@ func (m model) sectionValue(s section) string {
 		case 1:
 			return m.users[0].Login + adminTag(m.users[0].Admin)
 		default:
-			return fmt.Sprintf("%d users (%s, …)", len(m.users), m.users[0].Login)
+			return fmt.Sprintf("%d users (%s, ...)", len(m.users), m.users[0].Login)
 		}
 	case secTelemetry:
 		return triLabel(m.telemetry)
@@ -1628,7 +1641,7 @@ func triLabel(t int) string {
 
 func orDash(s string) string {
 	if strings.TrimSpace(s) == "" {
-		return "—"
+		return "-"
 	}
 	return s
 }
@@ -2153,7 +2166,7 @@ func (m model) userListView() string {
 		}
 		btns = append(btns, style.Render(b))
 	}
-	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + strings.Join(btns, "  "))},
+	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + strings.Join(btns, gap(2)))},
 		"[Tab/Arrows] move · [Enter] select/edit · [a] add · [d] delete · [Esc] back")
 }
 
@@ -2297,7 +2310,7 @@ func (m model) hubView() string {
 			install = btnSel.Render("Install")
 		}
 	}
-	btnLines := []string{lineBG.Width(w).Render("  " + cancel + "   " + install)}
+	btnLines := []string{lineBG.Width(w).Render("  " + cancel + gap(3) + install)}
 	if !m.canInstall() {
 		btnLines = append(btnLines, warnText.Width(w).Render("  Need: a disk, a /, an ESP, an admin user (+ passphrase if encrypting)."))
 	}
@@ -2355,7 +2368,7 @@ func choiceBlurb(s section) []string {
 	case secAutoUpdate:
 		return []string{
 			"Allow the system to update automatically as new versions",
-			"are released — the recommended default. Disabling it risks",
+			"are released - the recommended default. Disabling it risks",
 			"missing security fixes. (Presented for parity; not yet wired.)",
 		}
 	}
@@ -2512,7 +2525,7 @@ func (m model) mediaView() string {
 		}
 		btns = append(btns, style.Render(b))
 	}
-	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + strings.Join(btns, "  "))},
+	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + strings.Join(btns, gap(2)))},
 		"[Tab/Arrows] move · [Space] choose · [Enter] select/activate · [Esc] back")
 }
 
@@ -2638,7 +2651,7 @@ func (m model) textView() string {
 
 func (m model) partListView() string {
 	w := m.panelWidth()
-	disk := "— none —"
+	disk := "(none)"
 	if m.diskSet {
 		disk = m.disks[m.diskIdx].Path + "  " + m.disks[m.diskIdx].Model
 	}
@@ -2651,7 +2664,7 @@ func (m model) partListView() string {
 		itemLabel.Width(w).Render("  Partitions"),
 	}
 	if len(m.parts) == 0 {
-		body = append(body, footer.Width(w).Render("  none yet — press [a] to add"))
+		body = append(body, footer.Width(w).Render("  none yet - press [a] to add"))
 	}
 	for i, p := range m.parts {
 		body = append(body, row(w, i == m.partCursor, partSummary(p)))

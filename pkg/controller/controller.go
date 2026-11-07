@@ -71,6 +71,12 @@ type Options struct {
 	// an operator can see progress. nil is silent.
 	Log io.Writer
 
+	// LogFile, if set, is a file on the live system holding the install's
+	// log. A full run copies it to /root/slinstaller.log on the target
+	// before unmounting, as clr-installer archives its log into the
+	// installed system; failing to copy it is reported to Log, not fatal.
+	LogFile string
+
 	// Output, if set, receives the output of sub-commands that cannot go
 	// through Runner because they need stdin — namely cryptsetup, which is
 	// fed the LUKS passphrase. A full-screen front-end points this at its
@@ -200,6 +206,9 @@ func (in *installer) run() error {
 		// is written fresh at first boot.
 		if err := removeIfPresent(in.resolvCopy); err != nil {
 			return err
+		}
+		if err := in.archiveLog(); err != nil && in.opts.Log != nil {
+			fmt.Fprintf(in.opts.Log, "warning: the install log was not saved on the target: %v\n", err)
 		}
 		return in.mnt.UnmountAll()
 	}
@@ -1011,6 +1020,24 @@ func bootsSlinit(root string, remove map[string]bool) bool {
 
 // removeIfPresent removes path; an empty path or a file already gone is
 // not an error.
+// archiveLog copies Options.LogFile to /root/slinstaller.log on the target,
+// beside the saved config. It is private to root: it lists every command
+// the install ran.
+func (in *installer) archiveLog() error {
+	if in.opts.LogFile == "" {
+		return nil
+	}
+	data, err := os.ReadFile(in.opts.LogFile)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(in.opts.Root, "root")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "slinstaller.log"), data, 0o600)
+}
+
 func removeIfPresent(path string) error {
 	if path == "" {
 		return nil

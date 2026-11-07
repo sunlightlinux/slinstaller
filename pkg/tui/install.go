@@ -3,14 +3,18 @@ package tui
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
@@ -58,9 +62,7 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 	m := installModel{
 		cfg: cfg, opts: opts, disk: plan.Disk, ch: ch,
 		total: 12, // the controller's stage count; the first update corrects it
-		// Solid amber, to match the menu's selection bar rather than the
-		// default blue→pink gradient.
-		bar: progress.New(progress.WithSolidFill("#ffc23d")),
+		bar:   progress.New(progress.WithSolidFill(barFill(termenv.ColorProfile()))),
 		// ASCII frames: the console font has no braille or box spinner glyphs.
 		spin: spinner.New(spinner.WithSpinner(spinner.Line), spinner.WithStyle(stepRun)),
 	}
@@ -110,10 +112,55 @@ const (
 // maxLogLines is how much command output the log view keeps.
 const maxLogLines = 10000
 
-// A stage on the progress screen and where it has got.
+// A stage on the progress screen, where it has got, and its timing.
 type installStep struct {
 	name   string
 	status int
+	began  time.Time
+	took   time.Duration // set once the stage has finished
+}
+
+// installLogPath is where the install log is written on the live system
+// (a variable so tests can move it); a full run copies it to targetLogPath
+// on the installed one.
+var installLogPath = "/tmp/slinstaller.log"
+
+const targetLogPath = "/root/slinstaller.log"
+
+func (m installModel) now() time.Time {
+	if m.clock != nil {
+		return m.clock()
+	}
+	return time.Now()
+}
+
+// elapsed is how long the install has run, or ran.
+func (m installModel) elapsed() time.Duration {
+	if m.started.IsZero() {
+		return 0
+	}
+	if !m.finished.IsZero() {
+		return m.finished.Sub(m.started)
+	}
+	return m.now().Sub(m.started)
+}
+
+// fmtDur shows a duration as m:ss, or h:mm:ss past the hour.
+func fmtDur(d time.Duration) string {
+	sec := int(d.Round(time.Second) / time.Second)
+	if sec >= 3600 {
+		return fmt.Sprintf("%d:%02d:%02d", sec/3600, sec/60%60, sec%60)
+	}
+	return fmt.Sprintf("%d:%02d", sec/60, sec%60)
+}
+
+// spread puts left at the start of a w-wide line and right at its end.
+func spread(left, right string, w int) string {
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return left + lineBG.Render(strings.Repeat(" ", gap)) + right
 }
 
 const (
@@ -146,12 +193,25 @@ func stageLabel(name string) string {
 	return name
 }
 
+// barFill is the progress bar's colour: solid amber rather than the default
+// blue→pink gradient. The bar picks its own colours for the terminal it
+// finds (termenv's profile), and on the 16-colour console the nearest to
+// amber is bright red, so there it is named outright: bright yellow, which
+// the console has as a text colour (the bar is drawn in text, not
+// background).
+func barFill(p termenv.Profile) string {
+	if p == termenv.ANSI {
+		return "11"
+	}
+	return "#ffc23d"
+}
+
 // Step marks are plain ASCII: the console font has no check or cross glyph
 // (it shows an em dash as a filled box), so a tick would come out as one.
 var (
 	stepOKStyle   = lipgloss.NewStyle().Bold(true).Foreground(tone("#7dff6b", "119", "10")).Background(clrDialog)
 	stepFailStyle = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrRed)
-	stepRun       = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrDialog)
+	stepRun       = lipgloss.NewStyle().Bold(true).Foreground(tone("#fff35c", "227", "11")).Background(clrDialog)
 	stepWait      = lipgloss.NewStyle().Foreground(clrDim).Background(clrDialog)
 )
 
@@ -170,25 +230,47 @@ func (m *installModel) markStage(done, total int, name string) {
 	if total > 0 && total < len(m.steps) { // an install stopped --through a stage
 		m.steps = m.steps[:total]
 	}
+	now := m.now()
 	for i := range m.steps {
+		st := &m.steps[i]
 		switch {
 		case i < done || name == "complete":
-			m.steps[i].status = stepOK
+			if st.status == stepRunning {
+				st.took = now.Sub(st.began)
+			}
+			st.status = stepOK
 		case i == done:
-			m.steps[i].status = stepRunning
+			if st.status != stepRunning {
+				st.began = now
+			}
+			st.status = stepRunning
 		default:
-			m.steps[i].status = stepPending
+			st.status = stepPending
 		}
 	}
 }
 
 // failRunning marks the stage that was running when the install failed.
 func (m *installModel) failRunning() {
+	now := m.now()
 	for i := range m.steps {
 		if m.steps[i].status == stepRunning {
 			m.steps[i].status = stepFailed
+			m.steps[i].took = now.Sub(m.steps[i].began)
 		}
 	}
+}
+
+// stepTime is the time shown beside a stage: how long it took, or how long
+// it has been running.
+func (m installModel) stepTime(st installStep) string {
+	switch st.status {
+	case stepOK, stepFailed:
+		return fmtDur(st.took)
+	case stepRunning:
+		return fmtDur(m.now().Sub(st.began))
+	}
+	return ""
 }
 
 func (m installModel) stepMark(status int) string {
@@ -203,19 +285,90 @@ func (m installModel) stepMark(status int) string {
 	return stepWait.Render("[    ]")
 }
 
-// logRows is how many log lines the log view shows: what the dialog has
-// left under its two header rows and above its Back button.
+// logRows is how many rows the log view shows: what the dialog has left
+// under its two header rows and above the blank row and its Back button.
 func (m installModel) logRows() int {
-	if r := panelHeight(m.height) - 3 - 2 - 1; r > 3 {
+	if r := panelHeight(m.height) - 3 - 2 - 2; r > 3 {
 		return r
 	}
 	return 3
 }
 
+// What a log line is, for its colour in the log view.
+const (
+	logPlain = iota
+	logStage // "==> partition", where a stage begins
+	logWarn
+	logError
+)
+
+var (
+	logErrorRe = regexp.MustCompile(`(?i)\b(error|errors|failed|failure|fatal|unable to|cannot|can't|denied)\b`)
+	logWarnRe  = regexp.MustCompile(`(?i)\bwarn(ing)?\b`)
+
+	// xbpsProgressRe is a download progress line from xbps-install,
+	// "foo-1.0_1.x86_64.xbps: [1038KB 0%] 118MB/s ETA: 00m00s". Each is
+	// followed by the download's final line ("1038KB [avg rate: ...]"),
+	// so the log view leaves them out; the log file keeps them.
+	xbpsProgressRe = regexp.MustCompile(`^\S+: \[[0-9.]+[KMGT]?B +[0-9]+%\] .*ETA: \S+$`)
+
+	logStageStyle = lipgloss.NewStyle().Bold(true).Foreground(clrInk).Background(tone("#bcbcbc", "250", "7"))
+)
+
+func logKind(l string) int {
+	switch {
+	case strings.HasPrefix(l, "==> "):
+		return logStage
+	case logErrorRe.MatchString(l):
+		return logError
+	case logWarnRe.MatchString(l):
+		return logWarn
+	}
+	return logPlain
+}
+
+// A row of the log view: one line, or a piece of one too long for the panel.
+type logRow struct {
+	text string
+	kind int
+}
+
+// logWidth is how much text a log row holds.
+func (m installModel) logWidth() int { return contentWidth(m.width) - 3 }
+
+// wrapLog splits a line into rows of at most n cells; the rows after the
+// first are indented so a continued line reads as one.
+func wrapLog(l string, n int) []string {
+	r := []rune(l)
+	if len(r) <= n || n < 8 {
+		return []string{l}
+	}
+	out := []string{string(r[:n])}
+	for r = r[n:]; len(r) > 0; {
+		k := min(len(r), n-2)
+		out = append(out, "  "+string(r[:k]))
+		r = r[k:]
+	}
+	return out
+}
+
+// logView is the whole log as the view's rows.
+func (m installModel) logView() []logRow {
+	n := m.logWidth()
+	var rows []logRow
+	for _, l := range m.logs {
+		k := logKind(l)
+		for _, piece := range wrapLog(l, n) {
+			rows = append(rows, logRow{piece, k})
+		}
+	}
+	return rows
+}
+
 // scrollLog handles the log view's keys; it reports whether it used one.
 func (m *installModel) scrollLog(key string) bool {
 	rows := m.logRows()
-	top := max(len(m.logs)-rows, 0) // furthest the view can scroll up
+	top := max(len(m.logView())-rows, 0) // furthest the view can scroll up
 	switch key {
 	case "up", "k":
 		m.scroll++
@@ -256,7 +409,11 @@ type installModel struct {
 	steps   []installStep // every stage, with how far it has got
 	spin    spinner.Model // turns beside the running stage
 	details bool          // the full command log is on screen
-	scroll  int           // lines the log view is scrolled up from the end
+	scroll  int           // rows the log view is scrolled up from the end
+	logPath string        // the log file on the live system; "" if none
+
+	started, finished time.Time        // the install's start and end
+	clock             func() time.Time // time.Now; tests fix it
 
 	doneCursor int        // selected button on the final screen
 	action     doneAction // what the operator chose there
@@ -286,7 +443,9 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				m.phase = phaseRunning
 				m.steps = newSteps()
-				return m, tea.Batch(m.start(), m.spin.Tick)
+				m.started = m.now()
+				cmd := m.start()
+				return m, tea.Batch(cmd, m.spin.Tick)
 			case "esc", "q", "ctrl+c":
 				m.cancelled = true
 				return m, tea.Quit
@@ -343,15 +502,21 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.wait()
 
 	case logMsg:
-		m.logs = append(m.logs, cleanLogLine(string(msg)))
+		l := cleanLogLine(string(msg))
+		if xbpsProgressRe.MatchString(l) {
+			return m, m.wait()
+		}
+		m.logs = append(m.logs, l)
 		if len(m.logs) > maxLogLines {
 			m.logs = m.logs[len(m.logs)-maxLogLines:]
 		} else if m.scroll > 0 {
-			m.scroll++ // keep a scrolled-up view on the lines being read
+			// keep a scrolled-up view on the rows being read
+			m.scroll += len(wrapLog(l, m.logWidth()))
 		}
 		return m, m.wait()
 
 	case doneMsg:
+		m.finished = m.now()
 		m.err = msg.err
 		if m.err != nil {
 			m.failRunning()
@@ -367,11 +532,31 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // start launches the install in a goroutine, wiring the controller's
 // progress and command output into the model's channel, and begins waiting
 // on it.
-func (m installModel) start() tea.Cmd {
+func (m *installModel) start() tea.Cmd {
 	ch := m.ch
-	sink := func(line string) { ch <- logMsg(line) }
+	// Every line also goes to the log file, written from the install's own
+	// goroutine so it is complete when the controller copies it to the
+	// target. Without a file the install still runs; the view has the log.
+	var mu sync.Mutex
+	f, err := os.OpenFile(installLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err == nil {
+		m.logPath = installLogPath
+		fmt.Fprintf(f, "slinstaller install log, started %s\n", m.now().Format(time.RFC1123))
+	}
+	sink := func(line string) {
+		if f != nil {
+			mu.Lock()
+			fmt.Fprintln(f, cleanLogLine(line))
+			mu.Unlock()
+		}
+		ch <- logMsg(line)
+	}
 	opts := m.opts
-	opts.Log = nil
+	if f != nil {
+		opts.LogFile = installLogPath
+	}
+	// The stage markers ("==> partition") go into the log as well.
+	opts.Log = &lineWriter{sink: sink}
 	opts.Progress = func(done, total int, stage string) {
 		ch <- stageMsg{done: done, total: total, name: stage}
 	}
@@ -381,9 +566,26 @@ func (m installModel) start() tea.Cmd {
 	// and corrupt the full-screen view.
 	opts.Output = &lineWriter{sink: sink}
 
-	cfg := m.cfg
-	go func() { ch <- doneMsg{err: controller.Install(cfg, opts)} }()
+	cfg, now := m.cfg, m.now
+	go func() {
+		err := controller.Install(cfg, opts)
+		if f != nil {
+			mu.Lock()
+			fmt.Fprintf(f, "slinstaller install log, ended %s: %v\n", now().Format(time.RFC1123), errOrOK(err))
+			f.Close()
+			f = nil
+			mu.Unlock()
+		}
+		ch <- doneMsg{err: err}
+	}()
 	return m.wait()
+}
+
+func errOrOK(err error) any {
+	if err == nil {
+		return "ok"
+	}
+	return err
 }
 
 // lineWriter forwards whole lines written to it to a sink, buffering a
@@ -436,7 +638,7 @@ func (m installModel) confirmView() string {
 		lineBG.Width(w).Render(""),
 		lineBG.Width(w).Render("  All data on it will be lost."),
 	}
-	btns := []string{lineBG.Width(w).Render("  " + btnSel.Render("[Enter] Install") + "   " + btnIdle.Render("[Esc] Cancel"))}
+	btns := []string{lineBG.Width(w).Render("  " + btnSel.Render("[Enter] Install") + gap(3) + btnIdle.Render("[Esc] Cancel"))}
 	return frameScreenButtons(m.width, m.height, body, btns, "[Enter] begin the install · [Esc] go back")
 }
 
@@ -457,7 +659,7 @@ func (m installModel) runningView() string {
 	}
 
 	body := []string{
-		itemLabel.Width(w).Render("  " + label),
+		lineBG.Width(w).Render(spread(itemLabel.Render("  "+label), stepWait.Render("elapsed "+fmtDur(m.elapsed())), w)),
 		lineBG.Width(w).Render(""),
 		lineBG.Width(w).Render("  " + m.bar.ViewAs(frac)),
 		lineBG.Width(w).Render(""),
@@ -466,8 +668,14 @@ func (m installModel) runningView() string {
 	// The stages, one per line, each with its mark; the command output
 	// itself is behind the Details button.
 	for _, s := range m.steps {
-		body = append(body, lineBG.Width(w).Render("  "+m.stepMark(s.status)+stepRun.Render("  ")+
-			lineBG.Render(stageLabel(s.name))))
+		// The running stage stands out: its mark, spinner and name are
+		// bright yellow and bold, the rest plain.
+		label := lineBG.Render(stageLabel(s.name))
+		if s.status == stepRunning {
+			label = stepRun.Render(stageLabel(s.name))
+		}
+		left := lineBG.Render("  ") + m.stepMark(s.status) + lineBG.Render("  ") + label
+		body = append(body, lineBG.Width(w).Render(spread(left, stepWait.Render(m.stepTime(s)), w)))
 	}
 	btns := []string{lineBG.Width(w).Render("  " + btnSel.Render("Details"))}
 	return frameScreenButtons(m.width, m.height, body, btns, "[Enter] or [d] show the full log - please wait")
@@ -478,12 +686,34 @@ func (m installModel) runningView() string {
 func (m installModel) detailsView() string {
 	w := contentWidth(m.width)
 	rows := m.logRows()
-	end := max(len(m.logs)-m.scroll, 0)
+	all := m.logView()
+	end := max(len(all)-m.scroll, 0)
 	start := max(end-rows, 0)
-	head := fmt.Sprintf("Install log: lines %d-%d of %d", min(start+1, end), end, len(m.logs))
-	body := []string{itemLabel.Width(w).Render("  " + head), rule(w)}
-	for _, l := range m.logs[start:end] {
-		body = append(body, footer.Width(w).Render("  "+clip(l, w-3)))
+
+	head := "Install log"
+	if m.logPath != "" {
+		head += " (" + m.logPath + ")"
+	}
+	where := "end"
+	if m.scroll > 0 {
+		where = fmt.Sprintf("%d%%", end*100/max(len(all), 1))
+	}
+	body := []string{
+		lineBG.Width(w).Render(spread(itemLabel.Render("  "+head), stepWait.Render(where), w)),
+		rule(w),
+	}
+	for _, r := range all[start:end] {
+		text := "  " + r.text
+		switch r.kind {
+		case logStage:
+			body = append(body, lineBG.Width(w).Render(logStageStyle.Width(w-1).Render(text)))
+		case logError:
+			body = append(body, lineBG.Width(w).Render(stepFailStyle.Width(w-1).Render(text)))
+		case logWarn:
+			body = append(body, warnText.Width(w).Render(text))
+		default:
+			body = append(body, footer.Width(w).Render(text))
+		}
 	}
 	btns := []string{lineBG.Width(w).Render("  " + btnSel.Render("Back"))}
 	return frameScreenButtons(m.width, m.height, body, btns, "[Up/Down/PgUp/PgDn/Home/End] scroll - [Enter] back")
@@ -495,19 +725,26 @@ func (m installModel) doneView() string {
 	if m.err == nil {
 		body = []string{
 			lineBG.Width(w).Render(""),
-			itemLabel.Width(w).Render("  Install complete."),
+			itemLabel.Width(w).Render("  Install complete in " + fmtDur(m.elapsed()) + "."),
 			lineBG.Width(w).Render(""),
 			lineBG.Width(w).Render("  Sunlight Linux is installed on " + m.disk + "."),
 			lineBG.Width(w).Render("  Remove the install medium and reboot."),
 		}
+		if m.logPath != "" && m.opts.Through == "" {
+			body = append(body, lineBG.Width(w).Render(""),
+				footer.Width(w).Render("  The install log is saved in "+targetLogPath+"."))
+		}
 	} else {
 		body = []string{
 			lineBG.Width(w).Render(""),
-			warnText.Width(w).Render("  Install failed."),
+			warnText.Width(w).Render("  Install failed after " + fmtDur(m.elapsed()) + "."),
 			lineBG.Width(w).Render(""),
 		}
 		for _, l := range wrapErr(m.err.Error(), w-4) {
 			body = append(body, lineBG.Width(w).Render("  "+l))
+		}
+		if m.logPath != "" {
+			body = append(body, footer.Width(w).Render("  The full log is in "+m.logPath+" on this live system."))
 		}
 		// Show the tail of the command output — the failing command's own
 		// error is usually the last thing it printed.
@@ -534,7 +771,7 @@ func (m installModel) doneView() string {
 		btns = append(btns, style.Render(b.label))
 	}
 	return frameScreenButtons(m.width, m.height, body,
-		[]string{lineBG.Width(w).Render("  " + strings.Join(btns, "   "))}, "[Tab/Arrows] move · [Enter] select · [d] full log")
+		[]string{lineBG.Width(w).Render("  " + strings.Join(btns, gap(3)))}, "[Tab/Arrows] move · [Enter] select · [d] full log")
 }
 
 // ansiSeq matches the terminal escape sequences a command may print (colour,
@@ -611,10 +848,11 @@ func clip(s string, n int) string {
 	if len(r) <= n {
 		return string(r)
 	}
-	if n == 1 {
-		return "…"
+	// ASCII dots: the console font has no ellipsis glyph.
+	if n <= 3 {
+		return strings.Repeat(".", n)
 	}
-	return string(r[:n-1]) + "…"
+	return string(r[:n-3]) + "..."
 }
 
 func wrapErr(s string, n int) []string {

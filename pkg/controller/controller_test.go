@@ -246,3 +246,27 @@ func TestHooksReceiveConfigEnv(t *testing.T) {
 		t.Errorf("config env not injected in sorted order: %q", got)
 	}
 }
+
+// The install log is copied into the target's /root, private to root.
+func TestArchiveLog(t *testing.T) {
+	root, live := t.TempDir(), filepath.Join(t.TempDir(), "slinstaller.log")
+	if err := os.WriteFile(live, []byte("==> partition\n+ sgdisk --zap-all /dev/vda\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := &installer{opts: Options{Root: root, LogFile: live}}
+	if err := in.archiveLog(); err != nil {
+		t.Fatal(err)
+	}
+	got := filepath.Join(root, "root", "slinstaller.log")
+	data, err := os.ReadFile(got)
+	if err != nil || string(data) != "==> partition\n+ sgdisk --zap-all /dev/vda\n" {
+		t.Fatalf("archived log = %q, %v", data, err)
+	}
+	if fi, _ := os.Stat(got); fi.Mode().Perm() != 0o600 {
+		t.Errorf("archived log mode %v, want 0600", fi.Mode().Perm())
+	}
+	// No log file set: nothing to do.
+	if err := (&installer{opts: Options{Root: root}}).archiveLog(); err != nil {
+		t.Errorf("no LogFile: %v", err)
+	}
+}

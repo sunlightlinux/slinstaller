@@ -34,7 +34,7 @@ func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
 		return nil, "", err
 	}
 	disk := disks[promptIndex(in, w, "Install to which disk", len(disks))-1]
-	fmt.Fprintf(w, "\nSelected %s — it will be ERASED.\n\n", disk.Path)
+	fmt.Fprintf(w, "\nSelected %s - it will be ERASED.\n\n", disk.Path)
 
 	fs := promptChoice(in, w, "Root filesystem", rootFilesystems, "ext4")
 
@@ -214,7 +214,7 @@ func promptChoice(in *bufio.Reader, w io.Writer, label string, opts []string, de
 			return o
 		}
 	}
-	fmt.Fprintf(w, "  not one of %s — using %s\n", strings.Join(opts, "/"), def)
+	fmt.Fprintf(w, "  not one of %s - using %s\n", strings.Join(opts, "/"), def)
 	return def
 }
 
