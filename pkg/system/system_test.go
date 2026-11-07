@@ -349,3 +349,60 @@ func TestValidKeymap(t *testing.T) {
 		t.Error("zz should not be found")
 	}
 }
+
+func TestListTimezonesKeymapsLocales(t *testing.T) {
+	savedZ, savedK, savedL := zoneinfoDir, keymapsDir, localesFile
+	defer func() { zoneinfoDir, keymapsDir, localesFile = savedZ, savedK, savedL }()
+
+	// Timezones: skip the tab/metadata files and the posix/right trees.
+	z := t.TempDir()
+	zoneinfoDir = z
+	os.MkdirAll(filepath.Join(z, "Europe"), 0o755)
+	os.MkdirAll(filepath.Join(z, "posix", "Europe"), 0o755)
+	os.WriteFile(filepath.Join(z, "UTC"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(z, "Europe", "Bucharest"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(z, "zone.tab"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(z, "posix", "Europe", "Paris"), []byte("x"), 0o644)
+	tz := ListTimezones()
+	if !contains(tz, "UTC") || !contains(tz, "Europe/Bucharest") {
+		t.Errorf("timezones missing expected zones: %v", tz)
+	}
+	if contains(tz, "zone.tab") || contains(tz, "posix/Europe/Paris") {
+		t.Errorf("timezones included skipped entries: %v", tz)
+	}
+
+	// Keymaps: basename without .map/.map.gz, de-duplicated.
+	k := t.TempDir()
+	keymapsDir = k
+	os.MkdirAll(filepath.Join(k, "i386", "qwerty"), 0o755)
+	os.WriteFile(filepath.Join(k, "i386", "qwerty", "us.map.gz"), nil, 0o644)
+	os.WriteFile(filepath.Join(k, "ro.map"), nil, 0o644)
+	km := ListKeymaps()
+	if !contains(km, "us") || !contains(km, "ro") {
+		t.Errorf("keymaps wrong: %v", km)
+	}
+
+	// Locales: parse SUPPORTED, keep UTF-8.
+	lf := filepath.Join(t.TempDir(), "SUPPORTED")
+	os.WriteFile(lf, []byte("en_US.UTF-8 UTF-8\nen_US.ISO-8859-1 ISO-8859-1\n# comment\nro_RO.UTF-8 UTF-8\n"), 0o644)
+	localesFile = lf
+	lc := ListLocales()
+	if !contains(lc, "en_US.UTF-8") || !contains(lc, "ro_RO.UTF-8") || contains(lc, "en_US.ISO-8859-1") {
+		t.Errorf("locales wrong: %v", lc)
+	}
+
+	// Missing locale sources -> the built-in fallback (never empty).
+	localesFile = filepath.Join(t.TempDir(), "nope")
+	if lc := ListLocales(); len(lc) == 0 {
+		t.Error("ListLocales fallback is empty")
+	}
+}
+
+func contains(ss []string, v string) bool {
+	for _, s := range ss {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}

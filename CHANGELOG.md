@@ -48,6 +48,12 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Timezone, Language and Keyboard are now chosen from scrollable lists of
+  what the live system offers (zoneinfo zones, UTF-8 locales, console
+  keymaps), with a scrollbar and type-to-filter, as clr-installer does —
+  instead of a free text field (which stays as a fallback when the data is
+  absent). New `pkg/system` enumerators `ListTimezones`, `ListKeymaps` and
+  `ListLocales` back them.
 - The full-screen install's final screen now has action buttons — Reboot,
   Power off and Exit to shell — navigable with Tab/arrows and activated with
   Enter, instead of only "[Enter] exit". Reboot and power-off run after the

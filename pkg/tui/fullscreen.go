@@ -15,6 +15,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/network"
+	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
 // --- Test Network Settings: a secondary-progress popup ---
@@ -305,6 +306,7 @@ const (
 	viewNetList
 	viewUserList
 	viewUserForm
+	viewList // scrollable, filterable selection list (timezone, language, keyboard)
 )
 
 // popupKind selects the bordered dialog drawn centred over the hub, the way
@@ -366,6 +368,13 @@ type model struct {
 	input    textinput.Model
 	edCursor int
 	choices  []string // options for a generic choice view (e.g. kernel)
+
+	// Scrollable, type-to-filter list (Timezone, Language, Keyboard):
+	// listItems are the candidates, listFilter narrows them, listCursor is
+	// the position within the filtered view.
+	listItems  []string
+	listFilter string
+	listCursor int
 
 	// popup: a bordered dialog drawn over the hub.
 	popup    popupKind
@@ -572,6 +581,73 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateUserList(key)
 	case viewUserForm:
 		return m.updateUserForm(key)
+	case viewList:
+		return m.updateList(key)
+	}
+	return m, nil
+}
+
+// filtered returns the list items matching the current type-to-filter text
+// (case-insensitive substring), or all of them when the filter is empty.
+func (m model) filtered() []string {
+	if m.listFilter == "" {
+		return m.listItems
+	}
+	f := strings.ToLower(m.listFilter)
+	var out []string
+	for _, it := range m.listItems {
+		if strings.Contains(strings.ToLower(it), f) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// updateList drives the scrollable selection list: arrows move, typing
+// filters, Enter selects, Esc cancels.
+func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	items := m.filtered()
+	switch {
+	case key.String() == "esc":
+		m.view = viewHub
+		return m, nil
+	case key.String() == "up":
+		if m.listCursor > 0 {
+			m.listCursor--
+		}
+	case key.String() == "down":
+		if m.listCursor < len(items)-1 {
+			m.listCursor++
+		}
+	case key.String() == "enter":
+		if len(items) > 0 {
+			sel := items[m.listCursor]
+			switch m.editing {
+			case secTimezone:
+				m.timezone = sel
+			case secLanguage:
+				m.language = sel
+			case secKeyboard:
+				m.keyboard = sel
+			}
+		}
+		m.view = viewHub
+		return m, nil
+	case key.Type == tea.KeyBackspace:
+		if m.listFilter != "" {
+			m.listFilter = m.listFilter[:len(m.listFilter)-1]
+			m.listCursor = 0
+		}
+	case key.Type == tea.KeyRunes && len(key.Runes) == 1:
+		m.listFilter += string(key.Runes)
+		m.listCursor = 0
+	}
+	// Keep the cursor within the (possibly re-filtered) list.
+	if n := len(m.filtered()); m.listCursor >= n {
+		m.listCursor = n - 1
+	}
+	if m.listCursor < 0 {
+		m.listCursor = 0
 	}
 	return m, nil
 }
@@ -947,6 +1023,21 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.choices = kernelOptions
 		m.edCursor = indexOf(kernelOptions, m.kernel)
 		return m, nil
+	case secTimezone:
+		if items := system.ListTimezones(); len(items) > 0 {
+			return m.openList(items, m.timezone), nil
+		}
+		return m.openTextEditor(s), textinput.Blink
+	case secLanguage:
+		if items := system.ListLocales(); len(items) > 0 {
+			return m.openList(items, m.language), nil
+		}
+		return m.openTextEditor(s), textinput.Blink
+	case secKeyboard:
+		if items := system.ListKeymaps(); len(items) > 0 {
+			return m.openList(items, m.keyboard), nil
+		}
+		return m.openTextEditor(s), textinput.Blink
 	case secTelemetry:
 		m.view = viewSectionChoice
 		m.choices = yesNoOptions
@@ -992,31 +1083,53 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	default: // text sections
-		m.view = viewSectionText
-		ti := textinput.New()
-		ti.Focus()
-		switch s {
-		case secKeyboard:
-			ti.SetValue(m.keyboard)
-		case secLanguage:
-			ti.SetValue(m.language)
-		case secTimezone:
-			ti.SetValue(m.timezone)
-		case secHostname:
-			ti.SetValue(m.hostname)
-		case secProxy:
-			ti.SetValue(m.proxy)
-		case secMirror:
-			ti.SetValue(m.mirror)
-		case secKernelArgs:
-			ti.SetValue(m.kernelArgs)
-		case secBundles:
-			ti.SetValue(m.packages)
-		}
-		m.input = ti
-		m.formStep = 0 // for the two-field user editor
-		return m, textinput.Blink
+		return m.openTextEditor(s), textinput.Blink
 	}
+}
+
+// openTextEditor opens the single-field text editor for a section, seeded
+// with its current value.
+func (m model) openTextEditor(s section) model {
+	m.view = viewSectionText
+	ti := textinput.New()
+	ti.Focus()
+	switch s {
+	case secKeyboard:
+		ti.SetValue(m.keyboard)
+	case secLanguage:
+		ti.SetValue(m.language)
+	case secTimezone:
+		ti.SetValue(m.timezone)
+	case secHostname:
+		ti.SetValue(m.hostname)
+	case secProxy:
+		ti.SetValue(m.proxy)
+	case secMirror:
+		ti.SetValue(m.mirror)
+	case secKernelArgs:
+		ti.SetValue(m.kernelArgs)
+	case secBundles:
+		ti.SetValue(m.packages)
+	}
+	m.input = ti
+	m.formStep = 0
+	return m
+}
+
+// openList opens the scrollable, type-to-filter selection list, with the
+// cursor on the current value when it is present.
+func (m model) openList(items []string, current string) model {
+	m.view = viewList
+	m.listItems = items
+	m.listFilter = ""
+	m.listCursor = 0
+	for i, it := range items {
+		if it == current {
+			m.listCursor = i
+			break
+		}
+	}
+	return m
 }
 
 // kernelOptions are the kernels offered in the selection dialog; the empty
@@ -1605,6 +1718,8 @@ func (m model) View() string {
 		base = m.userListView()
 	case viewUserForm:
 		base = m.userFormView()
+	case viewList:
+		base = m.listView()
 	}
 	if m.popup != popupNone {
 		return overlayCenter(base, m.popupBox(), m.width, m.height)
@@ -1817,6 +1932,59 @@ func (m model) choiceView() string {
 		body = append(body, row(w, i == m.edCursor, label))
 	}
 	return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
+}
+
+// listView renders a scrollable, type-to-filter selection list (Timezone,
+// Language, Keyboard) with a scrollbar on the right, Cancel/Confirm buttons,
+// in clr's style.
+func (m model) listView() string {
+	w := m.panelWidth()
+	items := m.filtered()
+
+	header := []string{itemLabel.Width(w).Render("  " + sectionTitles[m.editing])}
+	if m.listFilter != "" {
+		header = append(header, footer.Width(w).Render("  filter: "+m.listFilter))
+	}
+	header = append(header, rule(w))
+
+	// Window the list to the remaining height, leaving room for a blank, the
+	// buttons and the footer.
+	rows := panelHeight(m.height) - len(header) - 4
+	if rows < 3 {
+		rows = 3
+	}
+	win := rows
+	if win > len(items) {
+		win = len(items)
+	}
+	start := 0
+	if m.listCursor >= win {
+		start = m.listCursor - win + 1
+	}
+	if max := len(items) - win; start > max {
+		start = max
+	}
+	if start < 0 {
+		start = 0
+	}
+
+	body := header
+	if len(items) == 0 {
+		body = append(body, footer.Width(w).Render("  (no match)"))
+	} else {
+		cw := w - 2
+		var lines []string
+		for i := start; i < start+win && i < len(items); i++ {
+			lines = append(lines, row(cw, i == m.listCursor, items[i]))
+		}
+		sb := scrollbarCol(len(lines), start, win, len(items))
+		block := lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(lines, "\n"), strings.Join(sb, "\n"))
+		body = append(body, strings.Split(block, "\n")...)
+	}
+
+	body = append(body, lineBG.Width(w).Render(""))
+	body = append(body, lineBG.Width(w).Render("  "+btnIdle.Render("Cancel")+"   "+btnSel.Render("Confirm")))
+	return m.screen(body, "type to filter · [Up/Down] move · [Enter] select · [Esc] cancel")
 }
 
 // netListView renders the list of interfaces and their current setting.

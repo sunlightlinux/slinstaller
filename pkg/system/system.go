@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -83,6 +84,115 @@ var (
 	zoneinfoDir = "/usr/share/zoneinfo"
 	keymapsDir  = "/usr/share/kbd/keymaps"
 )
+
+// localesFile lists the locales the live system supports (glibc's
+// SUPPORTED). A variable so tests can point it elsewhere.
+var localesFile = "/usr/share/i18n/SUPPORTED"
+
+// ListTimezones returns the zoneinfo zones on the live system, sorted — the
+// candidates for the Choose Timezone list. The tab/list metadata files and
+// the posix/right duplicate trees are skipped. Empty when there is no
+// zoneinfo data.
+func ListTimezones() []string {
+	skipTop := map[string]bool{"posix": true, "right": true}
+	skipFile := map[string]bool{
+		"zone.tab": true, "zone1970.tab": true, "iso3166.tab": true,
+		"leapseconds": true, "tzdata.zi": true, "leap-seconds.list": true,
+	}
+	var out []string
+	_ = filepath.WalkDir(zoneinfoDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, rerr := filepath.Rel(zoneinfoDir, path)
+		if rerr != nil || rel == "." {
+			return nil
+		}
+		top := strings.SplitN(rel, string(os.PathSeparator), 2)[0]
+		if d.IsDir() {
+			if skipTop[top] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if skipFile[d.Name()] || strings.HasSuffix(d.Name(), ".tab") {
+			return nil
+		}
+		out = append(out, filepath.ToSlash(rel))
+		return nil
+	})
+	sort.Strings(out)
+	return out
+}
+
+// ListKeymaps returns the console keymap names on the live system, sorted
+// and de-duplicated — the candidates for the Configure the Keyboard list.
+func ListKeymaps() []string {
+	seen := map[string]bool{}
+	_ = filepath.WalkDir(keymapsDir, func(_ string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		switch {
+		case strings.HasSuffix(name, ".map.gz"):
+			name = strings.TrimSuffix(name, ".map.gz")
+		case strings.HasSuffix(name, ".map"):
+			name = strings.TrimSuffix(name, ".map")
+		default:
+			return nil
+		}
+		seen[name] = true
+		return nil
+	})
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// localesFallback is a small set of common UTF-8 locales, used when the
+// live system lists none, so the Choose Language list is never empty.
+var localesFallback = []string{
+	"en_US.UTF-8", "en_GB.UTF-8", "de_DE.UTF-8", "fr_FR.UTF-8",
+	"es_ES.UTF-8", "it_IT.UTF-8", "ro_RO.UTF-8", "ru_RU.UTF-8",
+	"pt_BR.UTF-8", "zh_CN.UTF-8", "ja_JP.UTF-8",
+}
+
+// ListLocales returns the UTF-8 locales the live system supports, sorted —
+// the candidates for the Choose Language list. It reads glibc's SUPPORTED,
+// then Void's commented /etc/default/libc-locales, and falls back to a
+// built-in common set so the list is never empty.
+func ListLocales() []string {
+	for _, path := range []string{localesFile, "/etc/default/libc-locales"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var out []string
+		seen := map[string]bool{}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
+			if line == "" {
+				continue
+			}
+			name := strings.Fields(line)[0]
+			if strings.Contains(strings.ToUpper(name), "UTF-8") && !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+		if len(out) > 0 {
+			sort.Strings(out)
+			return out
+		}
+	}
+	out := append([]string(nil), localesFallback...)
+	sort.Strings(out)
+	return out
+}
 
 // ValidTimezone reports whether tz names a real zoneinfo zone. checked is
 // false when the live system has no zoneinfo data to check against, in

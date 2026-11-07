@@ -474,10 +474,12 @@ func TestPanelHeightStable(t *testing.T) {
 	size := func(m model) model { m.width, m.height = 100, 40; return m }
 
 	hub := size(newModel(oneDisk()))
-	tz := size(openSectionInTab(newModel(oneDisk()), 0, secTimezone))
+	// Hostname is a single-field text section (footer ends with "[Enter]
+	// confirm"), good for checking the box does not resize.
+	hn := size(openSectionInTab(newModel(oneDisk()), 1, secHostname))
 
 	hf, hl := titleRow(hub.View())
-	tf, tl := titleRow(tz.View())
+	tf, tl := titleRow(hn.View())
 	if hf != tf || hl != tl {
 		t.Errorf("dialog resized between menu and section: hub title@%d footer@%d, section title@%d footer@%d", hf, hl, tf, tl)
 	}
@@ -520,5 +522,30 @@ func TestHubScrollbar(t *testing.T) {
 	req := size(newModel(oneDisk()))
 	if strings.Contains(plain(req.View()), "▼") {
 		t.Errorf("Required tab should not scroll")
+	}
+}
+
+func TestListSelectAndFilter(t *testing.T) {
+	m := newModel(oneDisk())
+	m.editing = secTimezone
+	m = m.openList([]string{"UTC", "Europe/Berlin", "Europe/Bucharest", "Asia/Tokyo"}, "UTC")
+	if m.listCursor != 0 {
+		t.Fatalf("cursor should start on the current value, got %d", m.listCursor)
+	}
+	// Typing filters to the Europe zones.
+	for _, r := range "Buch" {
+		m = send(m, runes(string(r)))
+	}
+	got := m.filtered()
+	if len(got) != 1 || got[0] != "Europe/Bucharest" {
+		t.Fatalf("filter 'Buch' = %v, want [Europe/Bucharest]", got)
+	}
+	// Enter selects it into the timezone and returns to the hub.
+	m = send(m, enter)
+	if m.timezone != "Europe/Bucharest" {
+		t.Errorf("timezone = %q, want Europe/Bucharest", m.timezone)
+	}
+	if m.view != viewHub {
+		t.Errorf("list did not return to the hub")
 	}
 }
