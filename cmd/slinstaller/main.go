@@ -198,11 +198,8 @@ restart:
 	// but only when the live system actually has the data to check against
 	// (so a minimal medium that lacks it does not reject a valid value).
 	if !cfg.SkipValidationAll {
-		if ok, checked := system.ValidTimezone(cfg.Timezone); checked && !ok {
-			return fmt.Errorf("timezone %q is not a known zoneinfo zone (e.g. UTC, Europe/Bucharest)", cfg.Timezone)
-		}
-		if ok, checked := system.ValidKeymap(cfg.Keyboard); checked && !ok {
-			return fmt.Errorf("keymap %q is not among the system's console keymaps (e.g. us, de, ro)", cfg.Keyboard)
+		if err := checkLocale(cfg.Timezone, cfg.Keyboard); err != nil {
+			return err
 		}
 	}
 
@@ -493,6 +490,25 @@ restart:
 	if cfg.PostReboot {
 		fmt.Fprintln(os.Stderr, "postReboot: rebooting into the installed system...")
 		return rebootSystem()
+	}
+	return nil
+}
+
+// checkLocale rejects a timezone or keymap the live system does not know.
+// An empty one is not checked: it means "leave the target's default", as
+// system.Timezone and system.Keymap apply it, and the serial text flow
+// never asks for either. Checking "" as a name refused every such install
+// before it began.
+func checkLocale(tz, keymap string) error {
+	if tz != "" {
+		if ok, checked := system.ValidTimezone(tz); checked && !ok {
+			return fmt.Errorf("timezone %q is not a known zoneinfo zone (e.g. UTC, Europe/Bucharest)", tz)
+		}
+	}
+	if keymap != "" {
+		if ok, checked := system.ValidKeymap(keymap); checked && !ok {
+			return fmt.Errorf("keymap %q is not among the system's console keymaps (e.g. us, de, ro)", keymap)
+		}
 	}
 	return nil
 }

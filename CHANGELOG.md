@@ -12,6 +12,12 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- An install that set no timezone or keymap was refused before it began,
+  with `timezone "" is not a known zoneinfo zone`. The pre-wipe check added
+  for both took the empty value for a name, though empty means "leave the
+  target's default" when the install applies it, and the serial text flow
+  never asks for either — so every serial-console install failed. Only a
+  timezone or keymap that is set is checked now.
 - A `--local-repo` under the target root (e.g. a 9p share mounted at
   `/mnt/share` while installing to `/mnt`) is now refused in preflight: the
   repository would be hidden the moment the target filesystem is mounted,

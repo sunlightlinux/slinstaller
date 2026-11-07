@@ -75,3 +75,21 @@ func TestUnderRoot(t *testing.T) {
 		}
 	}
 }
+
+// An empty timezone or keymap means "leave the target's default", and is
+// not checked; a value that is set must name something the live system
+// has. v1.10.0 checked "" as a name and refused every install that did not
+// set both, the serial text flow included.
+func TestCheckLocale(t *testing.T) {
+	if err := checkLocale("", ""); err != nil {
+		t.Errorf("empty timezone and keymap refused: %v", err)
+	}
+	if _, err := os.Stat("/usr/share/zoneinfo"); err == nil {
+		if err := checkLocale("Not/AZone", ""); err == nil {
+			t.Error("an unknown timezone was accepted")
+		}
+		if err := checkLocale("UTC", ""); err != nil {
+			t.Errorf("UTC refused: %v", err)
+		}
+	}
+}
