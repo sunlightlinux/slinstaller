@@ -143,6 +143,17 @@ func (in *installer) stages() []stage {
 	}
 }
 
+// StageNames lists the install's stages in order, for a front-end that
+// shows them all before they run.
+func StageNames() []string {
+	var in installer
+	var names []string
+	for _, s := range in.stages() {
+		names = append(names, s.name)
+	}
+	return names
+}
+
 func (in *installer) run() error {
 	stages := in.stages()
 

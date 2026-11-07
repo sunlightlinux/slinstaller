@@ -16,6 +16,20 @@ for what will and will not be allowed to change once releases begin.
   the size of the terminal (smaller only on a smaller one). It used to grow
   with the terminal to 90x36, which made it much taller than clr-installer's.
   As there, the Required tab's section list now scrolls.
+- The full-screen interface takes Sunlight Linux's orange-to-red colours
+  in place of clr-installer's blue: a burnt orange dialog, an amber accent
+  for the selection, active tab, buttons and progress bar, and dark red for
+  popups and failures. The layout is unchanged. Each colour names its
+  16-colour console form too, since the console has no orange and the
+  nearest match turned every orange into bright red; there it is the VGA
+  brown (dark orange) with bright yellow.
+- The install progress screen lists the stages instead of the raw command
+  output: each is marked `[ OK ]` when done, with a turning spinner while it
+  runs, `[FAIL]` if it fails, and blank while it waits. The full command log
+  is behind a **Details** button (Enter or `d`), scrollable with the arrows,
+  PgUp/PgDn and Home/End, and on the final screen too (`d`); it keeps the
+  last 10000 lines, where only 500 were kept. The marks are ASCII because
+  the console font has no tick or cross glyph.
 - Buttons sit at the bottom of the dialog on every page that has them, just
   above the footer, as clr-installer's control frame does. They used to
   follow the content, so a short page (Manage User with no users) showed
@@ -25,6 +39,13 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- Black cells at the right of the install screen, and half-redrawn lines in
+  its log: command output reached the log with its control characters.
+  mke2fs prints its progress with backspaces ("0/16" erased and overwritten
+  by "done"), xbps redraws its download line with "\r"; lipgloss counted
+  them as zero-width while the terminal still moved the cursor, so the row
+  came out short and the rest was never drawn over. Each line is now turned
+  into what a terminal would show for it before it is logged.
 - The Cancel / Confirm buttons on the selection lists (timezone, language,
   keyboard, kernel) and on Select Additional Bundles could not be reached:
   they were drawn only, with Confirm always lit. Tab now moves focus from the

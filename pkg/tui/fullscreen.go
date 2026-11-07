@@ -48,8 +48,8 @@ func testNetCmd() tea.Cmd {
 }
 
 // RunFullscreen drives the install as a full-screen menu styled after the
-// Clear Linux minimal-ISO installer: a blue panel with [R] Required / [A]
-// Advanced tabs, each section a label over a "» value" line with a teal
+// Clear Linux minimal-ISO installer: a filled panel with [R] Required / [A]
+// Advanced tabs, each section a label over a "» value" line with an accent
 // selection bar, and Cancel/Install buttons at the foot. Required holds
 // Installation Media (disk + a manual partition editor: plain, encrypted,
 // LVM), Timezone, Keyboard, Language, Manage User and Hostname; Advanced
@@ -497,63 +497,75 @@ func newModel(disks []blockdev.Device) model {
 	}
 }
 
-// The Clear Linux installer palette: a royal-blue dialog centred on a black
-// screen, a black tab strip with a teal active tab, white labels over cyan
-// "» value" lines, and a tall teal bar — with a magenta label — on the
-// selected row. Every content line is rendered at the panel width so its
+// The Sunlight Linux palette, laid out as clr-installer lays out its own: a
+// dialog centred on a black screen, a black tab strip with an accent-filled
+// active tab, white labels over light "» value" lines, and an accent bar on
+// the selected row. Sunlight's colours run from orange to red: a burnt
+// orange dialog with an amber accent and dark red for what is selected or
+// failed. Every content line is rendered at the panel width so its
 // background spans the dialog.
-var (
-	clrBlue    = lipgloss.Color("20")  // dialog background (royal blue)
-	clrBlack   = lipgloss.Color("0")   // the screen around the dialog, and the tab strip
-	clrTeal    = lipgloss.Color("37")  // selection / active tab
-	clrWhite   = lipgloss.Color("231") // primary text
-	clrValue   = lipgloss.Color("51")  // "» value" text (cyan)
-	clrDim     = lipgloss.Color("152") // footer / log text
-	clrRule    = lipgloss.Color("66")  // separator rules
-	clrInk     = lipgloss.Color("16")  // dark text on a teal bar
-	clrSelText = lipgloss.Color("201") // selected label (magenta), as clr renders it
+//
+// Each colour names its 16-colour form as well: the Linux console has no
+// orange in its 16 colours, and lipgloss's nearest match sends every orange
+// to bright red, while the console's colour 3 is the VGA brown (#aa5500), a
+// dark orange. Terminals with 256 colours or more get the real shade.
+func tone(hex, c256, c16 string) lipgloss.CompleteColor {
+	return lipgloss.CompleteColor{TrueColor: hex, ANSI256: c256, ANSI: c16}
+}
 
-	// The dialog: a filled blue block, no border, centred on the black
-	// screen — the shape clr-installer draws.
-	boxStyle = lipgloss.NewStyle().Background(clrBlue).Padding(1, 2)
+var (
+	clrDialog  = tone("#c4410f", "166", "3")  // dialog background (burnt orange)
+	clrBlack   = lipgloss.Color("0")          // the screen around the dialog, and the tab strip
+	clrAccent  = tone("#ffc23d", "214", "11") // selection / active tab / buttons (amber)
+	clrWhite   = tone("#ffffff", "231", "15") // primary text
+	clrValue   = tone("#ffe9a8", "229", "11") // "» value" text (light yellow)
+	clrDim     = tone("#ffd9bd", "223", "7")  // footer / log text
+	clrRule    = tone("#f2955a", "209", "7")  // separator rules
+	clrInk     = tone("#000000", "16", "0")   // dark text on the accent bar
+	clrSelText = tone("#8c1407", "88", "1")   // selected label (dark red)
+	clrRed     = tone("#a3150a", "124", "1")  // failure badges
+
+	// The dialog: a filled block, no border, centred on the black screen —
+	// the shape clr-installer draws.
+	boxStyle = lipgloss.NewStyle().Background(clrDialog).Padding(1, 2)
 
 	// Full-width line backgrounds.
-	lineBG = lipgloss.NewStyle().Foreground(clrWhite).Background(clrBlue)
-	selBG  = lipgloss.NewStyle().Foreground(clrInk).Background(clrTeal)
+	lineBG = lipgloss.NewStyle().Foreground(clrWhite).Background(clrDialog)
+	selBG  = lipgloss.NewStyle().Foreground(clrInk).Background(clrAccent)
 
-	titleBar = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrBlue)
-	footer   = lipgloss.NewStyle().Foreground(clrDim).Background(clrBlue)
-	ruleBG   = lipgloss.NewStyle().Foreground(clrRule).Background(clrBlue)
+	titleBar = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrDialog)
+	footer   = lipgloss.NewStyle().Foreground(clrDim).Background(clrDialog)
+	ruleBG   = lipgloss.NewStyle().Foreground(clrRule).Background(clrDialog)
 
-	// Tabs sit on a black strip; the active one is a teal block.
+	// Tabs sit on a black strip; the active one is an accent block.
 	tabStrip    = lipgloss.NewStyle().Foreground(clrWhite).Background(clrBlack)
-	tabActive   = lipgloss.NewStyle().Bold(true).Foreground(clrInk).Background(clrTeal)
+	tabActive   = lipgloss.NewStyle().Bold(true).Foreground(clrInk).Background(clrAccent)
 	tabInactive = lipgloss.NewStyle().Foreground(clrWhite).Background(clrBlack)
 
 	// Hub items: a bold label then a "» value" line, highlighted when selected.
-	itemLabel    = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrBlue)
-	itemValue    = lipgloss.NewStyle().Foreground(clrValue).Background(clrBlue)
-	itemSelLabel = lipgloss.NewStyle().Bold(true).Foreground(clrSelText).Background(clrTeal)
-	itemSelValue = lipgloss.NewStyle().Foreground(clrInk).Background(clrTeal)
+	itemLabel    = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrDialog)
+	itemValue    = lipgloss.NewStyle().Foreground(clrValue).Background(clrDialog)
+	itemSelLabel = lipgloss.NewStyle().Bold(true).Foreground(clrSelText).Background(clrAccent)
+	itemSelValue = lipgloss.NewStyle().Foreground(clrInk).Background(clrAccent)
 
 	// Buttons.
-	btnSel   = lipgloss.NewStyle().Bold(true).Foreground(clrInk).Background(clrTeal).Padding(0, 2)
+	btnSel   = lipgloss.NewStyle().Bold(true).Foreground(clrInk).Background(clrAccent).Padding(0, 2)
 	btnIdle  = lipgloss.NewStyle().Foreground(clrInk).Background(lipgloss.Color("250")).Padding(0, 2)
 	btnOff   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Background(lipgloss.Color("238")).Padding(0, 2)
-	warnText = lipgloss.NewStyle().Foreground(lipgloss.Color("221")).Background(clrBlue)
+	warnText = lipgloss.NewStyle().Bold(true).Foreground(tone("#fff35c", "227", "11")).Background(clrDialog)
 
-	// Popup: a bordered window floated over the hub. A lighter blue fill and
-	// a white border set it apart from the dialog behind it.
-	clrPopup      = lipgloss.Color("25")
+	// Popup: a bordered window floated over the hub. A dark red fill and a
+	// white border set it apart from the dialog behind it.
+	clrPopup      = tone("#7d1a0c", "88", "1")
 	popupBoxStyle = lipgloss.NewStyle().Background(clrPopup).Foreground(clrWhite).
 			Border(lipgloss.RoundedBorder()).BorderForeground(clrWhite).
 			BorderBackground(clrBlack).Padding(1, 3)
 	popupTitle = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrPopup)
 	popupHint  = lipgloss.NewStyle().Foreground(clrDim).Background(clrPopup)
-	popupInput = lipgloss.NewStyle().Foreground(clrWhite).Background(lipgloss.Color("17")).Padding(0, 1)
+	popupInput = lipgloss.NewStyle().Foreground(clrWhite).Background(tone("#3a0a04", "52", "0")).Padding(0, 1)
 
 	// Scrollbar on the right of the hub's section list.
-	scrollStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("153")).Background(clrBlue)
+	scrollStyle = lipgloss.NewStyle().Foreground(clrDim).Background(clrDialog)
 )
 
 // overlayCenter composites a popup box centred over a base screen: the base
@@ -1940,7 +1952,7 @@ func contentWidth(width int) int {
 }
 
 // panelHeight is the dialog's fixed inner height (title + body + rule +
-// footer), so the blue box stays the same size moving between the menu and
+// footer), so the box stays the same size moving between the menu and
 // a section instead of shrinking to each view's content.
 func panelHeight(height int) int {
 	if height <= 0 {
@@ -1953,7 +1965,7 @@ func panelHeight(height int) int {
 	return h
 }
 
-// frameScreen frames a view the way clr-installer does: a filled blue dialog
+// frameScreen frames a view the way clr-installer does: a filled dialog
 // — bracketed title, the body, a rule and the footer hint — centred on a
 // black screen. Both front-ends (the hub and the install progress view)
 // render through it, so they match. The body is padded to a stable height so
@@ -2005,7 +2017,7 @@ func (m model) screenButtons(body, buttons []string, foot string) string {
 
 func rule(w int) string { return ruleBG.Width(w).Render(strings.Repeat("─", w)) }
 
-// row renders a plain full-width line, highlighted as a teal bar when selected.
+// row renders a plain full-width line, highlighted as an accent bar when selected.
 func row(w int, selected bool, text string) string {
 	if selected {
 		return selBG.Width(w).Render("  " + text)
@@ -2014,7 +2026,7 @@ func row(w int, selected bool, text string) string {
 }
 
 // item renders a hub entry: a bold label line and a "» value" line. When
-// selected it is drawn in the teal selection colours. The height is fixed
+// selected it is drawn in the accent selection colours. The height is fixed
 // at two lines so the hub's section list can be windowed and scrolled
 // cleanly — every section occupies the same space.
 func item(w int, selected bool, label, value string) []string {
@@ -2261,7 +2273,7 @@ func (m model) hubView() string {
 		s := vis[i]
 		sel := m.hubCursor == i
 		secLines = append(secLines, item(cw, sel, sectionLabels[s], m.sectionValue(s))...)
-		// The selected row's separator is drawn in the teal selection colour
+		// The selected row's separator is drawn in the accent selection colour
 		// too, so the highlight reads as a taller bar, as clr-installer shows.
 		if sel {
 			secLines = append(secLines, selBG.Width(cw).Render(""))
