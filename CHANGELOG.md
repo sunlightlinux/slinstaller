@@ -10,8 +10,18 @@ for what will and will not be allowed to change once releases begin.
 
 ## [Unreleased]
 
+### Changed
+
+- The full-screen dialog is clr-installer's window: 80x24, centred, whatever
+  the size of the terminal (smaller only on a smaller one). It used to grow
+  with the terminal to 90x36, which made it much taller than clr-installer's.
+  As there, the Required tab's section list now scrolls.
+
 ### Fixed
 
+- The install progress screen left a blank band between the command log
+  and the footer: the log was capped at 20 lines and sized from an estimate
+  of the window. It now fills exactly the rows the dialog has left.
 - An install that set no timezone or keymap was refused before it began,
   with `timezone "" is not a known zoneinfo zone`. The pre-wipe check added
   for both took the empty value for a name, though empty means "leave the

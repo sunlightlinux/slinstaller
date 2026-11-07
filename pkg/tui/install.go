@@ -291,19 +291,19 @@ func (m installModel) runningView() string {
 		lineBG.Width(w).Render(""),
 		rule(w),
 	}
-	body = append(body, m.logTail(w)...)
+	// The log fills what the panel has left: frameScreen adds the title
+	// above the body and the rule and footer below it.
+	body = append(body, m.logTail(w, panelHeight(m.height)-3-len(body))...)
 	return frameScreen(m.width, m.height, body, "installing — please wait")
 }
 
-// logTail renders the last few command-output lines, as many as the window
-// height allows, each clipped to the panel width so nothing wraps.
-func (m installModel) logTail(w int) []string {
-	rows := m.height - 16 // leave room for the frame, bar and footer
+// logTail renders the last rows command-output lines, each clipped to the
+// panel width so nothing wraps. rows is the space the panel has left; it
+// used to be estimated from the window height and capped at 20, which on
+// a tall screen left a blank band between the log and the footer.
+func (m installModel) logTail(w, rows int) []string {
 	if rows < 6 {
 		rows = 6
-	}
-	if rows > 20 {
-		rows = 20
 	}
 	start := len(m.logs) - rows
 	if start < 0 {

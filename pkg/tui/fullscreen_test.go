@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/charmbracelet/lipgloss"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -491,8 +492,8 @@ func TestPanelHeightStable(t *testing.T) {
 	if hf != tf || hl != tl {
 		t.Errorf("dialog resized between menu and section: hub title@%d footer@%d, section title@%d footer@%d", hf, hl, tf, tl)
 	}
-	if hl-hf != 33 { // panelHeight(40) = 34 -> span 33 (0-indexed)
-		t.Errorf("box height span=%d, want 33", hl-hf)
+	if hl-hf != panelHeight(40)-1 { // span of the panel rows, 0-indexed
+		t.Errorf("box height span=%d, want %d", hl-hf, panelHeight(40)-1)
 	}
 }
 
@@ -526,10 +527,19 @@ func TestHubScrollbar(t *testing.T) {
 		t.Errorf("last section not visible after scrolling down:\n%s", plain(m.View()))
 	}
 
-	// The Required tab fits, so no scrollbar arrows.
+	// In clr-installer's 80x24 window the Required tab scrolls too: its
+	// menu frame shows 3 of the 6 sections. Here the last one is below the
+	// fold, and scrolling brings it into view.
 	req := size(newModel(oneDisk()))
-	if strings.Contains(plain(req.View()), "▼") {
-		t.Errorf("Required tab should not scroll")
+	if !strings.Contains(plain(req.View()), "▼") {
+		t.Errorf("Required tab should scroll in the 80x24 dialog")
+	}
+	r := req
+	for i := 0; i < len(visibleSections(0))-1; i++ {
+		r = send(r, down)
+	}
+	if !strings.Contains(plain(r.View()), sectionLabels[secTelemetry]) {
+		t.Errorf("last Required section not visible after scrolling down:\n%s", plain(r.View()))
 	}
 }
 
@@ -635,5 +645,23 @@ func TestMediaDestructiveAutoLayout(t *testing.T) {
 	}
 	if m2.popup != popupPassphrase {
 		t.Errorf("encrypted install should prompt for a passphrase")
+	}
+}
+
+// The dialog is clr-installer's window: 80x24 whatever the terminal, and
+// smaller only when the terminal is.
+func TestDialogIsClrSized(t *testing.T) {
+	box := func(tw, th int) (int, int) {
+		lines := make([]string, panelHeight(th))
+		for i := range lines {
+			lines[i] = lineBG.Width(contentWidth(tw)).Render("")
+		}
+		b := boxStyle.Render(strings.Join(lines, "\n"))
+		return lipgloss.Width(b), lipgloss.Height(b)
+	}
+	for _, sz := range [][2]int{{80, 24}, {120, 40}, {240, 70}} {
+		if w, h := box(sz[0], sz[1]); w != 80 || h != 24 {
+			t.Errorf("terminal %dx%d: dialog %dx%d, want 80x24", sz[0], sz[1], w, h)
+		}
 	}
 }

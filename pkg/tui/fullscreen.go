@@ -1844,17 +1844,23 @@ func (m model) commitFormField(v string) (tea.Model, tea.Cmd) {
 
 // --- views ---
 
+// The dialog is clr-installer's window: 80 columns by 24 rows, centred,
+// whatever the size of the terminal (its tui package opens every page as an
+// 80x24 window). boxStyle pads it by 2 columns and 1 row on each side, so
+// the content inside is 76x22. A terminal smaller than 80x24 shrinks it, to
+// the same lower bounds as before.
+const (
+	dialogWidth  = 80
+	dialogHeight = 24
+)
+
 // contentWidth is the width every content line is rendered to: the inner
-// width of the centred dialog, not the terminal. Capped so the UI stays
-// readable on a wide screen and bounded so it fits a small one.
+// width of the centred dialog, not the terminal.
 func contentWidth(width int) int {
 	if width <= 0 {
-		width = 80
+		width = dialogWidth
 	}
-	cw := width - 10 // leave room for the border, padding and margins
-	if cw > 86 {
-		cw = 86
-	}
+	cw := min(width, dialogWidth) - 4 // boxStyle's horizontal padding
 	if cw < 40 {
 		cw = 40
 	}
@@ -1863,17 +1869,14 @@ func contentWidth(width int) int {
 
 // panelHeight is the dialog's fixed inner height (title + body + rule +
 // footer), so the blue box stays the same size moving between the menu and
-// a section instead of shrinking to each view's content. It tracks the
-// terminal height but is bounded so it neither overflows a small screen nor
-// sprawls on a large one; the terminal size does not change mid-session, so
-// this is stable.
+// a section instead of shrinking to each view's content.
 func panelHeight(height int) int {
-	h := height - 4
+	if height <= 0 {
+		height = dialogHeight
+	}
+	h := min(height, dialogHeight) - 2 // boxStyle's vertical padding
 	if h < 18 {
 		h = 18
-	}
-	if h > 34 {
-		h = 34
 	}
 	return h
 }
