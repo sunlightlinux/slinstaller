@@ -38,7 +38,7 @@ var doneButtons = []struct {
 }{
 	{"Reboot", actionReboot},
 	{"Power off", actionPowerOff},
-	{"Back to installer", actionBack},
+	{"Back to menu", actionBack},
 	{"Exit to shell", actionExit},
 }
 
@@ -53,7 +53,7 @@ var doneButtons = []struct {
 // RunInstall supplies its own Runner and Progress to feed the view, so the
 // caller leaves those unset. plan is used for the confirmation screen and the
 // stage count.
-// RunInstall returns back=true when the operator chose "Back to installer"
+// RunInstall returns back=true when the operator chose "Back to menu"
 // on the final screen, so the caller can re-run the configuration wizard.
 // Reboot and power-off are carried out here, after the interface is torn
 // down; an error aborts as before.
@@ -331,6 +331,7 @@ func logKind(l string) int {
 type logRow struct {
 	text string
 	kind int
+	line int // the log line it comes from, from 0
 }
 
 // logWidth is how much text a log row holds.
@@ -356,10 +357,10 @@ func wrapLog(l string, n int) []string {
 func (m installModel) logView() []logRow {
 	n := m.logWidth()
 	var rows []logRow
-	for _, l := range m.logs {
+	for i, l := range m.logs {
 		k := logKind(l)
 		for _, piece := range wrapLog(l, n) {
-			rows = append(rows, logRow{piece, k})
+			rows = append(rows, logRow{piece, k, i})
 		}
 	}
 	return rows
@@ -638,7 +639,7 @@ func (m installModel) confirmView() string {
 		lineBG.Width(w).Render(""),
 		lineBG.Width(w).Render("  All data on it will be lost."),
 	}
-	btns := []string{lineBG.Width(w).Render("  " + btnSel.Render("[Enter] Install") + gap(3) + btnIdle.Render("[Esc] Cancel"))}
+	btns := []string{lineBG.Width(w).Render("  " + buttonRow(button{"[Enter] Install", btnSel}, button{"[Esc] Cancel", btnIdle}))}
 	return frameScreenButtons(m.width, m.height, body, btns, "[Enter] begin the install · [Esc] go back")
 }
 
@@ -694,9 +695,17 @@ func (m installModel) detailsView() string {
 	if m.logPath != "" {
 		head += " (" + m.logPath + ")"
 	}
-	where := "end"
-	if m.scroll > 0 {
-		where = fmt.Sprintf("%d%%", end*100/max(len(all), 1))
+	// Where the view is: at the end it follows the log as lines arrive;
+	// scrolled up it holds still, at the line shown last.
+	where := "following new lines"
+	switch {
+	case m.scroll > 0 && end > 0:
+		where = fmt.Sprintf("line %d of %d", all[end-1].line+1, len(m.logs))
+		if m.phase == phaseRunning {
+			where = "paused at " + where
+		}
+	case m.phase != phaseRunning:
+		where = "end of log"
 	}
 	body := []string{
 		lineBG.Width(w).Render(spread(itemLabel.Render("  "+head), stepWait.Render(where), w)),
@@ -761,17 +770,13 @@ func (m installModel) doneView() string {
 		}
 	}
 
-	// Action buttons: Reboot / Power off / Exit to shell.
-	var btns []string
+	// Action buttons: Reboot / Power off / Back to menu / Exit to shell.
+	var btns []button
 	for i, b := range doneButtons {
-		style := btnIdle
-		if i == m.doneCursor {
-			style = btnSel
-		}
-		btns = append(btns, style.Render(b.label))
+		btns = append(btns, button{b.label, pick(i == m.doneCursor)})
 	}
 	return frameScreenButtons(m.width, m.height, body,
-		[]string{lineBG.Width(w).Render("  " + strings.Join(btns, gap(3)))}, "[Tab/Arrows] move · [Enter] select · [d] full log")
+		[]string{lineBG.Width(w).Render("  " + buttonRow(btns...))}, "[Tab/Arrows] move · [Enter] select · [d] full log")
 }
 
 // ansiSeq matches the terminal escape sequences a command may print (colour,

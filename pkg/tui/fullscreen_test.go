@@ -869,3 +869,26 @@ func TestButtonGapsKeepTheDialogColour(t *testing.T) {
 		}
 	}
 }
+
+// The buttons in a row are all as wide as the widest, and the widest row,
+// the final screen's four, still fits the dialog on one line.
+func TestButtonsAreUniform(t *testing.T) {
+	row := buttonRow(button{"OK", btnIdle}, button{"Back to menu", btnSel}, button{"Cancel", btnOff})
+	if got, want := lipgloss.Width(row), 3*(len("Back to menu")+4)+2*2; got != want {
+		t.Errorf("row is %d cells, want %d: three buttons of %d and two gaps", got, want, len("Back to menu")+4)
+	}
+
+	im := installModel{width: 80, height: 24, phase: phaseDone, disk: "/dev/vda"}
+	v := stripANSIForTest(im.View())
+	l := lineWith(v, "Reboot")
+	for _, b := range doneButtons {
+		if !strings.Contains(l, b.label) {
+			t.Errorf("final screen's buttons are not on one line: %q lacks %q", l, b.label)
+		}
+	}
+	for _, line := range strings.Split(im.View(), "\n") {
+		if w := lipgloss.Width(line); w > 80 {
+			t.Errorf("final screen line is %d cells wide: %q", w, stripANSIForTest(line))
+		}
+	}
+}

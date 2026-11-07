@@ -465,7 +465,7 @@ restart:
 			return rerr
 		}
 		if back {
-			// The operator chose "Back to installer": re-run the wizard and
+			// The operator chose "Back to menu": re-run the wizard and
 			// everything downstream of it (reboot/power-off already happened
 			// inside RunInstall when chosen).
 			fmt.Fprintln(os.Stderr, "\nReturning to the configuration menu...")

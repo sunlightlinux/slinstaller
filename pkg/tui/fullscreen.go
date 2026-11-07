@@ -671,6 +671,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // showed as a black block between buttons; gap keeps the dialog's colour.
 func gap(n int) string { return lineBG.Render(strings.Repeat(" ", n)) }
 
+// A button in a row: its label and how it is drawn (btnSel, btnIdle, btnOff).
+type button struct {
+	label string
+	style lipgloss.Style
+}
+
+// buttonRow draws a row of buttons all as wide as the widest, labels
+// centred, so a row reads as one set rather than boxes of every size.
+func buttonRow(btns ...button) string {
+	wide := 0
+	for _, b := range btns {
+		wide = max(wide, lipgloss.Width(b.label))
+	}
+	parts := make([]string, len(btns))
+	for k, b := range btns {
+		// The styles pad two cells a side; Width counts that padding.
+		parts[k] = b.style.Width(wide + 4).Align(lipgloss.Center).Render(b.label)
+	}
+	return strings.Join(parts, gap(2))
+}
+
+// pick is btnSel for the selected button, btnIdle for the rest.
+func pick(sel bool) lipgloss.Style {
+	if sel {
+		return btnSel
+	}
+	return btnIdle
+}
+
 // mediaButtons are the action buttons on the Installation Media dialog.
 var mediaButtons = []string{"Confirm", "Partition", "Rescan Media", "Cancel"}
 
@@ -877,14 +906,9 @@ func (m *model) moveButtonFocus(key tea.KeyMsg) bool {
 // cancelConfirm renders a page's Cancel / Confirm pair, the focused one
 // highlighted; with the list focused neither is.
 func (m model) cancelConfirm(w int) string {
-	cancel, confirm := btnIdle, btnIdle
-	switch m.btnFocus {
-	case focusCancel:
-		cancel = btnSel
-	case focusConfirm:
-		confirm = btnSel
-	}
-	return lineBG.Width(w).Render("  " + cancel.Render("Cancel") + gap(3) + confirm.Render("Confirm"))
+	return lineBG.Width(w).Render("  " + buttonRow(
+		button{"Cancel", pick(m.btnFocus == focusCancel)},
+		button{"Confirm", pick(m.btnFocus == focusConfirm)}))
 }
 
 func (m model) updateBundles(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -2158,15 +2182,11 @@ func (m model) userListView() string {
 	body = append(body, lineBG.Width(w).Render(""))
 
 	// Buttons: Add New User / Revert / Confirm / Cancel.
-	var btns []string
+	var btns []button
 	for i, b := range userButtons {
-		style := btnIdle
-		if m.userCursor == len(m.users)+i {
-			style = btnSel
-		}
-		btns = append(btns, style.Render(b))
+		btns = append(btns, button{b, pick(m.userCursor == len(m.users)+i)})
 	}
-	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + strings.Join(btns, gap(2)))},
+	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + buttonRow(btns...))},
 		"[Tab/Arrows] move · [Enter] select/edit · [a] add · [d] delete · [Esc] back")
 }
 
@@ -2299,18 +2319,12 @@ func (m model) hubView() string {
 	body = append(body, strings.Split(secBlock, "\n")...)
 
 	// Cancel / Install buttons, held at the bottom by screenButtons.
-	cancel := btnIdle.Render("Cancel")
-	if m.hubCursor == len(vis)+1 {
-		cancel = btnSel.Render("Cancel")
-	}
-	install := btnOff.Render("Install")
+	cancel := button{"Cancel", pick(m.hubCursor == len(vis)+1)}
+	install := button{"Install", btnOff}
 	if m.canInstall() {
-		install = btnIdle.Render("Install")
-		if m.hubCursor == len(vis) {
-			install = btnSel.Render("Install")
-		}
+		install.style = pick(m.hubCursor == len(vis))
 	}
-	btnLines := []string{lineBG.Width(w).Render("  " + cancel + gap(3) + install)}
+	btnLines := []string{lineBG.Width(w).Render("  " + buttonRow(cancel, install))}
 	if !m.canInstall() {
 		btnLines = append(btnLines, warnText.Width(w).Render("  Need: a disk, a /, an ESP, an admin user (+ passphrase if encrypting)."))
 	}
@@ -2517,15 +2531,11 @@ func (m model) mediaView() string {
 	body = append(body, row(w, m.mediaCursor == encIdx, encBox+" Enable Encryption"))
 	body = append(body, lineBG.Width(w).Render(""))
 
-	var btns []string
+	var btns []button
 	for i, b := range mediaButtons {
-		style := btnIdle
-		if m.mediaCursor == btnBase+i {
-			style = btnSel
-		}
-		btns = append(btns, style.Render(b))
+		btns = append(btns, button{b, pick(m.mediaCursor == btnBase+i)})
 	}
-	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + strings.Join(btns, gap(2)))},
+	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + buttonRow(btns...))},
 		"[Tab/Arrows] move · [Space] choose · [Enter] select/activate · [Esc] back")
 }
 

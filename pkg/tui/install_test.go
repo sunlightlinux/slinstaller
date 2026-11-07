@@ -32,7 +32,7 @@ func TestDoneScreenButtons(t *testing.T) {
 	if got := step(base, ent).action; got != actionReboot {
 		t.Errorf("default Enter action=%v, want Reboot", got)
 	}
-	// Tab steps through Power off, Back to installer, Exit to shell.
+	// Tab steps through Power off, Back to menu, Exit to shell.
 	if got := step(step(base, tab), ent).action; got != actionPowerOff {
 		t.Errorf("after one Tab action=%v, want Power off", got)
 	}
@@ -120,9 +120,23 @@ func TestDetailsView(t *testing.T) {
 	if len(lines) != 24 {
 		t.Errorf("log view is %d rows, want 24", len(lines))
 	}
+	if h := lineWith(stripANSIForTest(m.View()), "Install log"); !strings.Contains(h, "following new lines") {
+		t.Errorf("at the end the header should say it follows: %q", h)
+	}
 	m = key(m, tea.KeyMsg{Type: tea.KeyUp})
 	if strings.Contains(stripANSIForTest(m.View()), "log-line-199") {
 		t.Error("Up did not scroll the log")
+	}
+	if h := lineWith(stripANSIForTest(m.View()), "Install log"); !strings.Contains(h, "paused at line 199 of 200") {
+		t.Errorf("scrolled up, the header should say where it holds: %q", h)
+	}
+	m.phase = phaseDone
+	if h := lineWith(stripANSIForTest(m.View()), "Install log"); !strings.Contains(h, "line 199 of 200") || strings.Contains(h, "paused") {
+		t.Errorf("after the install, scrolled: %q", h)
+	}
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnd})
+	if h := lineWith(stripANSIForTest(m.View()), "Install log"); !strings.Contains(h, "end of log") {
+		t.Errorf("after the install, at the end: %q", h)
 	}
 	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.details {

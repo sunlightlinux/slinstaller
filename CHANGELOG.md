@@ -22,7 +22,9 @@ for what will and will not be allowed to change once releases begin.
   yellow, a line too long for the panel continues on the next row instead
   of being cut, and xbps's download progress lines are left out, as each is
   followed by the download's final line. A blank row now separates the log
-  from its Back button.
+  from its Back button. Its header says where the view is: "following new
+  lines" at the end, "paused at line 340 of 649" when scrolled up, and "end
+  of log" once the install is over.
 - The install progress screen shows how long the install has run, and each
   stage how long it took (or has been running); the final screen says how
   long the install took.
@@ -48,6 +50,10 @@ for what will and will not be allowed to change once releases begin.
   above the footer, as clr-installer's control frame does. They used to
   follow the content, so a short page (Manage User with no users) showed
   them a third of the way down with the rest of the dialog empty below.
+- The buttons in a row are all as wide as the widest, labels centred, on
+  every page: the hub, the lists, Installation Media, Manage User, the
+  install confirmation and the final screen. To fit four even buttons in
+  the dialog, the final screen's "Back to installer" is now "Back to menu".
 - The hub's section list reaches down to the buttons: five sections in the
   80x24 dialog, where it showed four with three empty rows below them.
 
