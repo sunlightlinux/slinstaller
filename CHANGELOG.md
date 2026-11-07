@@ -48,6 +48,10 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Select Additional Bundles is now a checklist with descriptions ([x]/[ ]),
+  as clr-installer does, instead of a free text field. The ticked bundles'
+  xbps packages (a small curated set — vim, git, curl, htop, openssh, …) are
+  written to the config's `packages`.
 - Timezone, Language and Keyboard are now chosen from scrollable lists of
   what the live system offers (zoneinfo zones, UTF-8 locales, console
   keymaps), with a scrollbar and type-to-filter, as clr-installer does —

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -306,8 +307,34 @@ const (
 	viewNetList
 	viewUserList
 	viewUserForm
-	viewList // scrollable, filterable selection list (timezone, language, keyboard)
+	viewList    // scrollable, filterable selection list (timezone, language, keyboard)
+	viewBundles // the Select Additional Bundles checklist
 )
+
+// bundleEntry is one row of the Select Additional Bundles checklist: a short
+// name, a description, and the xbps packages it adds when ticked. Clear's
+// bundle names do not map to Sunlight, so this is a small curated set of
+// common extras.
+type bundleEntry struct {
+	name  string
+	desc  string
+	packs []string
+}
+
+var bundleOptions = []bundleEntry{
+	{"vim", "Vi IMproved — improved text editor", []string{"vim"}},
+	{"nano", "Nano — simple text editor", []string{"nano"}},
+	{"git", "Git — version control", []string{"git"}},
+	{"curl", "curl — command-line data transfer", []string{"curl"}},
+	{"wget", "wget — file downloader", []string{"wget"}},
+	{"htop", "htop — interactive process viewer", []string{"htop"}},
+	{"tmux", "tmux — terminal multiplexer", []string{"tmux"}},
+	{"rsync", "rsync — fast file copy and sync", []string{"rsync"}},
+	{"man-pages", "Manual pages and reader", []string{"man-pages", "mandoc"}},
+	{"bash-completion", "Bash tab-completion", []string{"bash-completion"}},
+	{"openssh", "OpenSSH client and server", []string{"openssh"}},
+	{"sudo", "sudo — run commands as another user", []string{"sudo"}},
+}
 
 // popupKind selects the bordered dialog drawn centred over the hub, the way
 // clr-installer floats its passphrase and message windows.
@@ -375,6 +402,11 @@ type model struct {
 	listItems  []string
 	listFilter string
 	listCursor int
+
+	// Select Additional Bundles checklist: which bundles are ticked, and the
+	// cursor over them.
+	bundleChecked []bool
+	bundleCursor  int
 
 	// popup: a bordered dialog drawn over the hub.
 	popup    popupKind
@@ -583,8 +615,53 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateUserForm(key)
 	case viewList:
 		return m.updateList(key)
+	case viewBundles:
+		return m.updateBundles(key)
 	}
 	return m, nil
+}
+
+// updateBundles drives the Select Additional Bundles checklist: arrows move,
+// Space toggles, Enter confirms.
+func (m model) updateBundles(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		m.view = viewHub
+	case "up", "k":
+		if m.bundleCursor > 0 {
+			m.bundleCursor--
+		}
+	case "down", "j":
+		if m.bundleCursor < len(bundleOptions)-1 {
+			m.bundleCursor++
+		}
+	case " ", "x":
+		m.bundleChecked[m.bundleCursor] = !m.bundleChecked[m.bundleCursor]
+	case "enter":
+		m.packages = m.bundlesToPackages()
+		m.view = viewHub
+	}
+	return m, nil
+}
+
+// bundlesToPackages is the space-separated package list for the ticked
+// bundles, de-duplicated and sorted.
+func (m model) bundlesToPackages() string {
+	seen := map[string]bool{}
+	var out []string
+	for i, on := range m.bundleChecked {
+		if !on {
+			continue
+		}
+		for _, p := range bundleOptions[i].packs {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	sort.Strings(out)
+	return strings.Join(out, " ")
 }
 
 // filtered returns the list items matching the current type-to-filter text
@@ -1038,6 +1115,13 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 			return m.openList(items, m.keyboard), nil
 		}
 		return m.openTextEditor(s), textinput.Blink
+	case secBundles:
+		if m.bundleChecked == nil {
+			m.bundleChecked = make([]bool, len(bundleOptions))
+		}
+		m.view = viewBundles
+		m.bundleCursor = 0
+		return m, nil
 	case secTelemetry:
 		m.view = viewSectionChoice
 		m.choices = yesNoOptions
@@ -1720,6 +1804,8 @@ func (m model) View() string {
 		base = m.userFormView()
 	case viewList:
 		base = m.listView()
+	case viewBundles:
+		base = m.bundlesView()
 	}
 	if m.popup != popupNone {
 		return overlayCenter(base, m.popupBox(), m.width, m.height)
@@ -1985,6 +2071,51 @@ func (m model) listView() string {
 	body = append(body, lineBG.Width(w).Render(""))
 	body = append(body, lineBG.Width(w).Render("  "+btnIdle.Render("Cancel")+"   "+btnSel.Render("Confirm")))
 	return m.screen(body, "type to filter · [Up/Down] move · [Enter] select · [Esc] cancel")
+}
+
+// bundlesView renders the Select Additional Bundles checklist, with a
+// scrollbar on the right when it does not all fit.
+func (m model) bundlesView() string {
+	w := m.panelWidth()
+	header := []string{
+		itemLabel.Width(w).Render("  " + sectionTitles[secBundles]),
+		rule(w),
+	}
+	rows := panelHeight(m.height) - len(header) - 4
+	if rows < 3 {
+		rows = 3
+	}
+	win := rows
+	if win > len(bundleOptions) {
+		win = len(bundleOptions)
+	}
+	start := 0
+	if m.bundleCursor >= win {
+		start = m.bundleCursor - win + 1
+	}
+	if max := len(bundleOptions) - win; start > max {
+		start = max
+	}
+	if start < 0 {
+		start = 0
+	}
+
+	cw := w - 2
+	var lines []string
+	for i := start; i < start+win && i < len(bundleOptions); i++ {
+		b := bundleOptions[i]
+		box := "[ ]"
+		if m.bundleChecked[i] {
+			box = "[x]"
+		}
+		lines = append(lines, row(cw, i == m.bundleCursor, fmt.Sprintf("%s %s: %s", box, b.name, b.desc)))
+	}
+	sb := scrollbarCol(len(lines), start, win, len(bundleOptions))
+	block := lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(lines, "\n"), strings.Join(sb, "\n"))
+	body := append(header, strings.Split(block, "\n")...)
+	body = append(body, lineBG.Width(w).Render(""))
+	body = append(body, lineBG.Width(w).Render("  "+btnIdle.Render("Cancel")+"   "+btnSel.Render("Confirm")))
+	return m.screen(body, "[Up/Down] move · [Space] toggle · [Enter] confirm · [Esc] cancel")
 }
 
 // netListView renders the list of interfaces and their current setting.

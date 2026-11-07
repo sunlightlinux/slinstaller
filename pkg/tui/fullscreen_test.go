@@ -549,3 +549,24 @@ func TestListSelectAndFilter(t *testing.T) {
 		t.Errorf("list did not return to the hub")
 	}
 }
+
+func TestBundlesChecklist(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secBundles)
+	// Toggle "git" (index 2) and "man-pages" (adds two packages).
+	m = send(m, down)
+	m = send(m, down)
+	m = send(m, runes(" ")) // git
+	for i := 2; i < 8; i++ {
+		m = send(m, down)
+	}
+	m = send(m, runes(" ")) // man-pages (index 8)
+	m = send(m, enter)      // confirm -> hub, derive packages
+
+	if m.view != viewHub {
+		t.Fatalf("bundles did not return to the hub")
+	}
+	// Packages are the ticked bundles' packages, sorted and space-joined.
+	if m.packages != "git man-pages mandoc" {
+		t.Errorf("packages = %q, want 'git man-pages mandoc'", m.packages)
+	}
+}
