@@ -570,3 +570,37 @@ func TestBundlesChecklist(t *testing.T) {
 		t.Errorf("packages = %q, want 'git man-pages mandoc'", m.packages)
 	}
 }
+
+func TestKernelArgsAddRemove(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m = send(m, runes("quiet loglevel=3"))
+	m = send(m, enter) // -> Remove step
+	m = send(m, runes("console=ttyS0"))
+	m = send(m, enter) // confirm -> hub
+	if m.kernelArgs != "quiet loglevel=3" || m.kernelArgsRemove != "console=ttyS0" {
+		t.Fatalf("add=%q remove=%q", m.kernelArgs, m.kernelArgsRemove)
+	}
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := cfg.KernelArguments
+	if ka == nil || len(ka.Add) != 2 || ka.Add[0] != "quiet" || len(ka.Remove) != 1 || ka.Remove[0] != "console=ttyS0" {
+		t.Fatalf("kernel-arguments wrong: %+v", ka)
+	}
+}
+
+func TestMirrorInsecureCheckbox(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secMirror)
+	m = send(m, runes("http://mirror.example/repo"))
+	m = send(m, enter)      // URL -> checkbox step
+	m = send(m, runes(" ")) // toggle Allow insecure
+	m = send(m, enter)      // confirm
+	if m.mirror != "http://mirror.example/repo" || !m.allowInsecure {
+		t.Fatalf("mirror=%q insecure=%v", m.mirror, m.allowInsecure)
+	}
+	cfg, _ := m.buildConfig()
+	if cfg.SwupdMirror != "http://mirror.example/repo" || !cfg.AllowInsecureHTTP {
+		t.Fatalf("config mirror=%q insecure=%v", cfg.SwupdMirror, cfg.AllowInsecureHTTP)
+	}
+}

@@ -104,13 +104,14 @@ func (m model) buildConfig() (*config.Config, error) {
 			Children: layoutToMedia(m.disks[m.diskIdx].Name, m.parts),
 		}},
 		Hostname: m.hostname, Keyboard: m.keyboard, Language: m.language, Timezone: m.timezone,
-		Users:       users,
-		Kernel:      m.kernel,
-		HTTPSProxy:  strings.TrimSpace(m.proxy),
-		SwupdMirror: strings.TrimSpace(m.mirror),
+		Users:             users,
+		Kernel:            m.kernel,
+		HTTPSProxy:        strings.TrimSpace(m.proxy),
+		SwupdMirror:       strings.TrimSpace(m.mirror),
+		AllowInsecureHTTP: m.allowInsecure,
 	}
-	if args := strings.Fields(m.kernelArgs); len(args) > 0 {
-		cfg.KernelArguments = &config.KernelArguments{Add: args}
+	if add, rem := strings.Fields(m.kernelArgs), strings.Fields(m.kernelArgsRemove); len(add) > 0 || len(rem) > 0 {
+		cfg.KernelArguments = &config.KernelArguments{Add: add, Remove: rem}
 	}
 	cfg.Packages = splitList(m.packages)
 	for _, ni := range m.netIfaces {
@@ -307,8 +308,9 @@ const (
 	viewNetList
 	viewUserList
 	viewUserForm
-	viewList    // scrollable, filterable selection list (timezone, language, keyboard)
-	viewBundles // the Select Additional Bundles checklist
+	viewList     // scrollable, filterable selection list (timezone, language, keyboard)
+	viewBundles  // the Select Additional Bundles checklist
+	viewMiniForm // small multi-field forms: Kernel Command Line, Swupd Mirror
 )
 
 // bundleEntry is one row of the Select Additional Bundles checklist: a short
@@ -362,11 +364,13 @@ type model struct {
 	users []userEntry
 
 	// Advanced-tab values.
-	proxy      string // httpsProxy
-	mirror     string // swupdMirror
-	kernel     string // clr bundle name: "", kernel-native, kernel-lts
-	kernelArgs string // extra kernel command-line arguments, space-separated
-	packages   string // extra xbps packages (shown as "bundles"), space/comma-separated
+	proxy            string // httpsProxy
+	mirror           string // swupdMirror
+	allowInsecure    bool   // allowInsecureHTTP, toggled in the Swupd Mirror form
+	kernel           string // clr bundle name: "", kernel-native, kernel-lts
+	kernelArgs       string // kernel arguments to add, space-separated
+	kernelArgsRemove string // kernel arguments to remove, space-separated
+	packages         string // extra xbps packages (shown as "bundles")
 
 	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
 	// default; a static one carries its CIDR address, gateway and DNS.
@@ -617,8 +621,56 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateList(key)
 	case viewBundles:
 		return m.updateBundles(key)
+	case viewMiniForm:
+		return m.updateMiniForm(key)
 	}
 	return m, nil
+}
+
+// updateMiniForm drives the two-field forms: Kernel Command Line (Add then
+// Remove arguments) and Swupd Mirror (URL then an allow-insecure-http
+// checkbox).
+func (m model) updateMiniForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.String() == "esc" {
+		m.view = viewHub
+		return m, nil
+	}
+	switch m.editing {
+	case secKernelArgs:
+		if key.String() == "enter" {
+			v := strings.TrimSpace(m.input.Value())
+			if m.formStep == 0 {
+				m.kernelArgs = v
+				m.formStep = 1
+				ti := textinput.New()
+				ti.Focus()
+				ti.SetValue(m.kernelArgsRemove)
+				m.input = ti
+				return m, textinput.Blink
+			}
+			m.kernelArgsRemove = v
+			m.view = viewHub
+			return m, nil
+		}
+	case secMirror:
+		if m.formStep == 1 { // the allow-insecure checkbox
+			switch key.String() {
+			case " ", "x", "left", "right", "up", "down", "tab":
+				m.allowInsecure = !m.allowInsecure
+			case "enter":
+				m.view = viewHub
+			}
+			return m, nil
+		}
+		if key.String() == "enter" { // URL step
+			m.mirror = strings.TrimSpace(m.input.Value())
+			m.formStep = 1
+			return m, nil
+		}
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(key)
+	return m, cmd
 }
 
 // updateBundles drives the Select Additional Bundles checklist: arrows move,
@@ -1122,6 +1174,22 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.view = viewBundles
 		m.bundleCursor = 0
 		return m, nil
+	case secKernelArgs:
+		m.view = viewMiniForm
+		m.formStep = 0
+		ti := textinput.New()
+		ti.Focus()
+		ti.SetValue(m.kernelArgs)
+		m.input = ti
+		return m, textinput.Blink
+	case secMirror:
+		m.view = viewMiniForm
+		m.formStep = 0
+		ti := textinput.New()
+		ti.Focus()
+		ti.SetValue(m.mirror)
+		m.input = ti
+		return m, textinput.Blink
 	case secTelemetry:
 		m.view = viewSectionChoice
 		m.choices = yesNoOptions
@@ -1806,6 +1874,8 @@ func (m model) View() string {
 		base = m.listView()
 	case viewBundles:
 		base = m.bundlesView()
+	case viewMiniForm:
+		base = m.miniFormView()
 	}
 	if m.popup != popupNone {
 		return overlayCenter(base, m.popupBox(), m.width, m.height)
@@ -1962,8 +2032,15 @@ func (m model) hubView() string {
 	var secLines []string
 	for i := start; i < start+win && i < len(vis); i++ {
 		s := vis[i]
-		secLines = append(secLines, item(cw, m.hubCursor == i, sectionLabels[s], m.sectionValue(s))...)
-		secLines = append(secLines, rule(cw))
+		sel := m.hubCursor == i
+		secLines = append(secLines, item(cw, sel, sectionLabels[s], m.sectionValue(s))...)
+		// The selected row's separator is drawn in the teal selection colour
+		// too, so the highlight reads as a taller bar, as clr-installer shows.
+		if sel {
+			secLines = append(secLines, selBG.Width(cw).Render(""))
+		} else {
+			secLines = append(secLines, rule(cw))
+		}
 	}
 	sb := scrollbarCol(len(secLines), start, win, len(vis))
 	secBlock := lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(secLines, "\n"), strings.Join(sb, "\n"))
@@ -2010,6 +2087,14 @@ func (m model) choiceView() string {
 		itemLabel.Width(w).Render("  " + sectionTitles[m.editing]),
 		lineBG.Width(w).Render(""),
 	}
+	// Telemetry and Automatic OS Updates carry an explanatory paragraph above
+	// the Enabled/Disabled choice, the way clr-installer explains them.
+	for _, line := range choiceBlurb(m.editing) {
+		body = append(body, lineBG.Width(w).Render("  "+line))
+	}
+	if len(choiceBlurb(m.editing)) > 0 {
+		body = append(body, lineBG.Width(w).Render(""))
+	}
 	for i, c := range m.choices {
 		label := c
 		if m.editing == secKernel {
@@ -2018,6 +2103,26 @@ func (m model) choiceView() string {
 		body = append(body, row(w, i == m.edCursor, label))
 	}
 	return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
+}
+
+// choiceBlurb is the explanatory text shown above a choice page, for the
+// sections clr-installer explains.
+func choiceBlurb(s section) []string {
+	switch s {
+	case secTelemetry:
+		return []string{
+			"Allow the system to collect anonymized usage statistics",
+			"to help improve it? No personally identifiable information",
+			"is collected. (Presented for parity; not yet implemented.)",
+		}
+	case secAutoUpdate:
+		return []string{
+			"Allow the system to update automatically as new versions",
+			"are released — the recommended default. Disabling it risks",
+			"missing security fixes. (Presented for parity; not yet wired.)",
+		}
+	}
+	return nil
 }
 
 // listView renders a scrollable, type-to-filter selection list (Timezone,
@@ -2071,6 +2176,52 @@ func (m model) listView() string {
 	body = append(body, lineBG.Width(w).Render(""))
 	body = append(body, lineBG.Width(w).Render("  "+btnIdle.Render("Cancel")+"   "+btnSel.Render("Confirm")))
 	return m.screen(body, "type to filter · [Up/Down] move · [Enter] select · [Esc] cancel")
+}
+
+// miniFormView renders the two-field forms. Kernel Command Line shows an
+// Add or Remove arguments field; Swupd Mirror shows the URL, then an
+// allow-insecure checkbox — as clr-installer lays them out.
+func (m model) miniFormView() string {
+	w := m.panelWidth()
+	switch m.editing {
+	case secKernelArgs:
+		title, label := "Add Kernel Command-Line Arguments", "Add Extra Arguments"
+		if m.formStep == 1 {
+			label = "Remove Arguments"
+		}
+		body := []string{
+			itemLabel.Width(w).Render("  " + title),
+			footer.Width(w).Render("  Boot-time kernel arguments; space-separated."),
+			rule(w),
+			itemLabel.Width(w).Render("  " + label + ":"),
+			lineBG.Width(w).Render(""),
+			lineBG.Width(w).Render("  " + m.input.View()),
+		}
+		return m.screen(body, "type · [Enter] next · [Esc] cancel")
+	case secMirror:
+		body := []string{
+			itemLabel.Width(w).Render("  Swupd Mirror"),
+			footer.Width(w).Render("  Installation source (mirror) URL; HTTPS needs a public CA."),
+			rule(w),
+		}
+		if m.formStep == 0 {
+			body = append(body,
+				itemLabel.Width(w).Render("  Mirror URL:"),
+				lineBG.Width(w).Render(""),
+				lineBG.Width(w).Render("  "+m.input.View()))
+			return m.screen(body, "type · [Enter] next · [Esc] cancel")
+		}
+		box := "[ ]"
+		if m.allowInsecure {
+			box = "[x]"
+		}
+		body = append(body,
+			lineBG.Width(w).Render("  Mirror URL: "+orDash(m.mirror)),
+			lineBG.Width(w).Render(""),
+			row(w, true, box+" Allow installation over insecure connections (http://)"))
+		return m.screen(body, "[Space] toggle · [Enter] confirm · [Esc] cancel")
+	}
+	return m.screen(nil, "")
 }
 
 // bundlesView renders the Select Additional Bundles checklist, with a

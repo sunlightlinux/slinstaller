@@ -48,6 +48,12 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Smaller clr parities in the full-screen wizard: Kernel Command Line now
+  has both Add and Remove argument fields (→ `kernel-arguments` add/remove);
+  Swupd Mirror now has the "Allow installation over insecure connections
+  (http://)" checkbox (→ `allowInsecureHTTP`); Telemetry and Automatic OS
+  Updates now show clr's explanatory paragraph above the Enabled/Disabled
+  choice; and the hub's selected row is drawn as a taller teal bar.
 - Select Additional Bundles is now a checklist with descriptions ([x]/[ ]),
   as clr-installer does, instead of a free text field. The ticked bundles'
   xbps packages (a small curated set — vim, git, curl, htop, openssh, …) are
