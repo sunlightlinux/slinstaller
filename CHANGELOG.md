@@ -48,6 +48,14 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Configure Installation Media is now clr's front dialog: three modes
+  (Destructive, Advanced, Safe), the disk list, an Enable Encryption
+  checkbox and Confirm / Partition / Rescan Media / Cancel buttons.
+  Destructive + Confirm lays down a standard whole-disk layout (512M ESP at
+  /boot, 2G swap, root filling the rest; root encrypted when the box is
+  ticked, prompting for the passphrase); Advanced (or the Partition button)
+  opens the manual partition editor; Safe (install alongside) is shown but
+  reports it is not yet supported.
 - Smaller clr parities in the full-screen wizard: Kernel Command Line now
   has both Add and Remove argument fields (→ `kernel-arguments` add/remove);
   Swupd Mirror now has the "Allow installation over insecure connections

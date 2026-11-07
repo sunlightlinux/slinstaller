@@ -136,9 +136,17 @@ func TestCanInstall(t *testing.T) {
 	}
 }
 
+// openMediaEditor opens Installation Media and activates the Partition
+// button, landing in the manual partition editor.
+func openMediaEditor(start model) model {
+	m := openSectionInTab(start, 0, secMedia) // -> the media front dialog
+	m.mediaCursor = m.mediaEncIndex() + 1 + 1 // the "Partition" button
+	return send(m, enter)                     // -> the partition list
+}
+
 func TestFormAddPartition(t *testing.T) {
-	// Hub -> Installation Media (disk + partitions) -> add a plain ext4 root.
-	m := openSectionInTab(newModel(oneDisk()), 0, secMedia)
+	// Hub -> Installation Media -> Partition -> add a plain ext4 root.
+	m := openMediaEditor(newModel(oneDisk()))
 	m = send(m, runes("a"))
 	m = send(m, enter)      // type = "part" (first choice)
 	m = send(m, enter)      // fs = "ext4" (first choice)
@@ -285,9 +293,9 @@ func TestViewsRenderNoPanic(t *testing.T) {
 		t.Errorf("test-network spinner popup not shown:\n%s", v)
 	}
 
-	// Adding an encrypted partition in the media dialog pops the passphrase
-	// prompt, the way clr collects it.
-	mp := openSectionInTab(hub, 0, secMedia)
+	// Adding an encrypted partition in the partition editor pops the
+	// passphrase prompt, the way clr collects it.
+	mp := openMediaEditor(hub)
 	mp = send(mp, runes("a")) // add partition
 	mp = send(mp, down)       // type cursor -> crypt
 	mp = send(mp, enter)      // choose crypt
@@ -602,5 +610,30 @@ func TestMirrorInsecureCheckbox(t *testing.T) {
 	cfg, _ := m.buildConfig()
 	if cfg.SwupdMirror != "http://mirror.example/repo" || !cfg.AllowInsecureHTTP {
 		t.Fatalf("config mirror=%q insecure=%v", cfg.SwupdMirror, cfg.AllowInsecureHTTP)
+	}
+}
+
+func TestMediaDestructiveAutoLayout(t *testing.T) {
+	// Destructive (default mode) + Confirm builds the standard layout.
+	m := openSectionInTab(newModel(oneDisk()), 0, secMedia)
+	m.mediaCursor = m.mediaEncIndex() + 1 // Confirm button
+	m = send(m, enter)
+	if !m.diskSet || len(m.parts) != 3 {
+		t.Fatalf("auto layout: diskSet=%v parts=%d", m.diskSet, len(m.parts))
+	}
+	if !hasESP(m.parts) || !hasRoot(m.parts) || hasCrypt(m.parts) {
+		t.Errorf("plain auto layout wrong: %+v", m.parts)
+	}
+
+	// With encryption ticked, root is crypt and the passphrase popup opens.
+	m2 := openSectionInTab(newModel(oneDisk()), 0, secMedia)
+	m2.encrypt = true
+	m2.mediaCursor = m2.mediaEncIndex() + 1 // Confirm
+	m2 = send(m2, enter)
+	if !hasCrypt(m2.parts) {
+		t.Errorf("encrypted auto layout should have a crypt partition: %+v", m2.parts)
+	}
+	if m2.popup != popupPassphrase {
+		t.Errorf("encrypted install should prompt for a passphrase")
 	}
 }

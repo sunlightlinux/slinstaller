@@ -311,7 +311,15 @@ const (
 	viewList     // scrollable, filterable selection list (timezone, language, keyboard)
 	viewBundles  // the Select Additional Bundles checklist
 	viewMiniForm // small multi-field forms: Kernel Command Line, Swupd Mirror
+	viewMedia    // the Select Installation Media front dialog
 )
+
+// mediaModes are the installation modes, in clr's order.
+var mediaModes = []struct{ name, desc string }{
+	{"Destructive Installation", "Erase the whole disk and install with a standard layout."},
+	{"Advanced Installation", "Lay out or reuse partitions yourself (the partition editor)."},
+	{"Safe Installation", "Install alongside existing partitions — not yet supported."},
+}
 
 // bundleEntry is one row of the Select Additional Bundles checklist: a short
 // name, a description, and the xbps packages it adds when ticked. Clear's
@@ -411,6 +419,12 @@ type model struct {
 	// cursor over them.
 	bundleChecked []bool
 	bundleCursor  int
+
+	// Installation Media front dialog: the chosen mode, the cursor over the
+	// dialog's rows, and whether encryption is ticked.
+	mediaMode   int // 0 Destructive, 1 Advanced, 2 Safe
+	mediaCursor int
+	encrypt     bool
 
 	// popup: a bordered dialog drawn over the hub.
 	popup    popupKind
@@ -623,8 +637,125 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateBundles(key)
 	case viewMiniForm:
 		return m.updateMiniForm(key)
+	case viewMedia:
+		return m.updateMedia(key)
 	}
 	return m, nil
+}
+
+// mediaButtons are the action buttons on the Installation Media dialog.
+var mediaButtons = []string{"Confirm", "Partition", "Rescan Media", "Cancel"}
+
+// mediaEncIndex and mediaLast give the cursor positions on the media dialog:
+// modes (len(mediaModes)), then the disks, the encryption checkbox, and the
+// buttons.
+func (m model) mediaEncIndex() int { return len(mediaModes) + len(m.disks) }
+func (m model) mediaLast() int     { return m.mediaEncIndex() + 1 + len(mediaButtons) - 1 }
+
+// updateMedia drives the Installation Media front dialog: choose a mode and a
+// disk, toggle encryption, and Confirm / open the partition editor / rescan.
+func (m model) updateMedia(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	nModes, encIdx, last := len(mediaModes), m.mediaEncIndex(), m.mediaLast()
+	btnBase := encIdx + 1
+	switch key.String() {
+	case "esc":
+		m.view = viewHub
+	case "up", "k", "shift+tab", "left", "h":
+		if m.mediaCursor > 0 {
+			m.mediaCursor--
+		} else {
+			m.mediaCursor = last
+		}
+	case "down", "j", "tab", "right", "l":
+		if m.mediaCursor < last {
+			m.mediaCursor++
+		} else {
+			m.mediaCursor = 0
+		}
+	case " ", "x":
+		switch {
+		case m.mediaCursor < nModes:
+			m.mediaMode = m.mediaCursor
+		case m.mediaCursor == encIdx:
+			m.encrypt = !m.encrypt
+		}
+	case "enter":
+		switch {
+		case m.mediaCursor < nModes:
+			m.mediaMode = m.mediaCursor
+		case m.mediaCursor < encIdx: // a disk row
+			m.diskIdx = m.mediaCursor - nModes
+			m.diskSet = true
+		case m.mediaCursor == encIdx:
+			m.encrypt = !m.encrypt
+		default:
+			switch m.mediaCursor - btnBase {
+			case 0: // Confirm
+				return m.confirmMedia()
+			case 1: // Partition (manual editor)
+				m.diskSet = true
+				m.view = viewPartList
+				m.partCursor = 0
+			case 2: // Rescan Media
+				if devs, err := blockdev.List(); err == nil {
+					if disks := blockdev.Disks(devs); len(disks) > 0 {
+						m.disks = disks
+						if m.diskIdx >= len(m.disks) {
+							m.diskIdx = 0
+						}
+					}
+				}
+				m.mediaCursor = 0
+			case 3: // Cancel
+				m.view = viewHub
+			}
+		}
+	}
+	return m, nil
+}
+
+// confirmMedia applies the chosen installation mode.
+func (m model) confirmMedia() (tea.Model, tea.Cmd) {
+	m.diskSet = true // the first disk is selected by default
+	switch m.mediaMode {
+	case 0: // Destructive: a standard whole-disk layout
+		m.parts = autoLayout(m.encrypt)
+		m.view = viewHub
+		if m.encrypt && m.passphrase == "" {
+			return m.openPassphrasePopup()
+		}
+		return m, nil
+	case 1: // Advanced: the manual partition editor
+		m.view = viewPartList
+		m.partCursor = 0
+		return m, nil
+	default: // Safe: not supported yet
+		m.popup = popupMessage
+		m.popupMsg = []string{
+			"Safe Installation",
+			"",
+			"Installing alongside existing partitions is not yet",
+			"supported on Sunlight Linux. Choose Destructive for a",
+			"fresh install, or Advanced to lay out partitions yourself.",
+		}
+		return m, nil
+	}
+}
+
+// autoLayout is the standard whole-disk layout for a Destructive install:
+// a 512M EFI System Partition at /boot, a 2G swap, and the rest as root.
+// With encryption the root is a LUKS volume (the ESP stays plain so the
+// kernel is readable), giving a single passphrase prompt at boot.
+func autoLayout(encrypt bool) []partEntry {
+	root := partEntry{Type: "part", FS: "ext4", Mount: "/"}
+	if encrypt {
+		root.Type = "crypt"
+	}
+	return []partEntry{
+		{Type: "part", FS: "vfat", Mount: "/boot", Size: "512M"},
+		{Type: "part", FS: "swap", Size: "2G"},
+		root,
+	}
 }
 
 // updateMiniForm drives the two-field forms: Kernel Command Line (Add then
@@ -1138,9 +1269,9 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 	m.editing = s
 	switch s {
 	case secMedia:
-		// Installation Media: the disk and its partitions in one dialog.
-		m.view = viewPartList
-		m.partCursor = 0
+		// Installation Media: clr's front dialog (mode + disk + encryption).
+		m.view = viewMedia
+		m.mediaCursor = 0
 		return m, nil
 	case secUser:
 		// Manage User: the clr-style table of accounts.
@@ -1876,6 +2007,8 @@ func (m model) View() string {
 		base = m.bundlesView()
 	case viewMiniForm:
 		base = m.miniFormView()
+	case viewMedia:
+		base = m.mediaView()
 	}
 	if m.popup != popupNone {
 		return overlayCenter(base, m.popupBox(), m.width, m.height)
@@ -2222,6 +2355,66 @@ func (m model) miniFormView() string {
 		return m.screen(body, "[Space] toggle · [Enter] confirm · [Esc] cancel")
 	}
 	return m.screen(nil, "")
+}
+
+// mediaView renders the Installation Media front dialog: the three modes,
+// the disk list, an Enable Encryption checkbox and the action buttons — the
+// layout clr-installer uses.
+func (m model) mediaView() string {
+	w := m.panelWidth()
+	nModes, encIdx := len(mediaModes), m.mediaEncIndex()
+	btnBase := encIdx + 1
+	body := []string{itemLabel.Width(w).Render("  Select Installation Media"), rule(w)}
+
+	for i, mode := range mediaModes {
+		radio := "( )"
+		if m.mediaMode == i {
+			radio = "(•)"
+		}
+		sel := m.mediaCursor == i
+		body = append(body,
+			row(w, sel, radio+" "+mode.name),
+			func() string {
+				if sel {
+					return itemSelValue.Width(w).Render("      " + mode.desc)
+				}
+				return footer.Width(w).Render("      " + mode.desc)
+			}())
+	}
+	body = append(body, rule(w))
+
+	for i, d := range m.disks {
+		mark := "  "
+		if m.diskSet && m.diskIdx == i {
+			mark = "» "
+		}
+		body = append(body, row(w, m.mediaCursor == nModes+i,
+			fmt.Sprintf("%s%-14s %-9s %s", mark, d.Path, gib(d.Size), d.Model)))
+	}
+	body = append(body, rule(w))
+
+	encBox := "[ ]"
+	if m.encrypt {
+		encBox = "[x]"
+	}
+	body = append(body, row(w, m.mediaCursor == encIdx, encBox+" Enable Encryption"))
+	body = append(body, lineBG.Width(w).Render(""))
+
+	var btns []string
+	for i, b := range mediaButtons {
+		style := btnIdle
+		if m.mediaCursor == btnBase+i {
+			style = btnSel
+		}
+		btns = append(btns, style.Render(b))
+	}
+	body = append(body, lineBG.Width(w).Render("  "+strings.Join(btns, "  ")))
+	return m.screen(body, "[Tab/Arrows] move · [Space] choose · [Enter] select/activate · [Esc] back")
+}
+
+// gib formats a byte count as a rounded GiB figure for the disk list.
+func gib(b uint64) string {
+	return fmt.Sprintf("%dGiB", (b+(1<<29))>>30)
 }
 
 // bundlesView renders the Select Additional Bundles checklist, with a
