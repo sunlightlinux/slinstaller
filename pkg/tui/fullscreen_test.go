@@ -665,3 +665,135 @@ func TestDialogIsClrSized(t *testing.T) {
 		}
 	}
 }
+
+// Buttons sit at the bottom of the dialog on every page that has them,
+// just above the rule and footer, as clr-installer's control frame does —
+// not right after the content, where a short page left them halfway up.
+func TestButtonsSitAtTheBottom(t *testing.T) {
+	sized := func(m model) model { m.width, m.height = 100, 40; return m }
+	// lineAboveRule returns the n-th line above the dialog's bottom rule.
+	lineAboveRule := func(v string, n int) string {
+		lines := strings.Split(stripANSIForTest(v), "\n")
+		for i := len(lines) - 1; i >= 0; i-- {
+			if strings.Contains(lines[i], "────") {
+				if i-n >= 0 {
+					return lines[i-n]
+				}
+				break
+			}
+		}
+		return ""
+	}
+	cases := []struct {
+		name  string
+		view  string
+		above int // the hub has its "Need: …" line between buttons and rule
+		want  string
+	}{
+		{"hub", sized(newModel(oneDisk())).View(), 2, "Install"},
+		{"manage user", sized(openSectionInTab(newModel(oneDisk()), 0, secUser)).View(), 1, "Add New User"},
+		{"install confirm", installModel{width: 100, height: 40, disk: "/dev/sda", phase: phaseConfirm}.confirmView(), 1, "[Enter] Install"},
+		{"install done", installModel{width: 100, height: 40, disk: "/dev/sda", phase: phaseDone}.doneView(), 1, "Reboot"},
+	}
+	for _, c := range cases {
+		if got := lineAboveRule(c.view, c.above); !strings.Contains(got, c.want) {
+			t.Errorf("%s: %q is not just above the bottom rule; that line is %q", c.name, c.want, got)
+		}
+	}
+}
+
+// The hub's section list reaches down to the buttons: in the 80x24 dialog
+// five sections fit exactly, and the row above Cancel/Install is the last
+// section's separator, not a gap. It used to show four with three empty
+// rows below them.
+func TestHubListReachesTheButtons(t *testing.T) {
+	m := newModel(oneDisk())
+	m.width, m.height = 80, 24
+	lines := strings.Split(stripANSIForTest(m.View()), "\n")
+	values, btn := 0, -1
+	for i, l := range lines {
+		if strings.Contains(l, "» ") {
+			values++
+		}
+		if strings.Contains(l, "Cancel") && strings.Contains(l, "Install") {
+			btn = i
+		}
+	}
+	if values != 5 {
+		t.Errorf("hub shows %d sections at 80x24, want 5", values)
+	}
+	if btn < 1 || strings.TrimSpace(strings.Trim(lines[btn-1], "▲▼█░│ ")) == "" {
+		t.Errorf("the row above the buttons is empty; the list should reach them:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// Tab reaches the Cancel / Confirm buttons on a selection list, as in
+// clr-installer: they used to be drawn only, with Confirm always lit and
+// no key that could reach either. Enter on Cancel leaves the value as it
+// was; Enter on Confirm takes the highlighted item.
+func TestListButtonsAreReachable(t *testing.T) {
+	tab := tea.KeyMsg{Type: tea.KeyTab}
+	open := func() model {
+		m := newModel(oneDisk())
+		m.width, m.height = 80, 24
+		m.editing = secTimezone
+		m.timezone = "UTC"
+		return m.openList([]string{"UTC", "Europe/Bucharest"}, "UTC")
+	}
+
+	m := send(open(), down) // highlight Europe/Bucharest
+	m = send(m, tab)        // Cancel
+	if m.btnFocus != focusCancel {
+		t.Fatalf("Tab from the list: focus %d, want Cancel", m.btnFocus)
+	}
+	if l := lineWith(m.View(), "Cancel"); !strings.Contains(l, "Confirm") {
+		t.Fatalf("buttons row not found: %q", l)
+	}
+	m = send(m, enter)
+	if m.view != viewHub || m.timezone != "UTC" {
+		t.Errorf("Enter on Cancel: view %v timezone %q, want the hub and UTC unchanged", m.view, m.timezone)
+	}
+
+	m = send(send(send(open(), down), tab), tab) // Confirm
+	if m.btnFocus != focusConfirm {
+		t.Fatalf("second Tab: focus %d, want Confirm", m.btnFocus)
+	}
+	m = send(m, enter)
+	if m.timezone != "Europe/Bucharest" {
+		t.Errorf("Enter on Confirm: timezone %q, want the highlighted Europe/Bucharest", m.timezone)
+	}
+
+	// A third Tab returns to the list, and the dialog keeps its 80x24 size
+	// (a footer too long for it would wrap and add a row).
+	m = send(send(send(open(), tab), tab), tab)
+	if m.btnFocus != focusList {
+		t.Errorf("third Tab: focus %d, want the list", m.btnFocus)
+	}
+	if h := len(strings.Split(m.View(), "\n")); h != 24 {
+		t.Errorf("list page is %d rows tall, want 24", h)
+	}
+}
+
+func lineWith(v, s string) string {
+	for _, l := range strings.Split(stripANSIForTest(v), "\n") {
+		if strings.Contains(l, s) {
+			return l
+		}
+	}
+	return ""
+}
+
+// The bundles page's Cancel is reachable too, and leaves the selection.
+func TestBundlesCancelIsReachable(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secBundles)
+	m.width, m.height = 80, 24
+	m = send(m, runes(" ")) // tick the first bundle
+	m = send(m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.btnFocus != focusCancel {
+		t.Fatalf("Tab: focus %d, want Cancel", m.btnFocus)
+	}
+	m = send(m, enter)
+	if m.view != viewHub || m.packages != "" {
+		t.Errorf("Enter on Cancel: view %v packages %q, want the hub and no packages", m.view, m.packages)
+	}
+}

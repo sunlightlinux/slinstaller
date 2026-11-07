@@ -420,6 +420,12 @@ type model struct {
 	bundleChecked []bool
 	bundleCursor  int
 
+	// btnFocus is where keyboard focus is on a page whose content is a list
+	// above a Cancel / Confirm pair (the selection lists, the bundles):
+	// focusList, focusCancel or focusConfirm. Tab moves it, as in
+	// clr-installer.
+	btnFocus int
+
 	// Installation Media front dialog: the chosen mode, the cursor over the
 	// dialog's rows, and whether encryption is ticked.
 	mediaMode   int // 0 Destructive, 1 Advanced, 2 Safe
@@ -806,7 +812,64 @@ func (m model) updateMiniForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // updateBundles drives the Select Additional Bundles checklist: arrows move,
 // Space toggles, Enter confirms.
+// Focus on a list page with a Cancel / Confirm pair below it.
+const (
+	focusList = iota
+	focusCancel
+	focusConfirm
+)
+
+// moveButtonFocus handles the keys that move focus between a page's list
+// and its Cancel / Confirm buttons: Tab and Shift+Tab cycle list, Cancel,
+// Confirm; Left and Right move between the buttons; Up from a button goes
+// back to the list. It reports whether it used the key.
+func (m *model) moveButtonFocus(key tea.KeyMsg) bool {
+	switch key.String() {
+	case "tab":
+		m.btnFocus = (m.btnFocus + 1) % 3
+	case "shift+tab":
+		m.btnFocus = (m.btnFocus + 2) % 3
+	case "left", "right":
+		if m.btnFocus == focusList {
+			return false
+		}
+		if m.btnFocus == focusCancel {
+			m.btnFocus = focusConfirm
+		} else {
+			m.btnFocus = focusCancel
+		}
+	case "up":
+		if m.btnFocus == focusList {
+			return false
+		}
+		m.btnFocus = focusList
+	default:
+		return false
+	}
+	return true
+}
+
+// cancelConfirm renders a page's Cancel / Confirm pair, the focused one
+// highlighted; with the list focused neither is.
+func (m model) cancelConfirm(w int) string {
+	cancel, confirm := btnIdle, btnIdle
+	switch m.btnFocus {
+	case focusCancel:
+		cancel = btnSel
+	case focusConfirm:
+		confirm = btnSel
+	}
+	return lineBG.Width(w).Render("  " + cancel.Render("Cancel") + "   " + confirm.Render("Confirm"))
+}
+
 func (m model) updateBundles(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.moveButtonFocus(key) {
+		return m, nil
+	}
+	if key.String() == "enter" && m.btnFocus == focusCancel {
+		m.view = viewHub
+		return m, nil
+	}
 	switch key.String() {
 	case "esc":
 		m.view = viewHub
@@ -867,6 +930,13 @@ func (m model) filtered() []string {
 // filters, Enter selects, Esc cancels.
 func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	items := m.filtered()
+	if m.moveButtonFocus(key) {
+		return m, nil
+	}
+	if key.String() == "enter" && m.btnFocus == focusCancel {
+		m.view = viewHub
+		return m, nil
+	}
 	switch {
 	case key.String() == "esc":
 		m.view = viewHub
@@ -1304,6 +1374,7 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		}
 		m.view = viewBundles
 		m.bundleCursor = 0
+		m.btnFocus = focusList
 		return m, nil
 	case secKernelArgs:
 		m.view = viewMiniForm
@@ -1406,6 +1477,7 @@ func (m model) openList(items []string, current string) model {
 	m.listItems = items
 	m.listFilter = ""
 	m.listCursor = 0
+	m.btnFocus = focusList
 	for i, it := range items {
 		if it == current {
 			m.listCursor = i
@@ -1887,6 +1959,15 @@ func panelHeight(height int) int {
 // render through it, so they match. The body is padded to a stable height so
 // the box does not resize as views change.
 func frameScreen(width, height int, body []string, foot string) string {
+	return frameScreenButtons(width, height, body, nil, foot)
+}
+
+// frameScreenButtons is frameScreen with a row of buttons kept at the
+// bottom of the dialog, just above the rule and footer, whatever the height
+// of the body above it: clr-installer gives every page a control frame
+// below its fixed-height content frame, so its buttons sit on the same row
+// on every page instead of following the content up the screen.
+func frameScreenButtons(width, height int, body, buttons []string, foot string) string {
 	if width <= 0 {
 		width = 80
 	}
@@ -1901,9 +1982,10 @@ func frameScreen(width, height int, body []string, foot string) string {
 	// Pad with blank full-width lines so title+body fills the panel, leaving
 	// the last two rows for the rule and footer. A view taller than this
 	// (e.g. the Advanced menu on a short terminal) is left as-is.
-	for len(lines) < panelHeight(height)-2 {
+	for len(lines) < panelHeight(height)-2-len(buttons) {
 		lines = append(lines, lineBG.Width(cw).Render(""))
 	}
+	lines = append(lines, buttons...)
 	lines = append(lines, rule(cw), footer.Width(cw).Render(foot))
 	box := boxStyle.Render(strings.Join(lines, "\n"))
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box,
@@ -1914,6 +1996,11 @@ func (m model) panelWidth() int { return contentWidth(m.width) }
 
 func (m model) screen(body []string, foot string) string {
 	return frameScreen(m.width, m.height, body, foot)
+}
+
+// screenButtons is screen with the view's buttons held at the bottom.
+func (m model) screenButtons(body, buttons []string, foot string) string {
+	return frameScreenButtons(m.width, m.height, body, buttons, foot)
 }
 
 func rule(w int) string { return ruleBG.Width(w).Render(strings.Repeat("─", w)) }
@@ -1949,8 +2036,12 @@ const hubRowsPerSection = 3
 
 // hubVisibleCount is how many sections the hub shows at once, from the
 // panel's fixed height; the rest scroll, with a scrollbar on the right.
+// The chrome is 7 rows: title, tab strip and rule above the list; the
+// buttons, the "Need:" line, the rule and the footer below it. It used to
+// be counted as 8, with a blank line under the list besides, which left
+// three empty rows between the last section and the buttons.
 func hubVisibleCount(height int) int {
-	rows := panelHeight(height) - 8 // chrome: tab, rules, blank, buttons, footer
+	rows := panelHeight(height) - 7
 	if rows < hubRowsPerSection {
 		rows = hubRowsPerSection
 	}
@@ -2050,8 +2141,8 @@ func (m model) userListView() string {
 		}
 		btns = append(btns, style.Render(b))
 	}
-	body = append(body, lineBG.Width(w).Render("  "+strings.Join(btns, "  ")))
-	return m.screen(body, "[Tab/Arrows] move · [Enter] select/edit · [a] add · [d] delete · [Esc] back")
+	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + strings.Join(btns, "  "))},
+		"[Tab/Arrows] move · [Enter] select/edit · [a] add · [d] delete · [Esc] back")
 }
 
 // userFormView renders the Add/Edit User form: one field at a time, then the
@@ -2182,9 +2273,7 @@ func (m model) hubView() string {
 	secBlock := lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(secLines, "\n"), strings.Join(sb, "\n"))
 	body = append(body, strings.Split(secBlock, "\n")...)
 
-	body = append(body, lineBG.Width(w).Render(""))
-
-	// Cancel / Install buttons.
+	// Cancel / Install buttons, held at the bottom by screenButtons.
 	cancel := btnIdle.Render("Cancel")
 	if m.hubCursor == len(vis)+1 {
 		cancel = btnSel.Render("Cancel")
@@ -2196,12 +2285,12 @@ func (m model) hubView() string {
 			install = btnSel.Render("Install")
 		}
 	}
-	body = append(body, lineBG.Width(w).Render("  "+cancel+"   "+install))
+	btnLines := []string{lineBG.Width(w).Render("  " + cancel + "   " + install)}
 	if !m.canInstall() {
-		body = append(body, warnText.Width(w).Render("  Need: a disk, a /, an ESP, an admin user (+ passphrase if encrypting)."))
+		btnLines = append(btnLines, warnText.Width(w).Render("  Need: a disk, a /, an ESP, an admin user (+ passphrase if encrypting)."))
 	}
 
-	return m.screen(body, "Use [Tab] or the arrow keys [Up and Down] to navigate")
+	return m.screenButtons(body, btnLines, "Use [Tab] or the arrow keys [Up and Down] to navigate")
 }
 
 // choiceView renders the disk chooser (m.choices nil) or a generic option
@@ -2310,8 +2399,8 @@ func (m model) listView() string {
 	}
 
 	body = append(body, lineBG.Width(w).Render(""))
-	body = append(body, lineBG.Width(w).Render("  "+btnIdle.Render("Cancel")+"   "+btnSel.Render("Confirm")))
-	return m.screen(body, "type to filter · [Up/Down] move · [Enter] select · [Esc] cancel")
+	return m.screenButtons(body, []string{m.cancelConfirm(w)},
+		"type to filter · [Tab] buttons · [Enter] select · [Esc] back")
 }
 
 // miniFormView renders the two-field forms. Kernel Command Line shows an
@@ -2411,8 +2500,8 @@ func (m model) mediaView() string {
 		}
 		btns = append(btns, style.Render(b))
 	}
-	body = append(body, lineBG.Width(w).Render("  "+strings.Join(btns, "  ")))
-	return m.screen(body, "[Tab/Arrows] move · [Space] choose · [Enter] select/activate · [Esc] back")
+	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + strings.Join(btns, "  "))},
+		"[Tab/Arrows] move · [Space] choose · [Enter] select/activate · [Esc] back")
 }
 
 // gib formats a byte count as a rounded GiB figure for the disk list.
@@ -2461,8 +2550,8 @@ func (m model) bundlesView() string {
 	block := lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(lines, "\n"), strings.Join(sb, "\n"))
 	body := append(header, strings.Split(block, "\n")...)
 	body = append(body, lineBG.Width(w).Render(""))
-	body = append(body, lineBG.Width(w).Render("  "+btnIdle.Render("Cancel")+"   "+btnSel.Render("Confirm")))
-	return m.screen(body, "[Up/Down] move · [Space] toggle · [Enter] confirm · [Esc] cancel")
+	return m.screenButtons(body, []string{m.cancelConfirm(w)},
+		"[Tab] buttons · [Space] toggle · [Enter] confirm · [Esc] back")
 }
 
 // netListView renders the list of interfaces and their current setting.

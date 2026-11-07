@@ -16,9 +16,21 @@ for what will and will not be allowed to change once releases begin.
   the size of the terminal (smaller only on a smaller one). It used to grow
   with the terminal to 90x36, which made it much taller than clr-installer's.
   As there, the Required tab's section list now scrolls.
+- Buttons sit at the bottom of the dialog on every page that has them, just
+  above the footer, as clr-installer's control frame does. They used to
+  follow the content, so a short page (Manage User with no users) showed
+  them a third of the way down with the rest of the dialog empty below.
+- The hub's section list reaches down to the buttons: five sections in the
+  80x24 dialog, where it showed four with three empty rows below them.
 
 ### Fixed
 
+- The Cancel / Confirm buttons on the selection lists (timezone, language,
+  keyboard, kernel) and on Select Additional Bundles could not be reached:
+  they were drawn only, with Confirm always lit. Tab now moves focus from the
+  list to Cancel, Confirm and back (Shift+Tab the other way, Left/Right
+  between the buttons, Up back to the list), the focused button is the lit
+  one, and Enter on Cancel leaves without changing anything.
 - The install progress screen left a blank band between the command log
   and the footer: the log was capped at 20 lines and sized from an estimate
   of the window. It now fills exactly the rows the dialog has left.

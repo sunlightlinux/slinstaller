@@ -262,10 +262,9 @@ func (m installModel) confirmView() string {
 		itemLabel.Width(w).Render("    " + m.disk),
 		lineBG.Width(w).Render(""),
 		lineBG.Width(w).Render("  All data on it will be lost."),
-		lineBG.Width(w).Render(""),
-		lineBG.Width(w).Render("  " + btnSel.Render("[Enter] Install") + "   " + btnIdle.Render("[Esc] Cancel")),
 	}
-	return frameScreen(m.width, m.height, body, "[Enter] begin the install · [Esc] go back")
+	btns := []string{lineBG.Width(w).Render("  " + btnSel.Render("[Enter] Install") + "   " + btnIdle.Render("[Esc] Cancel"))}
+	return frameScreenButtons(m.width, m.height, body, btns, "[Enter] begin the install · [Esc] go back")
 }
 
 func (m installModel) runningView() string {
@@ -363,8 +362,8 @@ func (m installModel) doneView() string {
 		}
 		btns = append(btns, style.Render(b.label))
 	}
-	body = append(body, lineBG.Width(w).Render(""), lineBG.Width(w).Render("  "+strings.Join(btns, "   ")))
-	return frameScreen(m.width, m.height, body, "[Tab/Arrows] move · [Enter] select")
+	return frameScreenButtons(m.width, m.height, body,
+		[]string{lineBG.Width(w).Render("  " + strings.Join(btns, "   "))}, "[Tab/Arrows] move · [Enter] select")
 }
 
 func clip(s string, n int) string {
