@@ -332,3 +332,14 @@ func TestInstallWritesLogFile(t *testing.T) {
 		t.Errorf("log file mode %v, want 0600", fi.Mode().Perm())
 	}
 }
+
+// The text flow's log file holds lines as a terminal showed them.
+func TestLogWriterCleansLines(t *testing.T) {
+	var b strings.Builder
+	w := LogWriter(&b)
+	fmt.Fprint(w, "Creating journal:  0/16\b\b\b\b\b     \b\b\b\b\bdone\nfoo.xbps: [1KB 3%]\rfoo.xbps: 1KB")
+	fmt.Fprint(w, " [avg]\n")
+	if got, want := b.String(), "Creating journal: done\nfoo.xbps: 1KB [avg]\n"; got != want {
+		t.Errorf("log = %q, want %q", got, want)
+	}
+}

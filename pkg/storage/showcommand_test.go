@@ -22,3 +22,22 @@ func TestShowCommandMasksHashes(t *testing.T) {
 		t.Errorf("SinkRunner logged a hash: %q", lines)
 	}
 }
+
+// StreamRunner sends the command, masked, and its output to the writer.
+func TestStreamRunner(t *testing.T) {
+	var b strings.Builder
+	if err := StreamRunner(&b)([]string{"/bin/sh", "-c", "echo out; echo err >&2", "$6$x$y"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"    + /bin/sh -c", "<password hash>", "out\n", "err\n"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %q in %q", want, b.String())
+		}
+	}
+	if strings.Contains(b.String(), "$6$") {
+		t.Errorf("hash shown: %q", b.String())
+	}
+	if err := StreamRunner(&b)([]string{"/bin/false"}); err == nil {
+		t.Error("a failing command returned no error")
+	}
+}

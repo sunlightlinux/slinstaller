@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -124,6 +125,9 @@ type installStep struct {
 // (a variable so tests can move it); a full run copies it to targetLogPath
 // on the installed one.
 var installLogPath = "/tmp/slinstaller.log"
+
+// InstallLogPath is that path, for the text flow to write its log to.
+func InstallLogPath() string { return installLogPath }
 
 const targetLogPath = "/root/slinstaller.log"
 
@@ -587,6 +591,13 @@ func errOrOK(err error) any {
 		return "ok"
 	}
 	return err
+}
+
+// LogWriter returns a writer that keeps w a readable log of what passes
+// through it: each line reduced to what a terminal would have shown for it
+// (cleanLogLine). The text flow writes its log file through it.
+func LogWriter(w io.Writer) io.Writer {
+	return &lineWriter{sink: func(line string) { fmt.Fprintln(w, cleanLogLine(line)) }}
 }
 
 // lineWriter forwards whole lines written to it to a sink, buffering a

@@ -131,6 +131,10 @@ for what will and will not be allowed to change once releases begin.
   saved config), as clr-installer archives its own log. Until now the log
   lived only in the view and was gone once the installer exited.
   `controller.Options.LogFile` names the file to archive.
+- The text and unattended installs keep the same log: `/tmp/slinstaller.log`
+  (or `--log`'s file) while running, `/root/slinstaller.log` on the installed
+  system after a complete install. `--log` now shows progress live on the
+  terminal too, and its file holds lines as the terminal showed them.
 
 ### Fixed
 

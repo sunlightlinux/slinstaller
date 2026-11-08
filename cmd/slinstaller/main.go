@@ -343,20 +343,31 @@ restart:
 		}
 	}
 
-	// --log tees everything the install prints — the command trace, stage
-	// headers and sub-command output — to a file as well as the terminal,
-	// for debugging an unattended or serial install. Without it, output goes
-	// to stderr as before.
+	// Everything the install prints — the command trace, stage headers and
+	// sub-command output — also goes to a log file, which a completed install
+	// copies to the target as the full-screen one does: --log's file, or
+	// the default one. The full-screen front-end keeps its own. Without a
+	// default file the install still runs; a --log that cannot be written is
+	// an error, as it was asked for.
 	logOut := io.Writer(os.Stderr)
 	runner := storage.VerboseRunner
-	if logFile != "" {
-		lf, err := os.Create(logFile)
-		if err != nil {
+	logPath := logFile
+	if logPath == "" && !fullscreen {
+		logPath = tui.InstallLogPath()
+	}
+	if logPath != "" {
+		lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		switch {
+		case err == nil:
+			defer lf.Close()
+			logOut = io.MultiWriter(os.Stderr, tui.LogWriter(lf))
+			runner = storage.StreamRunner(logOut)
+		case logFile != "":
 			return fmt.Errorf("--log: %w", err)
+		default:
+			logPath = ""
+			fmt.Fprintf(os.Stderr, "warning: no install log file: %v\n", err)
 		}
-		defer lf.Close()
-		logOut = io.MultiWriter(os.Stderr, lf)
-		runner = storage.SinkRunner(func(line string) { fmt.Fprintln(logOut, line) })
 	}
 
 	opts := controller.Options{
@@ -372,6 +383,8 @@ restart:
 		Runner: runner,
 		Log:    logOut,
 		Output: logOut,
+
+		LogFile: logPath,
 	}
 	if len(rest) == 1 {
 		if abs, err := filepath.Abs(rest[0]); err == nil {
@@ -592,6 +605,9 @@ restart:
 	if through != "" {
 		fmt.Fprintf(os.Stderr, "(stopped after stage %q; target left mounted at %s)\n", through, root)
 		return nil
+	}
+	if logPath != "" {
+		fmt.Fprintln(os.Stderr, "The install log is saved in /root/slinstaller.log on the installed system.")
 	}
 	// postReboot: an unattended install that should come up into the new
 	// system reboots once the full run has finished (not a staged --through).

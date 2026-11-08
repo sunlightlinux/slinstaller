@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -217,6 +218,22 @@ func VerboseRunner(args []string) error {
 	c.Stdout = os.Stderr
 	c.Stderr = os.Stderr
 	return c.Run()
+}
+
+// StreamRunner is VerboseRunner writing to w instead of stderr: each command
+// and, live, its output, so a progress bar still moves on the terminal when
+// w also goes to one.
+func StreamRunner(w io.Writer) Runner {
+	return func(args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("empty command")
+		}
+		fmt.Fprintf(w, "    + %s\n", ShowCommand(args))
+		c := exec.Command(args[0], args[1:]...)
+		c.Stdout = w
+		c.Stderr = w
+		return c.Run()
+	}
 }
 
 // cryptHashRe matches a crypt(3) password hash ($6$salt$..., $y$..., ...).
