@@ -328,8 +328,9 @@ func WheelSudo(root string) error {
 const AutoUpdateServiceName = "sunlight-autoupdate"
 
 // autoUpdateService updates the system once a day, the way Clear Linux's
-// swupd-update.timer does: a slinit calendar timer (cron-*) on an
-// otherwise idle process, run at a random but fixed time within the hour
+// swupd-update.timer does: a slinit calendar timer (cron-*) on an internal
+// service, which needs slinit 3.13.0 (an older one ignores cron-* there, and
+// the system would silently stop updating), run at a random but fixed time within the hour
 // after midnight so a fleet does not hit the mirror at once, and caught up
 // at the next boot when the machine was off. xbps updates itself first,
 // as it refuses a system update while a newer xbps is available; the
@@ -342,8 +343,7 @@ const autoUpdateService = `# sunlight-autoupdate -- updates the system from its 
 #     slinitctl enable sunlight-autoupdate     # turn it on
 #     slinitctl disable sunlight-autoupdate    # turn it off
 #     slinitctl start sunlight-autoupdate      # for this boot only
-type = process
-command = /bin/sleep infinity
+type = internal
 cron-command = /bin/sh -c "xbps-install -Syu xbps; xbps-install -Suy"
 cron-calendar = daily
 cron-randomized-delay = 1h
