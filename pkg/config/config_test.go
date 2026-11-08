@@ -878,3 +878,14 @@ targetMedia:
 		t.Errorf("Plan: %v", err)
 	}
 }
+
+func TestValidPassphrase(t *testing.T) {
+	for p, ok := range map[string]bool{
+		"1234567": false, "12345678": true, strings.Repeat("x", 94): true, strings.Repeat("x", 95): false,
+		"parolă12345": false, "with space ok": true, "tab\there1": false,
+	} {
+		if err := ValidPassphrase(p); (err == nil) != ok {
+			t.Errorf("ValidPassphrase(%q) = %v, want ok=%v", p, err, ok)
+		}
+	}
+}

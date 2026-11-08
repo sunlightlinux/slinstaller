@@ -390,6 +390,10 @@ const (
 	MaxLoginLength    = 31
 	MinPasswordLength = 8
 	MaxPasswordLength = 255
+
+	// A LUKS passphrase: 8 to 94 characters, clr-installer's limits.
+	MinPassphraseLength = 8
+	MaxPassphraseLength = 94
 )
 
 // reservedLogins are the names the base system already uses for an
@@ -419,6 +423,24 @@ func ValidLogin(login string) error {
 		return fmt.Errorf("login %q is longer than %d characters", login, MaxLoginLength)
 	case reservedLogins[login]:
 		return fmt.Errorf("login %q is already a system account or group", login)
+	}
+	return nil
+}
+
+// ValidPassphrase checks a new LUKS passphrase as clr-installer does: its
+// length, and printable 7-bit characters only, as it is typed at boot, before
+// a keyboard layout or a character set is loaded.
+func ValidPassphrase(p string) error {
+	switch n := len(p); {
+	case n < MinPassphraseLength:
+		return fmt.Errorf("passphrase must be at least %d characters", MinPassphraseLength)
+	case n > MaxPassphraseLength:
+		return fmt.Errorf("passphrase must be at most %d characters", MaxPassphraseLength)
+	}
+	for _, r := range p {
+		if r < 0x20 || r > 0x7e {
+			return fmt.Errorf("passphrase may only contain printable ASCII characters")
+		}
 	}
 	return nil
 }

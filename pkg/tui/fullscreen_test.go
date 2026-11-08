@@ -1045,3 +1045,35 @@ func TestManPagesBundleUsesVoidNames(t *testing.T) {
 		}
 	}
 }
+
+// A new LUKS passphrase is typed twice and must be long enough: a typo here
+// locks the disk. A mismatch goes back to the first entry.
+func TestPassphrasePopupAsksTwice(t *testing.T) {
+	m := newModel(oneDisk())
+	m.width, m.height = 80, 24
+	nm, _ := m.openPassphrasePopup()
+	m = nm.(model)
+
+	m = send(m, runes("short"))
+	m = send(m, enter)
+	if m.popup != popupPassphrase || m.passFirst != "" || !strings.Contains(m.View(), "at least 8") {
+		t.Fatalf("short passphrase accepted: first %q\n%s", m.passFirst, m.View())
+	}
+	m.input.SetValue("correct horse")
+	m = send(m, enter)
+	if !strings.Contains(m.View(), "Type the passphrase again") || m.input.Value() != "" {
+		t.Fatalf("no second entry, input %q\n%s", m.input.Value(), m.View())
+	}
+	m = send(m, runes("correct hrose"))
+	m = send(m, enter)
+	if m.passphrase != "" || m.passFirst != "" || !strings.Contains(m.View(), "do not match") {
+		t.Fatalf("mismatch: passphrase %q first %q\n%s", m.passphrase, m.passFirst, m.View())
+	}
+	m = send(m, runes("correct horse"))
+	m = send(m, enter)
+	m = send(m, runes("correct horse"))
+	m = send(m, enter)
+	if m.popup != popupNone || m.passphrase != "correct horse" {
+		t.Errorf("popup %v, passphrase %q", m.popup, m.passphrase)
+	}
+}

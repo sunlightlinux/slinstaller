@@ -12,6 +12,11 @@ for what will and will not be allowed to change once releases begin.
 
 ### Changed
 
+- A new LUKS passphrase typed at the installer is asked for twice and must be
+  8 to 94 printable ASCII characters, as in clr-installer: a typo here locked
+  the disk it was set on. *Compatibility:* only what is typed at a terminal is
+  checked; a passphrase from `--crypt-file`, the environment or a pipe is used
+  as given, so an unattended install does not change.
 - A disk that is in use is no longer offered or installed to: one with a
   mounted filesystem, active swap, or the live medium itself (the TUI and
   the text flow leave it out; a config naming it is refused before

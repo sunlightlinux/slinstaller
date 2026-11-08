@@ -568,8 +568,14 @@ restart:
 			opts.Passphrase = os.Getenv("SLINSTALLER_LUKS_PASSPHRASE")
 		}
 		if opts.Passphrase == "" {
-			// Read it with echo off so the passphrase is not shown on screen.
-			opts.Passphrase = tui.ReadSecret(stdin, os.Stderr, "LUKS passphrase")
+			// Read it with echo off so the passphrase is not shown on screen,
+			// and on a terminal twice, as a typo here locks the disk. A pipe
+			// gives it once, as it always has.
+			if isTerminal(os.Stdin) {
+				opts.Passphrase = tui.PromptNewPassphrase(stdin, os.Stderr)
+			} else {
+				opts.Passphrase = tui.ReadSecret(stdin, os.Stderr, "LUKS passphrase")
+			}
 		}
 		if opts.Passphrase == "" {
 			return fmt.Errorf("the layout is encrypted but no passphrase was given")

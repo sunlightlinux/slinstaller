@@ -41,10 +41,7 @@ func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
 	encrypt := promptYesNo(in, w, "Encrypt the root partition?", false)
 	passphrase := ""
 	if encrypt {
-		passphrase = promptSecret(in, w, "LUKS passphrase")
-		if passphrase == "" {
-			return nil, "", fmt.Errorf("tui: an encrypted root needs a passphrase")
-		}
+		passphrase = PromptNewPassphrase(in, w)
 	}
 
 	swap := promptChoice(in, w, "Swap", []string{"partition", "file", "none"}, "partition")
@@ -201,6 +198,19 @@ func promptDefault(in *bufio.Reader, w io.Writer, label, def string) string {
 		return s
 	}
 	return def
+}
+
+// PromptNewPassphrase reads a new LUKS passphrase, twice, until it is valid
+// and the two entries match.
+func PromptNewPassphrase(in *bufio.Reader, w io.Writer) string {
+	for {
+		p := promptSecret(in, w, "LUKS passphrase")
+		err := config.ValidPassphrase(p)
+		if err == nil {
+			return p
+		}
+		fmt.Fprintf(w, "  %v, try again\n", err)
+	}
 }
 
 // promptSecret reads a value twice and requires the two to match, so a

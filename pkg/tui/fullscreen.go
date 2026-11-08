@@ -464,6 +464,10 @@ type model struct {
 
 	copyNetwork bool // the network test passed: copy the live network config
 
+	// The passphrase popup: the first entry while the second is typed, and
+	// why the last one was refused.
+	passFirst, popupErr string
+
 	confirmed bool
 }
 
@@ -1114,13 +1118,30 @@ func (m model) updatePopup(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.popup = popupNone
 		return m, nil
 	}
-	// passphrase
+	// passphrase: typed twice, as a mistake here cannot be undone later. A
+	// mistyped LUKS passphrase locks the disk it was set on.
 	switch key.String() {
 	case "esc":
 		m.popup = popupNone
 		return m, nil
 	case "enter":
-		m.passphrase = m.input.Value()
+		v := m.input.Value()
+		if m.passFirst == "" {
+			if err := config.ValidPassphrase(v); err != nil {
+				m.popupErr = err.Error()
+				return m, nil
+			}
+			m.popupErr, m.passFirst = "", v
+			m.input = passwordInput("")
+			return m, textinput.Blink
+		}
+		if v != m.passFirst {
+			// Back to the first entry: either may hold the typo.
+			m.passFirst, m.popupErr = "", "the passphrases do not match; type it again"
+			m.input = passwordInput("")
+			return m, textinput.Blink
+		}
+		m.passphrase, m.passFirst, m.popupErr = v, "", ""
 		m.popup = popupNone
 		return m, nil
 	}
@@ -1993,11 +2014,8 @@ func (m model) updateFormText(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // encrypted partition is added.
 func (m model) openPassphrasePopup() (tea.Model, tea.Cmd) {
 	m.popup = popupPassphrase
-	ti := textinput.New()
-	ti.Focus()
-	ti.EchoMode = textinput.EchoPassword
-	ti.SetValue(m.passphrase)
-	m.input = ti
+	m.passFirst, m.popupErr = "", ""
+	m.input = passwordInput(m.passphrase)
 	return m, textinput.Blink
 }
 
@@ -2351,14 +2369,21 @@ func (m model) popupBox() string {
 	var inner []string
 	switch m.popup {
 	case popupPassphrase:
+		prompt := fmt.Sprintf("Enter the LUKS passphrase (%d to %d characters):", config.MinPassphraseLength, config.MaxPassphraseLength)
+		if m.passFirst != "" {
+			prompt = "Type the passphrase again:"
+		}
 		inner = []string{
 			popupTitle.Render("Encryption Passphrase"),
 			"",
-			"Enter the LUKS passphrase:",
+			prompt,
 			popupInput.Render(m.input.View()),
 			"",
-			popupHint.Render("[Enter] confirm · [Esc] cancel"),
 		}
+		if m.popupErr != "" {
+			inner = append(inner, m.popupErr, "")
+		}
+		inner = append(inner, popupHint.Render("[Enter] confirm · [Esc] cancel"))
 	case popupMessage:
 		// popupMsg[0] is the title; the rest is the body.
 		title, body := "", m.popupMsg
