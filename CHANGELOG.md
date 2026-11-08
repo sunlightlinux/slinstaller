@@ -138,6 +138,9 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- Choosing `man-pages` in the TUI failed the install at base-install, after
+  the disk had been wiped: it asked for a package `mandoc`, which Void calls
+  `mdocml`.
 - A popup cut a black band across the dialog: it replaced the whole rows it
   covered. It now replaces only the cells under it.
 - A password hash no longer appears in the install log: the `useradd -p`

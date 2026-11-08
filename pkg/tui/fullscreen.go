@@ -350,7 +350,7 @@ var bundleOptions = []bundleEntry{
 	{"htop", "htop - interactive process viewer", []string{"htop"}},
 	{"tmux", "tmux - terminal multiplexer", []string{"tmux"}},
 	{"rsync", "rsync - fast file copy and sync", []string{"rsync"}},
-	{"man-pages", "Manual pages and reader", []string{"man-pages", "mandoc"}},
+	{"man-pages", "Manual pages and reader", []string{"man-pages", "mdocml"}},
 	{"bash-completion", "Bash tab-completion", []string{"bash-completion"}},
 	{"openssh", "OpenSSH client and server", []string{"openssh"}},
 	{"sudo", "sudo - run commands as another user", []string{"sudo"}},

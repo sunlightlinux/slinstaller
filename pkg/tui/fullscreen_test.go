@@ -589,8 +589,8 @@ func TestBundlesChecklist(t *testing.T) {
 		t.Fatalf("bundles did not return to the hub")
 	}
 	// Packages are the ticked bundles' packages, sorted and space-joined.
-	if m.packages != "git man-pages mandoc" {
-		t.Errorf("packages = %q, want 'git man-pages mandoc'", m.packages)
+	if m.packages != "git man-pages mdocml" {
+		t.Errorf("packages = %q, want 'git man-pages mdocml'", m.packages)
 	}
 }
 
@@ -1030,5 +1030,18 @@ func TestCellsFromKeepsActiveStyles(t *testing.T) {
 	}
 	if got := cellsFrom(s, 99); got != "" {
 		t.Errorf("past the end: %q", got)
+	}
+}
+
+// Bundle packages are Void's names, whatever the upstream project is called:
+// `mandoc` is packaged as mdocml, and asking for it failed the install after
+// the disk was wiped.
+func TestManPagesBundleUsesVoidNames(t *testing.T) {
+	for _, b := range bundleOptions {
+		for _, p := range b.packs {
+			if p == "mandoc" {
+				t.Errorf("bundle %q asks for mandoc, which Void packages as mdocml", b.name)
+			}
+		}
 	}
 }
