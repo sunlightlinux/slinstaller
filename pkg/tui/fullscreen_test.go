@@ -983,3 +983,52 @@ func TestButtonRowsAreCentred(t *testing.T) {
 		}
 	}
 }
+
+// A popup replaces only the cells it covers: left and right of it the row
+// keeps its text and its colours, instead of a black band across the dialog.
+func TestPopupKeepsTheRowAroundIt(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	base := lineBG.Render(strings.Repeat("a", 20)) + footer.Render(strings.Repeat("b", 20))
+	got := overlayLine(base, popupTitle.Render("POPUP"), 40)
+	if w := lipgloss.Width(got); w != 40 {
+		t.Errorf("line is %d cells: %q", w, got)
+	}
+	if text := stripANSIForTest(got); text != strings.Repeat("a", 17)+"POPUP"+strings.Repeat("b", 18) {
+		t.Errorf("text = %q", text)
+	}
+	if !strings.HasSuffix(got, footer.Render(strings.Repeat("b", 18))) {
+		t.Errorf("the right part lost its colours: %q", got)
+	}
+	if !strings.HasPrefix(got, lineBG.Render(strings.Repeat("a", 17))[:6]) {
+		t.Errorf("the left part lost its colours: %q", got)
+	}
+
+	// A real popup: every row of the screen keeps the width, and the rows it
+	// covers still show the dialog on both sides.
+	m := newModel(oneDisk())
+	m.width, m.height = 80, 24
+	m.popup, m.popupMsg = popupMessage, []string{"Test Network Settings", "", "[ OK ] Network is reachable."}
+	lines := strings.Split(m.View(), "\n")
+	black := regexp.MustCompile(`^\x1b\[40m +\x1b\[0m\S`)
+	for i, l := range lines {
+		if w := lipgloss.Width(l); w > 80 {
+			t.Errorf("row %d is %d cells", i, w)
+		}
+		if strings.Contains(l, "Test Network") && black.MatchString(l) {
+			t.Errorf("row %d has a black band beside the popup: %q", i, l)
+		}
+	}
+}
+
+func TestCellsFromKeepsActiveStyles(t *testing.T) {
+	s := "\x1b[31mab\x1b[0m\x1b[32mc»d\x1b[0m"
+	if got, want := cellsFrom(s, 3), "\x1b[32m»d\x1b[0m"; got != want {
+		t.Errorf("cellsFrom = %q, want %q", got, want)
+	}
+	if got := cellsFrom(s, 99); got != "" {
+		t.Errorf("past the end: %q", got)
+	}
+}

@@ -4,14 +4,17 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
@@ -575,7 +578,7 @@ var (
 	clrPopup      = tone("#7d1a0c", "88", "1")
 	popupBoxStyle = lipgloss.NewStyle().Background(clrPopup).Foreground(clrWhite).
 			Border(lipgloss.RoundedBorder()).BorderForeground(clrWhite).
-			BorderBackground(clrBlack).Padding(1, 3)
+			BorderBackground(clrDialog).Padding(1, 3)
 	popupTitle = lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Background(clrPopup)
 	popupHint  = lipgloss.NewStyle().Foreground(clrDim).Background(clrPopup)
 	popupInput = lipgloss.NewStyle().Foreground(clrWhite).Background(tone("#3a0a04", "52", "0")).Padding(0, 1)
@@ -584,10 +587,10 @@ var (
 	scrollStyle = lipgloss.NewStyle().Foreground(clrDim).Background(clrDialog)
 )
 
-// overlayCenter composites a popup box centred over a base screen: the base
-// rows above and below the popup stay visible, so the popup reads as a
-// window floating on the hub. The popup's own rows (black-backed, holding
-// the bordered box centred horizontally) replace the base rows they cover.
+// overlayCenter composites a popup box centred over a base screen. Only the
+// cells the box covers are replaced: what lies left and right of it stays,
+// with its colours, so the popup reads as a window floating on the hub. It
+// used to replace whole rows, which cut a black band across the dialog.
 func overlayCenter(base, popup string, width, height int) string {
 	if width <= 0 {
 		width = 80
@@ -606,10 +609,44 @@ func overlayCenter(base, popup string, width, height int) string {
 		if row < 0 || row >= len(baseLines) {
 			continue
 		}
-		baseLines[row] = lipgloss.PlaceHorizontal(width, lipgloss.Center, pl,
-			lipgloss.WithWhitespaceBackground(clrBlack))
+		baseLines[row] = overlayLine(baseLines[row], pl, width)
 	}
 	return strings.Join(baseLines, "\n")
+}
+
+// overlayLine puts pop in the middle of a width-wide styled line.
+func overlayLine(base, pop string, width int) string {
+	left := max((width-lipgloss.Width(pop))/2, 0)
+	return ansi.Truncate(base, left, "") + "\x1b[0m" + pop + "\x1b[0m" +
+		cellsFrom(base, left+lipgloss.Width(pop))
+}
+
+// sgrSeq matches a colour or style escape sequence.
+var sgrSeq = regexp.MustCompile(`^\x1b\[[0-9;]*m`)
+
+// cellsFrom returns what is left of a styled line after its first n cells,
+// starting with the styles in force at that point, so it keeps its colours.
+func cellsFrom(s string, n int) string {
+	var active strings.Builder
+	cells := 0
+	for i := 0; i < len(s); {
+		if seq := sgrSeq.FindString(s[i:]); seq != "" {
+			if seq == "\x1b[0m" || seq == "\x1b[m" {
+				active.Reset()
+			} else {
+				active.WriteString(seq)
+			}
+			i += len(seq)
+			continue
+		}
+		if cells >= n {
+			return active.String() + s[i:]
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		cells += ansi.StringWidth(string(r))
+		i += size
+	}
+	return ""
 }
 
 func (m model) Init() tea.Cmd { return textinput.Blink }

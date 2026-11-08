@@ -138,6 +138,8 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- A popup cut a black band across the dialog: it replaced the whole rows it
+  covered. It now replaces only the cells under it.
 - A password hash no longer appears in the install log: the `useradd -p`
   command is shown with `<password hash>` in its place, in the log view,
   the log file and `--log`.
