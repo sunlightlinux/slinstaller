@@ -354,6 +354,7 @@ var bundleOptions = []bundleEntry{
 	{"bash-completion", "Bash tab-completion", []string{"bash-completion"}},
 	{"openssh", "OpenSSH client and server", []string{"openssh"}},
 	{"sudo", "sudo - run commands as another user", []string{"sudo"}},
+	{"docker", "Docker Engine and containerd, started at boot", []string{"docker", "containerd"}},
 }
 
 // popupKind selects the bordered dialog drawn centred over the hub, the way
