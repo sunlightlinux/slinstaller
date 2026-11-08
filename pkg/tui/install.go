@@ -639,7 +639,7 @@ func (m installModel) confirmView() string {
 		lineBG.Width(w).Render(""),
 		lineBG.Width(w).Render("  All data on it will be lost."),
 	}
-	btns := []string{lineBG.Width(w).Render("  " + buttonRow(button{"[Enter] Install", btnSel}, button{"[Esc] Cancel", btnIdle}))}
+	btns := []string{buttonLine(w, button{"[Enter] Install", btnSel}, button{"[Esc] Cancel", btnIdle})}
 	return frameScreenButtons(m.width, m.height, body, btns, "[Enter] begin the install · [Esc] go back")
 }
 
@@ -678,7 +678,7 @@ func (m installModel) runningView() string {
 		left := lineBG.Render("  ") + m.stepMark(s.status) + lineBG.Render("  ") + label
 		body = append(body, lineBG.Width(w).Render(spread(left, stepWait.Render(m.stepTime(s)), w)))
 	}
-	btns := []string{lineBG.Width(w).Render("  " + btnSel.Render("Details"))}
+	btns := []string{buttonLine(w, button{"Details", btnSel})}
 	return frameScreenButtons(m.width, m.height, body, btns, "[Enter] or [d] show the full log - please wait")
 }
 
@@ -724,7 +724,7 @@ func (m installModel) detailsView() string {
 			body = append(body, footer.Width(w).Render(text))
 		}
 	}
-	btns := []string{lineBG.Width(w).Render("  " + btnSel.Render("Back"))}
+	btns := []string{buttonLine(w, button{"Back", btnSel})}
 	return frameScreenButtons(m.width, m.height, body, btns, "[Up/Down/PgUp/PgDn/Home/End] scroll - [Enter] back")
 }
 
@@ -776,7 +776,7 @@ func (m installModel) doneView() string {
 		btns = append(btns, button{b.label, pick(i == m.doneCursor)})
 	}
 	return frameScreenButtons(m.width, m.height, body,
-		[]string{lineBG.Width(w).Render("  " + buttonRow(btns...))}, "[Tab/Arrows] move · [Enter] select · [d] full log")
+		[]string{buttonLine(w, btns...)}, "[Tab/Arrows] move · [Enter] select · [d] full log")
 }
 
 // ansiSeq matches the terminal escape sequences a command may print (colour,

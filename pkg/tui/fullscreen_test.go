@@ -532,19 +532,19 @@ func TestHubScrollbar(t *testing.T) {
 		t.Errorf("last section not visible after scrolling down:\n%s", plain(m.View()))
 	}
 
-	// In clr-installer's 80x24 window the Required tab scrolls too: its
-	// menu frame shows 3 of the 6 sections. Here the last one is below the
-	// fold, and scrolling brings it into view.
-	req := size(newModel(oneDisk()))
-	if !strings.Contains(plain(req.View()), "▼") {
-		t.Errorf("Required tab should scroll in the 80x24 dialog")
+	// The Required tab's five sections all fit the 80x24 dialog, with nothing
+	// to scroll. Telemetry, clr's sixth, is left out: Sunlight collects none.
+	req := plain(size(newModel(oneDisk())).View())
+	if strings.Contains(req, "▼") {
+		t.Errorf("Required tab should fit without scrolling:\n%s", req)
 	}
-	r := req
-	for i := 0; i < len(visibleSections(0))-1; i++ {
-		r = send(r, down)
+	for _, sec := range visibleSections(0) {
+		if !strings.Contains(req, sectionLabels[sec]) {
+			t.Errorf("%q not visible on the Required tab:\n%s", sectionLabels[sec], req)
+		}
 	}
-	if !strings.Contains(plain(r.View()), sectionLabels[secTelemetry]) {
-		t.Errorf("last Required section not visible after scrolling down:\n%s", plain(r.View()))
+	if strings.Contains(req, "Telemetry") {
+		t.Errorf("Telemetry is still offered:\n%s", req)
 	}
 }
 
@@ -957,5 +957,29 @@ func TestNetworkTestSetsCopyNetwork(t *testing.T) {
 	}
 	if !cfg.CopyNetwork {
 		t.Error("buildConfig dropped copyNetwork")
+	}
+}
+
+// A row of buttons sits in the middle of the dialog, with a margin on both
+// sides, however many it has. The final screen's four used to run from the
+// left indent to the right edge.
+func TestButtonRowsAreCentred(t *testing.T) {
+	const w = 76
+	for name, line := range map[string]string{
+		"one": buttonLine(w, button{"Details", btnSel}),
+		"two": buttonLine(w, button{"Cancel", btnIdle}, button{"Install", btnOff}),
+		// Equal labels: without colour a button's inner padding reads as
+		// margin too, so uneven labels would not measure the row itself.
+		"four": buttonLine(w, button{"Exit to shell", btnSel}, button{"Exit to shell", btnIdle}, button{"Exit to shell", btnIdle}, button{"Exit to shell", btnIdle}),
+	} {
+		if got := lipgloss.Width(line); got != w {
+			t.Errorf("%s: line is %d cells, want %d", name, got, w)
+		}
+		text := stripANSIForTest(line)
+		left := len(text) - len(strings.TrimLeft(text, " "))
+		right := len(text) - len(strings.TrimRight(text, " "))
+		if left < 2 || right < 2 || left-right > 1 || right-left > 1 {
+			t.Errorf("%s: margins %d and %d in %q", name, left, right, text)
+		}
 	}
 }

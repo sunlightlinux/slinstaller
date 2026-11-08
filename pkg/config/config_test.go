@@ -851,3 +851,30 @@ func TestAutoUpdatesDefaultsOn(t *testing.T) {
 		}
 	}
 }
+
+// A clr-installer config's telemetry keys load and are ignored: Sunlight
+// has no telemetry, and the config must still run.
+func TestTelemetryKeysAreIgnored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(path, []byte(`
+telemetry: true
+telemetryURL: https://example.invalid/
+telemetryTID: abc
+telemetryPolicy: text
+targetMedia:
+- name: sda
+  type: disk
+  children:
+  - {name: sda1, type: part, fstype: vfat, mountpoint: /boot, size: 512M}
+  - {name: sda2, type: part, fstype: ext4, mountpoint: /, size: 0}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.Plan(); err != nil {
+		t.Errorf("Plan: %v", err)
+	}
+}

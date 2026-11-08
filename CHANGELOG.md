@@ -89,6 +89,12 @@ for what will and will not be allowed to change once releases begin.
   every page: the hub, the lists, Installation Media, Manage User, the
   install confirmation and the final screen. To fit four even buttons in
   the dialog, the final screen's "Back to installer" is now "Back to menu".
+- The TUI no longer has a Telemetry section: Sunlight Linux collects none,
+  so the choice did nothing. A config's telemetry keys still load and are
+  ignored, as before.
+- Button rows are centred in the dialog on every page. A row too wide to
+  leave a margin on both sides, the final screen's four, draws its buttons
+  tighter instead of touching the right edge.
 - The hub's section list reaches down to the buttons: five sections in the
   80x24 dialog, where it showed four with three empty rows below them.
 

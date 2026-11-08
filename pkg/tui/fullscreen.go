@@ -258,11 +258,10 @@ func hasCrypt(parts []partEntry) bool {
 
 type section int
 
-// The hub sections, named and ordered exactly as clr-installer's TUI menu:
-// the Required tab first (Timezone … Telemetry), then the Advanced tab
-// (Network … Save Configuration). This is the phase-1 1:1 match; some
-// sections (Telemetry, Bundles, Automatic OS Updates) are presented for
-// fidelity and are not yet wired to a Sunlight behaviour.
+// The hub sections, named and ordered as clr-installer's TUI menu: the
+// Required tab first (Timezone … Manage User), then the Advanced tab
+// (Network … Save Configuration). clr's Telemetry section is left out:
+// Sunlight Linux collects none, so it would have nothing to turn on.
 const (
 	// Required options.
 	secTimezone section = iota
@@ -270,7 +269,6 @@ const (
 	secKeyboard
 	secMedia
 	secUser
-	secTelemetry
 	// Advanced options.
 	secNetwork
 	secProxy
@@ -289,7 +287,7 @@ const (
 // titles shown at the top of each section's own dialog.
 var sectionLabels = [sectionCount]string{
 	"Choose Timezone", "Choose Language", "Configure the Keyboard",
-	"Configure Installation Media", "Manage User", "Telemetry",
+	"Configure Installation Media", "Manage User",
 	"Configure Network Interfaces", "Proxy", "Test Network Settings",
 	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
 	"Kernel Selection", "Swupd Mirror", "Automatic OS Updates",
@@ -298,7 +296,7 @@ var sectionLabels = [sectionCount]string{
 
 var sectionTitles = [sectionCount]string{
 	"Select System Timezone", "Select System Language", "Select Keyboard",
-	"Select Installation Media", "Manage User", "Telemetry",
+	"Select Installation Media", "Manage User",
 	"Configure Network Interfaces", "Configure the Network Proxy", "Test Network Settings",
 	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
 	"Select Desired Kernel", "Swupd Mirror", "Automatic OS Updates",
@@ -396,9 +394,9 @@ type model struct {
 	netEdit   int // interface being configured in the form
 
 	// Tri-state clr toggles: 0 = no choice, 1 = enabled, 2 = disabled.
-	// telemetry is presented for clr fidelity only; autoUpdate sets the
-	// config's autoUpdate, and defaults to enabled as clr does.
-	telemetry, autoUpdate int
+	// autoUpdate sets the config's autoUpdate, and defaults to enabled as
+	// clr does.
+	autoUpdate int
 
 	// Test Network Settings runs a connectivity check with a small spinner
 	// popup — a secondary progress indicator like clr's.
@@ -699,17 +697,33 @@ type button struct {
 
 // buttonRow draws a row of buttons all as wide as the widest, labels
 // centred, so a row reads as one set rather than boxes of every size.
-func buttonRow(btns ...button) string {
+func buttonRow(btns ...button) string { return sizedButtonRow(4, btns...) }
+
+// sizedButtonRow is buttonRow with pad cells of space around the widest
+// label. The styles' own padding is replaced: Width counts padding, and a
+// compact row has less room than they ask for.
+func sizedButtonRow(pad int, btns ...button) string {
 	wide := 0
 	for _, b := range btns {
 		wide = max(wide, lipgloss.Width(b.label))
 	}
 	parts := make([]string, len(btns))
 	for k, b := range btns {
-		// The styles pad two cells a side; Width counts that padding.
-		parts[k] = b.style.Width(wide + 4).Align(lipgloss.Center).Render(b.label)
+		parts[k] = b.style.Padding(0).Width(wide + pad).Align(lipgloss.Center).Render(b.label)
 	}
 	return strings.Join(parts, gap(2))
+}
+
+// buttonLine is a full-width line with a row of buttons centred on it. A
+// row too wide to leave a margin on both sides draws its buttons tighter:
+// the final screen's four filled the dialog and touched its right edge.
+func buttonLine(w int, btns ...button) string {
+	row := buttonRow(btns...)
+	if lipgloss.Width(row) > w-4 {
+		row = sizedButtonRow(2, btns...)
+	}
+	margin := max(w-lipgloss.Width(row), 0)
+	return gap(margin/2) + row + gap(margin-margin/2)
 }
 
 // pick is btnSel for the selected button, btnIdle for the rest.
@@ -926,9 +940,9 @@ func (m *model) moveButtonFocus(key tea.KeyMsg) bool {
 // cancelConfirm renders a page's Cancel / Confirm pair, the focused one
 // highlighted; with the list focused neither is.
 func (m model) cancelConfirm(w int) string {
-	return lineBG.Width(w).Render("  " + buttonRow(
+	return buttonLine(w,
 		button{"Cancel", pick(m.btnFocus == focusCancel)},
-		button{"Confirm", pick(m.btnFocus == focusConfirm)}))
+		button{"Confirm", pick(m.btnFocus == focusConfirm)})
 }
 
 func (m model) updateBundles(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1398,7 +1412,7 @@ func visibleSections(tab int) []section {
 		return []section{secNetwork, secProxy, secTestNet, secBundles, secHostname,
 			secKernelArgs, secKernel, secMirror, secAutoUpdate, secSaveConfig}
 	}
-	return []section{secTimezone, secLanguage, secKeyboard, secMedia, secUser, secTelemetry}
+	return []section{secTimezone, secLanguage, secKeyboard, secMedia, secUser}
 }
 
 func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1508,11 +1522,6 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		ti.SetValue(m.mirror)
 		m.input = ti
 		return m, textinput.Blink
-	case secTelemetry:
-		m.view = viewSectionChoice
-		m.choices = yesNoOptions
-		m.edCursor = triToIndex(m.telemetry)
-		return m, nil
 	case secAutoUpdate:
 		m.view = viewSectionChoice
 		m.choices = yesNoOptions
@@ -1607,8 +1616,7 @@ func (m model) openList(items []string, current string) model {
 // first entry keeps the base system's default kernel.
 var kernelOptions = []string{"", "kernel-native", "kernel-lts"}
 
-// yesNoOptions back the Enabled/Disabled choice pages (Telemetry, Automatic
-// OS Updates).
+// yesNoOptions back the Enabled/Disabled choice page (Automatic OS Updates).
 var yesNoOptions = []string{"Enabled", "Disabled"}
 
 // triToIndex maps a tri-state toggle (0 unset, 1 on, 2 off) to the
@@ -1665,8 +1673,6 @@ func (m model) sectionValue(s section) string {
 		default:
 			return fmt.Sprintf("%d users (%s, ...)", len(m.users), m.users[0].Login)
 		}
-	case secTelemetry:
-		return triLabel(m.telemetry)
 	case secNetwork:
 		var statics []string
 		for _, ni := range m.netIfaces {
@@ -1777,10 +1783,8 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = viewPartList
 		} else {
 			switch m.editing {
-			case secTelemetry:
-				m.telemetry = m.edCursor + 1 // 1 Enabled, 2 Disabled
 			case secAutoUpdate:
-				m.autoUpdate = m.edCursor + 1
+				m.autoUpdate = m.edCursor + 1 // 1 Enabled, 2 Disabled
 			default: // kernel
 				m.kernel = m.choices[m.edCursor]
 			}
@@ -2253,7 +2257,7 @@ func (m model) userListView() string {
 	for i, b := range userButtons {
 		btns = append(btns, button{b, pick(m.userCursor == len(m.users)+i)})
 	}
-	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + buttonRow(btns...))},
+	return m.screenButtons(body, []string{buttonLine(w, btns...)},
 		"[Tab/Arrows] move · [Enter] select/edit · [a] add · [d] delete · [Esc] back")
 }
 
@@ -2396,7 +2400,7 @@ func (m model) hubView() string {
 	if m.canInstall() {
 		install.style = pick(m.hubCursor == len(vis))
 	}
-	btnLines := []string{lineBG.Width(w).Render("  " + buttonRow(cancel, install))}
+	btnLines := []string{buttonLine(w, cancel, install)}
 	if !m.canInstall() {
 		btnLines = append(btnLines, warnText.Width(w).Render("  Need: a disk, a /, an ESP, an admin user (+ passphrase if encrypting)."))
 	}
@@ -2423,8 +2427,8 @@ func (m model) choiceView() string {
 		itemLabel.Width(w).Render("  " + sectionTitles[m.editing]),
 		lineBG.Width(w).Render(""),
 	}
-	// Telemetry and Automatic OS Updates carry an explanatory paragraph above
-	// the Enabled/Disabled choice, the way clr-installer explains them.
+	// Automatic OS Updates carries an explanatory paragraph above the
+	// Enabled/Disabled choice, the way clr-installer explains it.
 	for _, line := range choiceBlurb(m.editing) {
 		body = append(body, lineBG.Width(w).Render("  "+line))
 	}
@@ -2445,12 +2449,6 @@ func (m model) choiceView() string {
 // sections clr-installer explains.
 func choiceBlurb(s section) []string {
 	switch s {
-	case secTelemetry:
-		return []string{
-			"Allow the system to collect anonymized usage statistics",
-			"to help improve it? No personally identifiable information",
-			"is collected. (Presented for parity; not yet implemented.)",
-		}
 	case secAutoUpdate:
 		return []string{
 			"Allow the system to update automatically as new versions",
@@ -2608,7 +2606,7 @@ func (m model) mediaView() string {
 	for i, b := range mediaButtons {
 		btns = append(btns, button{b, pick(m.mediaCursor == btnBase+i)})
 	}
-	return m.screenButtons(body, []string{lineBG.Width(w).Render("  " + buttonRow(btns...))},
+	return m.screenButtons(body, []string{buttonLine(w, btns...)},
 		"[Tab/Arrows] move · [Space] choose · [Enter] select/activate · [Esc] back")
 }
 
