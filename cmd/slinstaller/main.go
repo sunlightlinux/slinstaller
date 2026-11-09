@@ -504,11 +504,12 @@ restart:
 			}
 		}
 
-		// Reuse install: the partitions are not created here, so they must
-		// already exist on the disk. Confirm each before formatting any.
+		// Reuse install: the reused partitions are not created here, so they
+		// must already exist on the disk. A Safe/alongside install's Create
+		// partitions are cut in free space, so they are expected NOT to exist.
 		if !plan.Wipe {
 			for _, p := range plan.Parts {
-				if p.LV || p.Raid {
+				if p.LV || p.Raid || p.Create {
 					continue
 				}
 				d := blockdev.FindByPath(devs, p.Device)

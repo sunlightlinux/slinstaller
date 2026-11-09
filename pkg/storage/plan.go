@@ -34,6 +34,13 @@ type Partition struct {
 	// meaningful when the plan does not wipe the disk.
 	Preserve bool
 
+	// Create marks a NEW partition to cut in unallocated space on a disk
+	// that is NOT wiped — a Safe/alongside install, which adds Sunlight to a
+	// disk's free space while leaving the existing partitions intact.
+	// StartMiB/EndMiB are the region to cut it in.
+	Create           bool
+	StartMiB, EndMiB uint64
+
 	// Encrypted marks a LUKS partition. Its filesystem is made and
 	// mounted on the mapper device, not the raw partition; MapName is the
 	// mapper name (/dev/mapper/<MapName>).

@@ -1131,3 +1131,40 @@ func TestTestNetProgressBar(t *testing.T) {
 		t.Errorf("result did not switch to a message popup: testing=%v popup=%v", done.testingNet, done.popup)
 	}
 }
+
+func TestSafeLayoutBuildsAlongsidePlan(t *testing.T) {
+	// The layout confirmSafe produces: reuse the ESP, create root in free space.
+	m := newModel(oneDisk())
+	m.users = []userEntry{{Login: "me", Password: "pw", Admin: true}}
+	m.safeInstall = true
+	m.parts = []partEntry{
+		{Name: "sda1", Type: "part", FS: "vfat", Mount: "/boot/efi", Preserve: true},
+		{Name: "sda3", Type: "part", FS: "ext4", Mount: "/", Create: true, Start: "20480M", Size: "25000M"},
+	}
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ReusePartitions {
+		t.Error("Safe config should set reusePartitions")
+	}
+	plan, err := cfg.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.Wipe {
+		t.Error("Safe plan must not wipe")
+	}
+	var sawCreate, sawPreserve bool
+	for _, p := range plan.Parts {
+		if p.Device == "/dev/sda3" && p.Create && p.StartMiB == 20480 {
+			sawCreate = true
+		}
+		if p.Device == "/dev/sda1" && p.Preserve {
+			sawPreserve = true
+		}
+	}
+	if !sawCreate || !sawPreserve {
+		t.Errorf("Safe plan wrong: create=%v preserve=%v", sawCreate, sawPreserve)
+	}
+}

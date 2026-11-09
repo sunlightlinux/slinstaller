@@ -10,6 +10,21 @@ for what will and will not be allowed to change once releases begin.
 
 ## [Unreleased]
 
+### Added
+
+- Safe Installation (install alongside an existing system): the Installation
+  Media dialog's Safe mode now works. It reuses the disk's existing EFI
+  System Partition and adds a root partition in the largest unallocated
+  region, leaving every existing partition — and any other OS — intact; no
+  disk is wiped. New `pkg/storage` helpers detect free space and the ESP
+  (`FreeRegions`, `LargestFree`, `ExistingESP`, `NextPartitionNumber`,
+  parsing `parted ... print free`), a Plan can cut a `Create` partition at an
+  explicit offset on a non-wiped disk, and the config carries it (`create` +
+  `start` on a `reusePartitions` child). *Limitations:* it needs an existing
+  ESP and enough free space — it does not yet resize/shrink a partition to
+  make room — and the root is not encrypted in this mode. VM-unverified so
+  far.
+
 ### Changed
 
 - Test Network Settings now runs its connectivity check behind an animated

@@ -21,6 +21,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/network"
+	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
@@ -119,6 +120,7 @@ func (m model) buildConfig() (*config.Config, error) {
 		AutoUpdate:        boolPtr(m.autoUpdate != 2),
 		SwupdMirror:       strings.TrimSpace(m.mirror),
 		AllowInsecureHTTP: m.allowInsecure,
+		ReusePartitions:   m.safeInstall, // Safe install reuses the disk
 	}
 	if add, rem := strings.Fields(m.kernelArgs), strings.Fields(m.kernelArgsRemove); len(add) > 0 || len(rem) > 0 {
 		cfg.KernelArguments = &config.KernelArguments{Add: add, Remove: rem}
@@ -200,6 +202,14 @@ type partEntry struct {
 	VG        string // for lvm
 	Encrypted bool   // for lvm: the PV is a LUKS container (LVM-on-LUKS)
 	LVs       []lvEntry
+
+	// Safe/alongside install only: Name overrides the partition device name
+	// (so a reused ESP keeps its number), Preserve reuses it without
+	// formatting, and Create cuts a new one at Start in unallocated space.
+	Name     string
+	Preserve bool
+	Create   bool
+	Start    string
 }
 
 // layoutToMedia turns the editor's partition list into config children,
@@ -209,7 +219,13 @@ func layoutToMedia(disk string, parts []partEntry) []*config.Media {
 	var out []*config.Media
 	for i, p := range parts {
 		name := partDevName(disk, i+1)
-		m := &config.Media{Name: name, Type: p.Type, FsType: p.FS, Mountpoint: p.Mount, Size: p.Size}
+		if p.Name != "" { // Safe install: explicit device name
+			name = p.Name
+		}
+		m := &config.Media{
+			Name: name, Type: p.Type, FsType: p.FS, Mountpoint: p.Mount, Size: p.Size,
+			Preserve: p.Preserve, Create: p.Create, Start: p.Start,
+		}
 		if p.Type == "lvm" {
 			m.FsType, m.Mountpoint = "", ""
 			m.VolumeGroup = p.VG
@@ -328,7 +344,7 @@ const (
 var mediaModes = []struct{ name, desc string }{
 	{"Destructive Installation", "Erase the whole disk and install with a standard layout."},
 	{"Advanced Installation", "Lay out or reuse partitions yourself (the partition editor)."},
-	{"Safe Installation", "Install alongside existing partitions - not yet supported."},
+	{"Safe Installation", "Add Sunlight in the disk's free space, keeping what is there."},
 }
 
 // bundleEntry is one row of the Select Additional Bundles checklist: a short
@@ -439,10 +455,12 @@ type model struct {
 	btnFocus int
 
 	// Installation Media front dialog: the chosen mode, the cursor over the
-	// dialog's rows, and whether encryption is ticked.
+	// dialog's rows, and whether encryption is ticked. safeInstall marks a
+	// Safe/alongside layout (reuse the disk, add Sunlight in free space).
 	mediaMode   int // 0 Destructive, 1 Advanced, 2 Safe
 	mediaCursor int
 	encrypt     bool
+	safeInstall bool
 
 	// popup: a bordered dialog drawn over the hub.
 	popup    popupKind
@@ -885,7 +903,8 @@ func (m model) updateMedia(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // confirmMedia applies the chosen installation mode.
 func (m model) confirmMedia() (tea.Model, tea.Cmd) {
-	m.diskSet = true // the first disk is selected by default
+	m.diskSet = true      // the first disk is selected by default
+	m.safeInstall = false // reset; only a Safe confirm sets it
 	switch m.mediaMode {
 	case 0: // Destructive: a standard whole-disk layout
 		m.parts = autoLayout(m.encrypt)
@@ -898,17 +917,65 @@ func (m model) confirmMedia() (tea.Model, tea.Cmd) {
 		m.view = viewPartList
 		m.partCursor = 0
 		return m, nil
-	default: // Safe: not supported yet
+	default: // Safe: install into the disk's free space, keeping what is there
+		return m.confirmSafe()
+	}
+}
+
+// confirmSafe builds a Safe/alongside layout: reuse the disk's existing EFI
+// System Partition and add a root partition in its largest unallocated
+// region, leaving every existing partition intact. It inspects the live disk
+// for the ESP, the free region and the next partition number; any problem
+// becomes a popup rather than a layout.
+func (m model) confirmSafe() (tea.Model, tea.Cmd) {
+	disk := m.disks[m.diskIdx].Path // /dev/sda
+	fail := func(lines ...string) (tea.Model, tea.Cmd) {
 		m.popup = popupMessage
-		m.popupMsg = []string{
-			"Safe Installation",
-			"",
-			"Installing alongside existing partitions is not yet",
-			"supported on Sunlight Linux. Choose Destructive for a",
-			"fresh install, or Advanced to lay out partitions yourself.",
-		}
+		m.popupMsg = append([]string{"Safe Installation", ""}, lines...)
 		return m, nil
 	}
+
+	esp, ok, err := storage.ExistingESP(disk)
+	if err != nil {
+		return fail("Could not read the disk: " + err.Error())
+	}
+	if !ok {
+		return fail(
+			"This disk has no EFI System Partition to share.",
+			"A Safe install adds Sunlight beside an existing system,",
+			"so it needs one. Use Destructive for a fresh install.")
+	}
+	minMiB := storage.MinRootSize >> 20
+	region, ok, err := storage.LargestFree(disk, minMiB)
+	if err != nil {
+		return fail("Could not read free space: " + err.Error())
+	}
+	if !ok {
+		return fail(
+			fmt.Sprintf("No unallocated region of at least %d MiB was found.", minMiB),
+			"Free some space on the disk first (Sunlight does not yet",
+			"resize existing partitions), or use Destructive.")
+	}
+	num, err := storage.NextPartitionNumber(disk)
+	if err != nil {
+		return fail("Could not read the partition table: " + err.Error())
+	}
+
+	base := m.disks[m.diskIdx].Name // sda
+	root := partEntry{
+		Name: partDevName("/dev/"+base, num), Type: "part", FS: "ext4", Mount: "/",
+		Create: true,
+		Start:  fmt.Sprintf("%dM", region.StartMiB),
+		Size:   fmt.Sprintf("%dM", region.SizeMiB-1), // a MiB of slack at the end
+	}
+	espEntry := partEntry{
+		Name: strings.TrimPrefix(esp, "/dev/"), Type: "part", FS: "vfat",
+		Mount: "/boot/efi", Preserve: true,
+	}
+	m.parts = []partEntry{espEntry, root}
+	m.safeInstall = true
+	m.view = viewHub
+	return m, nil
 }
 
 // autoLayout is the standard whole-disk layout for a Destructive install:

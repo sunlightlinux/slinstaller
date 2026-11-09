@@ -38,12 +38,28 @@ func (pl *Plan) TableCommands() [][]string {
 
 // diskTableCommands lays down one disk's partition table.
 func (pl *Plan) diskTableCommands(disk string) [][]string {
-	// A reuse install does not touch the partition table at all: the
-	// partitions already exist and are only formatted/mounted. Emitting no
-	// parted commands is what keeps an existing layout (and any other OS on
-	// the disk) intact.
+	// A non-wiping install leaves the partition table alone, except for any
+	// partition marked Create: a Safe/alongside install cuts new partitions
+	// in unallocated space (at their StartMiB..EndMiB) while leaving the
+	// existing partitions — and any other OS on the disk — intact. A pure
+	// reuse install (no Create) emits nothing.
 	if !pl.Wipe {
-		return nil
+		var cmds [][]string
+		for _, p := range pl.physOn(disk) {
+			if !p.Create {
+				continue
+			}
+			cmds = append(cmds, partedMkpart(disk, p,
+				fmt.Sprintf("%dMiB", p.StartMiB), fmt.Sprintf("%dMiB", p.EndMiB)))
+			if p.isESP() {
+				cmds = append(cmds, []string{"parted", "-s", disk, "set",
+					fmt.Sprintf("%d", p.Number), "esp", "on"})
+			}
+		}
+		if len(cmds) > 0 {
+			cmds = append(cmds, []string{"partprobe", disk})
+		}
+		return cmds
 	}
 
 	var cmds [][]string

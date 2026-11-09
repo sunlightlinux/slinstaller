@@ -889,3 +889,51 @@ func TestValidPassphrase(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanSafeAlongside(t *testing.T) {
+	c := &Config{
+		ReusePartitions: true,
+		Hostname:        "box",
+		Users:           []*User{{Login: "me", Password: "$6$a$b", Admin: true}},
+		TargetMedia: []*Media{{
+			Name: "sda", Type: "disk",
+			Children: []*Media{
+				{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+				{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: "/", Create: true, Start: "20480M", Size: "25000M"},
+			},
+		}},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	plan, err := c.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.Wipe {
+		t.Error("Safe plan must not wipe")
+	}
+	var esp, root *storage.Partition
+	for i := range plan.Parts {
+		switch plan.Parts[i].Device {
+		case "/dev/sda1":
+			esp = &plan.Parts[i]
+		case "/dev/sda3":
+			root = &plan.Parts[i]
+		}
+	}
+	if esp == nil || !esp.Preserve {
+		t.Fatalf("ESP should be preserved: %+v", esp)
+	}
+	if root == nil || !root.Create || root.StartMiB != 20480 || root.EndMiB != 20480+25000 {
+		t.Fatalf("root create/offsets wrong: %+v", root)
+	}
+	// TableCommands cut only the new root (no mklabel), mkfs only the root.
+	flat := ""
+	for _, cmd := range plan.TableCommands() {
+		flat += strings.Join(cmd, " ") + "\n"
+	}
+	if strings.Contains(flat, "mklabel") || !strings.Contains(flat, "20480MiB 45480MiB") {
+		t.Errorf("Safe table commands wrong:\n%s", flat)
+	}
+}

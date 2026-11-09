@@ -190,6 +190,13 @@ type Media struct {
 	// data: it is mounted but not reformatted. Ignored for a normal
 	// (wiping) install, where every partition is made fresh.
 	Preserve bool `yaml:"preserve,omitempty"`
+
+	// Create and Start describe a NEW partition to cut in unallocated space
+	// during a reusePartitions (Safe/alongside) install — the Sunlight
+	// partition added to a disk's free space without wiping the existing
+	// ones. Start is the MiB offset of the free region; Size is its length.
+	Create bool   `yaml:"create,omitempty"`
+	Start  string `yaml:"start,omitempty"`
 }
 
 // RaidArray is one software RAID array: a name (its device is /dev/md/<name>,
@@ -905,7 +912,7 @@ func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 					disk.Name, ch.Name, ch.Type)
 			}
 			dev, num := partDev(device, i, ch.Name)
-			pl.Parts = append(pl.Parts, storage.Partition{
+			p := storage.Partition{
 				Number:     num,
 				Device:     dev,
 				Disk:       device,
@@ -914,7 +921,23 @@ func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 				Label:      ch.Label,
 				Options:    strings.Fields(ch.Options),
 				Preserve:   ch.Preserve,
-			})
+			}
+			// A Create child is cut fresh in unallocated space (Safe install):
+			// Start is the MiB offset, Size the length, so End = Start + Size.
+			if ch.Create {
+				startMiB, err := offsetMiB(ch.Start)
+				if err != nil {
+					return nil, fmt.Errorf("config: %s/%s start: %w", disk.Name, ch.Name, err)
+				}
+				sizeMiB, err := offsetMiB(ch.Size)
+				if err != nil {
+					return nil, fmt.Errorf("config: %s/%s size: %w", disk.Name, ch.Name, err)
+				}
+				p.Create = true
+				p.StartMiB = startMiB
+				p.EndMiB = startMiB + sizeMiB
+			}
+			pl.Parts = append(pl.Parts, p)
 		}
 	}
 	if len(pl.Parts) == 0 {
@@ -928,6 +951,16 @@ func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 		}
 	}
 	return pl, nil
+}
+
+// offsetMiB parses a size/offset string to whole MiB, for a Safe install's
+// start offset and length.
+func offsetMiB(s string) (uint64, error) {
+	bytes, err := parseSize(s)
+	if err != nil {
+		return 0, err
+	}
+	return bytes >> 20, nil
 }
 
 // planDiskOf is the disk a physical partition sits on, defaulting to the
