@@ -1077,3 +1077,27 @@ func TestPassphrasePopupAsksTwice(t *testing.T) {
 		t.Errorf("popup %v, passphrase %q", m.popup, m.passphrase)
 	}
 }
+
+func TestIfaceLiveV4(t *testing.T) {
+	ni := netIfaceEntry{Details: []string{"ipv4:    10.0.2.15", "netmask: 255.255.255.0", "ipv6:    fe80::1"}}
+	if got := ifaceLiveV4(ni); got != "10.0.2.15" {
+		t.Errorf("ifaceLiveV4 = %q, want 10.0.2.15", got)
+	}
+	if got := ifaceLiveV4(netIfaceEntry{Details: []string{"ipv6:    fe80::1"}}); got != "" {
+		t.Errorf("no v4 should give empty, got %q", got)
+	}
+}
+
+func TestNetInterfaceDetailView(t *testing.T) {
+	m := newModel(oneDisk())
+	m.netIfaces = []netIfaceEntry{{Name: "enp0s3", Details: []string{"ipv4:    10.0.2.15", "netmask: 255.255.255.0"}}}
+	m.width, m.height = 90, 28
+	nm, _ := m.startNetForm(0)
+	v := stripANSIForTest(nm.(model).View())
+	// The detail header, the live address, and the still-present choice.
+	for _, want := range []string{"interface: enp0s3", "ipv4:    10.0.2.15", "Automatic (DHCP)", "Static IP"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("interface detail missing %q:\n%s", want, v)
+		}
+	}
+}

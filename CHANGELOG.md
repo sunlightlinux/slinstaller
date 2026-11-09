@@ -12,6 +12,11 @@ for what will and will not be allowed to change once releases begin.
 
 ### Changed
 
+- The Configure Network Interfaces sub-page now shows each interface's
+  current live addresses (ipv4/netmask/ipv6/netmask, read-only) the way
+  clr-installer does, above the Automatic (DHCP) / Static IP choice — so you
+  can see the interface's state and still configure a static address. The
+  interface list shows the live IPv4 next to a DHCP interface.
 - A new LUKS passphrase typed at the installer is asked for twice and must be
   8 to 94 printable ASCII characters, as in clr-installer: a typo here locked
   the disk it was set on. *Compatibility:* only what is typed at a terminal is

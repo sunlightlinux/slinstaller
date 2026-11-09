@@ -481,18 +481,20 @@ type userEntry struct {
 }
 
 // netIfaceEntry is one network interface in the Configure Network Interfaces
-// sub-page. Static carries a CIDR address, gateway and DNS; otherwise the
-// interface is left on DHCP.
+// sub-page. Details are the interface's current live addresses (read-only,
+// as clr-installer shows them); Static carries a CIDR address, gateway and
+// DNS to configure, otherwise the interface is left on DHCP.
 type netIfaceEntry struct {
 	Name    string
+	Details []string // live "ipv4: …" / "netmask: …" lines
 	Static  bool
 	Addr    string // CIDR, e.g. 192.168.1.50/24
 	Gateway string
 	DNS     string
 }
 
-// liveInterfaces lists the machine's non-loopback interfaces, each starting
-// on DHCP, for the network sub-page to configure.
+// liveInterfaces lists the machine's non-loopback interfaces with their
+// current addresses, each starting on DHCP, for the network sub-page.
 func liveInterfaces() []netIfaceEntry {
 	ifs, err := net.Interfaces()
 	if err != nil {
@@ -503,7 +505,28 @@ func liveInterfaces() []netIfaceEntry {
 		if i.Flags&net.FlagLoopback != 0 {
 			continue
 		}
-		out = append(out, netIfaceEntry{Name: i.Name})
+		e := netIfaceEntry{Name: i.Name}
+		addrs, _ := i.Addrs()
+		for _, a := range addrs {
+			ipnet, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			kind := "ipv6"
+			ip := ipnet.IP
+			if v4 := ip.To4(); v4 != nil {
+				kind, ip = "ipv4", v4
+			}
+			// net.IP.String() on the mask gives the dotted form for IPv4 and
+			// the ffff:… form for IPv6, matching clr's display.
+			e.Details = append(e.Details,
+				fmt.Sprintf("%-8s %s", kind+":", ip.String()),
+				fmt.Sprintf("%-8s %s", "netmask:", net.IP(ipnet.Mask).String()))
+		}
+		if len(e.Details) == 0 {
+			e.Details = []string{"(no address - link down or DHCP pending)"}
+		}
+		out = append(out, e)
 	}
 	return out
 }
@@ -2723,6 +2746,17 @@ func (m model) bundlesView() string {
 		"[Tab] buttons · [Space] toggle · [Enter] confirm · [Esc] back")
 }
 
+// ifaceLiveV4 returns the interface's current IPv4 address from its live
+// details, or "" if it has none.
+func ifaceLiveV4(ni netIfaceEntry) string {
+	for _, d := range ni.Details {
+		if strings.HasPrefix(d, "ipv4:") {
+			return strings.TrimSpace(strings.TrimPrefix(d, "ipv4:"))
+		}
+	}
+	return ""
+}
+
 // netListView renders the list of interfaces and their current setting.
 func (m model) netListView() string {
 	w := m.panelWidth()
@@ -2737,6 +2771,8 @@ func (m model) netListView() string {
 		setting := "Automatic (DHCP)"
 		if ni.Static {
 			setting = "Static " + ni.Addr
+		} else if v4 := ifaceLiveV4(ni); v4 != "" {
+			setting = "DHCP - " + v4
 		}
 		body = append(body, row(w, i == m.netCursor, fmt.Sprintf("%-14s %s", ni.Name, setting)))
 	}
@@ -2752,16 +2788,22 @@ func (m model) netFormView() string {
 		name = m.netIfaces[m.netEdit].Name
 	}
 	if m.formStep == 0 {
+		// clr-style read-only detail header: the interface's current
+		// addresses, then the Addressing choice.
 		body := []string{
-			itemLabel.Width(w).Render("  Configure " + name),
-			rule(w),
-			itemLabel.Width(w).Render("  Addressing"),
+			itemLabel.Width(w).Render("  interface: " + name),
 			lineBG.Width(w).Render(""),
 		}
+		if m.netEdit < len(m.netIfaces) {
+			for _, d := range m.netIfaces[m.netEdit].Details {
+				body = append(body, itemValue.Width(w).Render("    "+d))
+			}
+		}
+		body = append(body, rule(w), itemLabel.Width(w).Render("  Addressing"), lineBG.Width(w).Render(""))
 		for i, opt := range []string{"Automatic (DHCP)", "Static IP"} {
 			body = append(body, row(w, i == m.edCursor, opt))
 		}
-		return m.screen(body, "[Left/Right] choose · [Enter] select · [Esc] back")
+		return m.screen(body, "[Up/Down] choose · [Enter] select · [Esc] back")
 	}
 	var title, hint string
 	switch m.formStep {
