@@ -1101,3 +1101,33 @@ func TestNetInterfaceDetailView(t *testing.T) {
 		}
 	}
 }
+
+func TestTestNetProgressBar(t *testing.T) {
+	// Opening Test Network shows the progress popup (not a spinner).
+	m := openSectionInTab(newModel(oneDisk()), 1, secTestNet)
+	if m.popup != popupSpinner || !m.testingNet {
+		t.Fatalf("Test Network did not start the progress popup")
+	}
+	m.width, m.height = 90, 28
+	if v := stripANSIForTest(m.View()); !strings.Contains(v, "Testing connectivity") {
+		t.Errorf("popup missing the progress text:\n%s", v)
+	}
+
+	// A tick advances the bar and wraps at the end.
+	nm, _ := m.Update(spinnerTickMsg{})
+	if got := nm.(model).netProgress; got <= 0 {
+		t.Errorf("tick did not advance the bar: %v", got)
+	}
+	m.netProgress = 0.99
+	nm, _ = m.Update(spinnerTickMsg{})
+	if got := nm.(model).netProgress; got != 0 {
+		t.Errorf("bar did not wrap at the end: %v", got)
+	}
+
+	// The result arrives -> a message popup, done testing.
+	nm, _ = m.Update(netTestDoneMsg{result: "[ OK ] Network is reachable.", ok: true})
+	done := nm.(model)
+	if done.testingNet || done.popup != popupMessage {
+		t.Errorf("result did not switch to a message popup: testing=%v popup=%v", done.testingNet, done.popup)
+	}
+}

@@ -11,10 +11,12 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
@@ -34,8 +36,6 @@ type netTestDoneMsg struct {
 	result string
 	ok     bool
 }
-
-var spinnerFrames = []string{"|", "/", "-", "\\"}
 
 // spinnerTickCmd schedules the next spinner frame.
 func spinnerTickCmd() tea.Cmd {
@@ -402,11 +402,12 @@ type model struct {
 	// clr does.
 	autoUpdate int
 
-	// Test Network Settings runs a connectivity check with a small spinner
-	// popup — a secondary progress indicator like clr's.
-	testingNet   bool
-	spinnerFrame int
-	netResult    string
+	// Test Network Settings runs a connectivity check behind an animated
+	// progress bar in a popup, as clr-installer does.
+	testingNet  bool
+	netProgress float64
+	netBar      progress.Model
+	netResult   string
 
 	view          view
 	tab           int // 0 = Required options, 1 = Advanced options
@@ -532,10 +533,14 @@ func liveInterfaces() []netIfaceEntry {
 }
 
 func newModel(disks []blockdev.Device) model {
+	bar := progress.New(progress.WithSolidFill(barFill(termenv.ColorProfile())))
+	bar.Width = 40
+	bar.ShowPercentage = false
 	return model{
 		disks: disks, view: viewHub,
 		keyboard: "us", language: "en_US.UTF-8", timezone: "UTC", hostname: "sunlight",
 		autoUpdate: 1, // clr defaults automatic updates on
+		netBar:     bar,
 	}
 }
 
@@ -686,7 +691,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case spinnerTickMsg:
 		if m.testingNet {
-			m.spinnerFrame++
+			// The check has no real percentage, so the bar pulses: fill, then
+			// wrap and fill again until the result arrives.
+			m.netProgress += 0.06
+			if m.netProgress > 1 {
+				m.netProgress = 0
+			}
 			return m, spinnerTickCmd()
 		}
 		return m, nil
@@ -1619,11 +1629,11 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.netCursor = 0
 		return m, nil
 	case secTestNet:
-		// A secondary-progress popup: run a connectivity check while a small
-		// spinner animates, like clr's "Test Network Settings".
+		// A secondary-progress popup: run a connectivity check while a
+		// progress bar animates, like clr's "Test Network Settings".
 		m.popup = popupSpinner
 		m.testingNet = true
-		m.spinnerFrame = 0
+		m.netProgress = 0
 		m.netResult = ""
 		return m, tea.Batch(spinnerTickCmd(), testNetCmd())
 	case secSaveConfig:
@@ -2417,11 +2427,12 @@ func (m model) popupBox() string {
 		inner = append([]string{popupTitle.Render(title), ""}, body...)
 		inner = append(inner, "", popupHint.Render("press any key to continue"))
 	case popupSpinner:
-		frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
 		inner = []string{
 			popupTitle.Render("Test Network Settings"),
 			"",
-			frame + " Checking connectivity to the mirror...",
+			m.netBar.ViewAs(m.netProgress),
+			"",
+			"Testing connectivity...",
 		}
 	}
 	return popupBoxStyle.Render(strings.Join(inner, "\n"))

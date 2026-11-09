@@ -12,6 +12,9 @@ for what will and will not be allowed to change once releases begin.
 
 ### Changed
 
+- Test Network Settings now runs its connectivity check behind an animated
+  progress bar in the popup (which pulses while the check runs), the way
+  clr-installer shows it, instead of a text spinner.
 - The Configure Network Interfaces sub-page now shows each interface's
   current live addresses (ipv4/netmask/ipv6/netmask, read-only) the way
   clr-installer does, above the Automatic (DHCP) / Static IP choice — so you
