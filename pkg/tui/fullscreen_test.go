@@ -595,7 +595,12 @@ func TestBundlesChecklist(t *testing.T) {
 }
 
 func TestKernelArgsAddRemove(t *testing.T) {
-	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs) // profile list
+	// Move to the "Custom" profile (last) and open the Add/Remove form.
+	for i := 0; i < kernelProfileIndex("Custom"); i++ {
+		m = send(m, down)
+	}
+	m = send(m, enter)
 	m = send(m, runes("quiet loglevel=3"))
 	m = send(m, enter) // -> Remove step
 	m = send(m, runes("console=ttyS0"))
@@ -1166,5 +1171,34 @@ func TestSafeLayoutBuildsAlongsidePlan(t *testing.T) {
 	}
 	if !sawCreate || !sawPreserve {
 		t.Errorf("Safe plan wrong: create=%v preserve=%v", sawCreate, sawPreserve)
+	}
+}
+
+func TestKernelProfileSelect(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs) // profile list
+	// Select "Realtime".
+	idx := 0
+	for i, p := range kernelProfiles {
+		if p.name == "Realtime" {
+			idx = i
+		}
+	}
+	for i := 0; i < idx; i++ {
+		m = send(m, down)
+	}
+	m = send(m, enter)
+	if m.kernelProfile != "Realtime" || !strings.Contains(m.kernelArgs, "preempt=full") {
+		t.Fatalf("profile=%q args=%q", m.kernelProfile, m.kernelArgs)
+	}
+	if m.view != viewHub {
+		t.Error("profile select should return to the hub")
+	}
+	// The hub value names the profile; the config carries the args.
+	if got := m.sectionValue(secKernelArgs); got != "Realtime profile" {
+		t.Errorf("hub value = %q, want 'Realtime profile'", got)
+	}
+	cfg, _ := m.buildConfig()
+	if cfg.KernelArguments == nil || len(cfg.KernelArguments.Add) == 0 {
+		t.Errorf("config kernel-arguments empty")
 	}
 }

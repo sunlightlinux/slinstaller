@@ -405,6 +405,7 @@ type model struct {
 	kernel           string // clr bundle name: "", kernel-native, kernel-lts
 	kernelArgs       string // kernel arguments to add, space-separated
 	kernelArgsRemove string // kernel arguments to remove, space-separated
+	kernelProfile    string // the chosen Kernel Command Line profile name
 	packages         string // extra xbps packages (shown as "bundles")
 
 	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
@@ -1666,13 +1667,12 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.btnFocus = focusList
 		return m, nil
 	case secKernelArgs:
-		m.view = viewMiniForm
-		m.formStep = 0
-		ti := textinput.New()
-		ti.Focus()
-		ti.SetValue(m.kernelArgs)
-		m.input = ti
-		return m, textinput.Blink
+		// A list of command-line profiles; the last ("Custom") opens the
+		// manual Add/Remove form.
+		m.view = viewSectionChoice
+		m.choices = kernelProfileNames()
+		m.edCursor = kernelProfileIndex(m.kernelProfile)
+		return m, nil
 	case secMirror:
 		m.view = viewMiniForm
 		m.formStep = 0
@@ -1775,6 +1775,46 @@ func (m model) openList(items []string, current string) model {
 // first entry keeps the base system's default kernel.
 var kernelOptions = []string{"", "kernel-native", "kernel-lts"}
 
+// kernelProfile is a named set of kernel command-line arguments: a starting
+// point the operator picks, then edits as Custom if needed. The args are
+// sensible, machine-independent defaults — tuning that needs specific CPU
+// ranges (isolcpus=, nohz_full=<list>) is left to Custom.
+type kernelProfile struct {
+	name string
+	args string
+}
+
+var kernelProfiles = []kernelProfile{
+	{"Server", "mitigations=auto transparent_hugepage=madvise"},
+	{"Desktop", "quiet splash mitigations=auto"},
+	{"Desktop LowLatency", "quiet splash preempt=full threadirqs"},
+	{"LowLatency", "preempt=full threadirqs"},
+	{"Realtime", "preempt=full threadirqs nowatchdog nmi_watchdog=0 skew_tick=1"},
+	{"Audio/Video Workstation", "preempt=full threadirqs tsc=reliable nowatchdog"},
+	{"telco/ran", "preempt=full processor.max_cstate=1 intel_idle.max_cstate=0 idle=poll nosoftlockup"},
+	{"Virtualization Optimized", "intel_iommu=on iommu=pt transparent_hugepage=never"},
+	{"Custom", ""}, // type the Add/Remove arguments yourself
+}
+
+// kernelProfileNames is the picker's list; kernelProfileIndex finds a name
+// (defaulting to the first entry).
+func kernelProfileNames() []string {
+	out := make([]string, len(kernelProfiles))
+	for i, p := range kernelProfiles {
+		out[i] = p.name
+	}
+	return out
+}
+
+func kernelProfileIndex(name string) int {
+	for i, p := range kernelProfiles {
+		if p.name == name {
+			return i
+		}
+	}
+	return 0
+}
+
 // yesNoOptions back the Enabled/Disabled choice page (Automatic OS Updates).
 var yesNoOptions = []string{"Enabled", "Disabled"}
 
@@ -1861,10 +1901,14 @@ func (m model) sectionValue(s section) string {
 		}
 		return m.hostname
 	case secKernelArgs:
-		if strings.TrimSpace(m.kernelArgs) == "" {
+		switch {
+		case m.kernelProfile != "" && m.kernelProfile != "Custom":
+			return m.kernelProfile + " profile"
+		case strings.TrimSpace(m.kernelArgs) != "" || strings.TrimSpace(m.kernelArgsRemove) != "":
+			return "Custom: " + strings.TrimSpace(m.kernelArgs+" "+m.kernelArgsRemove)
+		default:
 			return "No kernel command line configuration defined"
 		}
-		return m.kernelArgs
 	case secKernel:
 		if m.kernel == "" {
 			return "Select desired kernel"
@@ -1944,6 +1988,21 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch m.editing {
 			case secAutoUpdate:
 				m.autoUpdate = m.edCursor + 1 // 1 Enabled, 2 Disabled
+			case secKernelArgs:
+				p := kernelProfiles[m.edCursor]
+				m.kernelProfile = p.name
+				if p.name == "Custom" {
+					// Keep the current args and open the manual Add/Remove form.
+					m.choices = nil
+					m.view = viewMiniForm
+					m.formStep = 0
+					ti := textinput.New()
+					ti.Focus()
+					ti.SetValue(m.kernelArgs)
+					m.input = ti
+					return m, textinput.Blink
+				}
+				m.kernelArgs, m.kernelArgsRemove = p.args, ""
 			default: // kernel
 				m.kernel = m.choices[m.edCursor]
 			}
@@ -2587,8 +2646,12 @@ func (m model) choiceView() string {
 		}
 		return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
 	}
+	title := sectionTitles[m.editing]
+	if m.editing == secKernelArgs {
+		title = "Select a Kernel Command Line Profile"
+	}
 	body := []string{
-		itemLabel.Width(w).Render("  " + sectionTitles[m.editing]),
+		itemLabel.Width(w).Render("  " + title),
 		lineBG.Width(w).Render(""),
 	}
 	// Automatic OS Updates carries an explanatory paragraph above the
@@ -2605,6 +2668,14 @@ func (m model) choiceView() string {
 			label = kernelLabel(c)
 		}
 		body = append(body, row(w, i == m.edCursor, label))
+	}
+	// For the kernel-profile picker, preview the highlighted profile's args.
+	if m.editing == secKernelArgs && m.edCursor < len(kernelProfiles) {
+		args := kernelProfiles[m.edCursor].args
+		if args == "" {
+			args = "(type your own Add / Remove arguments)"
+		}
+		body = append(body, lineBG.Width(w).Render(""), footer.Width(w).Render("  "+clip(args, w-4)))
 	}
 	return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
 }

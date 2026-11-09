@@ -12,6 +12,11 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Kernel Command Line now offers a list of predefined profiles — Server,
+  Desktop, Desktop LowLatency, LowLatency, Realtime, Audio/Video Workstation,
+  telco/ran, Virtualization Optimized, and Custom — each with a sensible,
+  machine-independent set of kernel arguments shown as a preview. Picking a
+  profile fills the arguments; Custom opens the manual Add/Remove form.
 - Safe Installation (install alongside an existing system): the Installation
   Media dialog's Safe mode now works. It reuses the disk's existing EFI
   System Partition and adds a root partition in the largest unallocated
