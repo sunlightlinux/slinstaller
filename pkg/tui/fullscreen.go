@@ -1791,7 +1791,7 @@ var kernelProfiles = []kernelProfile{
 	{"LowLatency", "preempt=full threadirqs"},
 	{"Realtime", "preempt=full threadirqs nowatchdog nmi_watchdog=0 skew_tick=1"},
 	{"Audio/Video Workstation", "preempt=full threadirqs tsc=reliable nowatchdog"},
-	{"telco/ran", "preempt=full processor.max_cstate=1 intel_idle.max_cstate=0 idle=poll nosoftlockup"},
+	{"Telco/RAN", "preempt=full processor.max_cstate=1 intel_idle.max_cstate=0 idle=poll nosoftlockup"},
 	{"Virtualization Optimized", "intel_iommu=on iommu=pt transparent_hugepage=never"},
 	{"Custom", ""}, // type the Add/Remove arguments yourself
 }
