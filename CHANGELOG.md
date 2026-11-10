@@ -21,6 +21,12 @@ for what will and will not be allowed to change once releases begin.
   a profile weakens security or power (`mitigations=off`, `idle=poll`).
   Picking a profile fills the arguments; Custom opens the manual Add/Remove
   form.
+- Added an "NVIDIA GPU (proprietary)" profile: blacklists nouveau
+  (`rd.driver.blacklist=nouveau nouveau.modeset=0 module_blacklist=nouveau`) and
+  enables the proprietary driver's KMS (`nvidia-drm.modeset=1`), alongside the
+  Intel and AMD GPU profiles. Its note warns the GPU has no driver until the
+  proprietary NVIDIA driver is installed. (NVIDIA Grace / ARM64 tuning is out of
+  scope while the installer is x86_64-only.)
 - Added an "AMD Instinct (GPU compute)" profile following AMD's Instinct
   acceptance guide: the required `iommu=pt`, `pci=realloc=off` and `pci=bfsort`
   (reliable GPU enumeration/ordering) with the vendor IOMMU (amd_iommu on an

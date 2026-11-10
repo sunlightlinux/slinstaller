@@ -1356,3 +1356,17 @@ func TestAMDInstinctProfile(t *testing.T) {
 		t.Errorf("Intel host Instinct should keep intel_iommu=on: %s", m.profileArgs(p))
 	}
 }
+
+func TestNvidiaProfile(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m.cpuVendor = "amd" // vendor-neutral args: unchanged by the rewriter
+	a := m.profileArgs(kernelProfileByName("NVIDIA GPU (proprietary)"))
+	for _, want := range []string{"module_blacklist=nouveau", "nouveau.modeset=0", "nvidia-drm.modeset=1"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("NVIDIA profile missing %q: %s", want, a)
+		}
+	}
+	if strings.Contains(a, "iommu") {
+		t.Errorf("NVIDIA profile should not carry iommu args: %s", a)
+	}
+}

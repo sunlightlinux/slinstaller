@@ -1855,6 +1855,8 @@ var kernelProfiles = []kernelProfile{
 	{name: "Intel GPU Workstation", args: "i915.force_probe=* i915.enable_guc=3 i915.enable_fbc=1 mitigations=auto"},
 	{name: "AMD GPU Workstation", args: "amdgpu.ppfeaturemask=0xffffffff amdgpu.dc=1 amdgpu.gpu_recovery=1 mitigations=auto",
 		note: "ppfeaturemask=0xffffffff unlocks power/clock control (CoreCtrl); use only on a discrete AMD GPU."},
+	{name: "NVIDIA GPU (proprietary)", args: "rd.driver.blacklist=nouveau nouveau.modeset=0 module_blacklist=nouveau nvidia-drm.modeset=1 mitigations=auto",
+		note: "Blocks nouveau for the proprietary NVIDIA driver (install it, or the GPU has no driver). nvidia-drm.modeset=1 enables KMS."},
 	{name: "Containers / Cloud", args: "cgroup_no_v1=all cgroup_enable=memory swapaccount=1 transparent_hugepage=madvise mitigations=auto"},
 	{name: "Hardened (AppArmor)", args: "apparmor=1 security=apparmor lockdown=integrity mitigations=auto audit=1"},
 	{name: "Laptop / Power Save", args: "quiet splash mitigations=auto pcie_aspm=force pcie_aspm.policy=powersave nmi_watchdog=0"},
