@@ -40,3 +40,18 @@ func TestVendorKernelArgsAMD(t *testing.T) {
 		t.Errorf("unknown vendor changed args: %q", got)
 	}
 }
+
+func TestVendorKernelArgsIommuFlags(t *testing.T) {
+	// igfx_off is kept on Intel, dropped (plain amd_iommu=on) on AMD.
+	in := "intel_iommu=on,igfx_off iommu=pt"
+	if got := VendorKernelArgs(in, "intel"); got != "intel_iommu=on,igfx_off iommu=pt" {
+		t.Errorf("Intel dropped igfx_off: %q", got)
+	}
+	if got := VendorKernelArgs(in, "amd"); got != "amd_iommu=on iommu=pt" {
+		t.Errorf("AMD iommu wrong: %q", got)
+	}
+	// amd_iommu flags kept on AMD, normalized on Intel.
+	if got := VendorKernelArgs("amd_iommu=on iommu=pt", "intel"); got != "intel_iommu=on iommu=pt" {
+		t.Errorf("Intel from amd_iommu wrong: %q", got)
+	}
+}

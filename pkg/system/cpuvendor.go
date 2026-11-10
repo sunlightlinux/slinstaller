@@ -35,10 +35,12 @@ func CPUVendor() string {
 
 // VendorKernelArgs rewrites the CPU-vendor-specific tokens in a kernel
 // command line for the given vendor, so a profile written with Intel
-// arguments boots correctly on AMD (and vice versa): intel_iommu=/amd_iommu=
-// become <vendor>_iommu=on, kvm-intel/kvm-amd.nested become
-// kvm-<vendor>.nested, and intel_idle.max_cstate= (Intel-only) is dropped on
-// AMD. An unknown/non-x86 vendor leaves the arguments untouched.
+// arguments boots correctly on AMD (and vice versa): the iommu token keeps its
+// flags on the matching vendor (e.g. intel_iommu=on,igfx_off stays as-is on
+// Intel) but becomes a plain <vendor>_iommu=on when switched, since flags like
+// igfx_off are Intel-only; kvm-intel/kvm-amd.nested become kvm-<vendor>.nested;
+// and intel_idle.max_cstate= (Intel-only) is dropped on AMD. An unknown/non-x86
+// vendor leaves the arguments untouched.
 func VendorKernelArgs(args, vendor string) string {
 	if vendor != "intel" && vendor != "amd" {
 		return args
@@ -46,8 +48,18 @@ func VendorKernelArgs(args, vendor string) string {
 	var out []string
 	for _, t := range strings.Fields(args) {
 		switch {
-		case strings.HasPrefix(t, "intel_iommu=") || strings.HasPrefix(t, "amd_iommu="):
-			out = append(out, vendor+"_iommu=on")
+		case strings.HasPrefix(t, "intel_iommu="):
+			if vendor == "intel" {
+				out = append(out, t) // keep flags such as igfx_off
+			} else {
+				out = append(out, "amd_iommu=on")
+			}
+		case strings.HasPrefix(t, "amd_iommu="):
+			if vendor == "amd" {
+				out = append(out, t)
+			} else {
+				out = append(out, "intel_iommu=on")
+			}
 		case t == "kvm-intel.nested=1" || t == "kvm-amd.nested=1":
 			out = append(out, "kvm-"+vendor+".nested=1")
 		case strings.HasPrefix(t, "intel_idle.max_cstate="):
