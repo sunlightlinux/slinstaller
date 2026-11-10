@@ -1845,6 +1845,8 @@ var kernelProfiles = []kernelProfile{
 		note: "Telco/RAN plus cpuidle.off/max_cstate=0, pcie_aspm=off, audit=0: maximum determinism, highest power draw, weakest security.", isolate: true, huge: true},
 	{name: "HPC / Compute", args: "mitigations=off nowatchdog nmi_watchdog=0 processor.max_cstate=1 intel_idle.max_cstate=0 cpufreq.default_governor=performance transparent_hugepage=always",
 		note: "mitigations=off: faster, but disables CPU-vulnerability mitigations."},
+	{name: "AMD Instinct (GPU compute)", args: "iommu=pt intel_iommu=on pci=realloc=off pci=bfsort numa_balancing=disable mitigations=off pcie_aspm=off processor.max_cstate=0 nmi_watchdog=0 nowatchdog tsc=nowatchdog transparent_hugepage=always quiet",
+		note: "AMD Instinct GPU nodes (per AMD's guide); iommu adapts to the host CPU. Max-tuning extras in Custom: modprobe.blacklist=amdgpu, nokaslr, norandmaps, biosdevname=0."},
 	{name: "Virtualization Host (KVM)", args: "intel_iommu=on iommu=pt kvm-intel.nested=1 transparent_hugepage=never"},
 	{name: "GPU Passthrough (VFIO)", args: "intel_iommu=on iommu=pt vfio-pci.disable_vga=1 kvm-intel.nested=1 transparent_hugepage=never",
 		note: "Strict isolation. For consumer boards that need ACS override, use the consumer/ACS profile."},

@@ -21,6 +21,15 @@ for what will and will not be allowed to change once releases begin.
   a profile weakens security or power (`mitigations=off`, `idle=poll`).
   Picking a profile fills the arguments; Custom opens the manual Add/Remove
   form.
+- Added an "AMD Instinct (GPU compute)" profile following AMD's Instinct
+  acceptance guide: the required `iommu=pt`, `pci=realloc=off` and `pci=bfsort`
+  (reliable GPU enumeration/ordering) with the vendor IOMMU (amd_iommu on an
+  AMD EPYC host, intel_iommu on an Intel host), plus the recommended
+  `numa_balancing=disable`, `tsc=nowatchdog`, `pcie_aspm=off`,
+  `processor.max_cstate=0`, `transparent_hugepage=always`, `mitigations=off`
+  and the watchdog disables. The more situational extras
+  (`modprobe.blacklist=amdgpu`, `nokaslr`, `norandmaps`, `biosdevname=0`) are
+  named in the note for Custom rather than enabled by default.
 - Added a "GPU Passthrough (consumer/ACS)" profile for passthrough on consumer
   boards: the VFIO base plus `pcie_acs_override=downstream` (split IOMMU groups)
   and `intel_iommu=on,igfx_off` (ignore the iGPU, which stays with the host). The

@@ -1338,3 +1338,21 @@ func TestGPUPassthroughConsumerProfile(t *testing.T) {
 		t.Errorf("AMD should not carry Intel iommu/igfx_off: %s", a)
 	}
 }
+
+func TestAMDInstinctProfile(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	p := kernelProfileByName("AMD Instinct (GPU compute)")
+	// AMD host: intel_iommu=on becomes amd_iommu=on; required Instinct args present.
+	m.cpuVendor = "amd"
+	a := m.profileArgs(p)
+	for _, want := range []string{"amd_iommu=on", "iommu=pt", "pci=realloc=off", "pci=bfsort", "tsc=nowatchdog", "numa_balancing=disable"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("AMD Instinct missing %q: %s", want, a)
+		}
+	}
+	// Intel host: keeps intel_iommu=on (Instinct on Xeon).
+	m.cpuVendor = "intel"
+	if !strings.Contains(m.profileArgs(p), "intel_iommu=on") {
+		t.Errorf("Intel host Instinct should keep intel_iommu=on: %s", m.profileArgs(p))
+	}
+}
