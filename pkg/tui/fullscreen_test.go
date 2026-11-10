@@ -1235,7 +1235,7 @@ func TestKernelProfileAutoPinning(t *testing.T) {
 	// Pretend this machine was detected with 16 CPUs (housekeeping 0-1).
 	m.cpuIso = system.CPUIsolation{
 		Total: 16, Housekeeping: "0-1", Isolated: "2-15", OK: true,
-		Args: "isolcpus=managed_irq,domain,2-15 nohz_full=2-15 rcu_nocbs=2-15 irqaffinity=0-1",
+		Args: "isolcpus=domain,nohz,managed_irq,2-15 nohz_full=2-15 rcu_nocbs=2-15 irqaffinity=0-1",
 	}
 	m.hugeGiB = 7
 	// Select Telco/RAN.
@@ -1244,7 +1244,7 @@ func TestKernelProfileAutoPinning(t *testing.T) {
 	}
 	m = send(m, enter)
 	for _, want := range []string{
-		"isolcpus=managed_irq,domain,2-15", "nohz_full=2-15", "rcu_nocbs=2-15",
+		"isolcpus=domain,nohz,managed_irq,2-15", "nohz_full=2-15", "rcu_nocbs=2-15",
 		"irqaffinity=0-1", "hugepages=7", "mitigations=off",
 	} {
 		if !strings.Contains(m.kernelArgs, want) {
@@ -1282,5 +1282,21 @@ func TestConsolesAppliedToKernelArgs(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("console=tty0 duplicated %d times", n)
+	}
+}
+
+func TestTelcoAMDPstate(t *testing.T) {
+	// AMD: the isolation profile gets amd_pstate=active.
+	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m.cpuVendor = "amd"
+	p := kernelProfileByName("Telco/RAN")
+	if a := m.profileArgs(p); !strings.Contains(a, "amd_pstate=active") {
+		t.Errorf("AMD Telco missing amd_pstate=active: %s", a)
+	}
+	// Intel: no amd_pstate, no intel_pstate (HWP kept by default).
+	m.cpuVendor = "intel"
+	a := m.profileArgs(p)
+	if strings.Contains(a, "amd_pstate") || strings.Contains(a, "intel_pstate") {
+		t.Errorf("Intel Telco should not force a pstate driver: %s", a)
 	}
 }

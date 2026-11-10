@@ -1830,10 +1830,10 @@ var kernelProfiles = []kernelProfile{
 	{name: "Desktop", args: "quiet splash mitigations=auto transparent_hugepage=madvise"},
 	{name: "Desktop LowLatency", args: "quiet splash preempt=full threadirqs transparent_hugepage=madvise"},
 	{name: "LowLatency", args: "preempt=full threadirqs nowatchdog nmi_watchdog=0"},
-	{name: "Realtime", args: "preempt=full threadirqs nowatchdog nmi_watchdog=0 skew_tick=1 nosoftlockup rcu_nocb_poll clocksource=tsc tsc=reliable", isolate: true},
+	{name: "Realtime", args: "preempt=full threadirqs nowatchdog nmi_watchdog=0 skew_tick=1 nohz=on nosoftlockup rcu_nocb_poll rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 rcutree.kthread_prio=99 clocksource=tsc tsc=reliable", isolate: true},
 	{name: "Audio/Video Workstation", args: "preempt=full threadirqs tsc=reliable nowatchdog nmi_watchdog=0 cpufreq.default_governor=performance"},
-	{name: "Telco/RAN", args: "preempt=full processor.max_cstate=1 intel_idle.max_cstate=0 idle=poll nosoftlockup nowatchdog nmi_watchdog=0 rcu_nocb_poll hpet=disable clocksource=tsc tsc=reliable mitigations=off cpufreq.default_governor=performance",
-		note: "mitigations=off + idle=poll: max performance, less secure, high power.", isolate: true, huge: true},
+	{name: "Telco/RAN", args: "preempt=full idle=poll skew_tick=1 nohz=on mce=off nosoftlockup nowatchdog nmi_watchdog=0 rcu_nocb_poll rcupdate.rcu_cpu_stall_suppress=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 rcupdate.rcu_task_stall_timeout=0 rcutree.kthread_prio=99 clocksource=tsc tsc=reliable net.ifnames=1 intel_iommu=on iommu=pt mitigations=off cpufreq.default_governor=performance",
+		note: "mitigations=off + idle=poll: max performance, less secure, high power. idle=poll replaces C-state limiting (per SUSE telco).", isolate: true, huge: true},
 	{name: "HPC / Compute", args: "mitigations=off nowatchdog nmi_watchdog=0 processor.max_cstate=1 intel_idle.max_cstate=0 cpufreq.default_governor=performance transparent_hugepage=always",
 		note: "mitigations=off: faster, but disables CPU-vulnerability mitigations."},
 	{name: "Virtualization Host (KVM)", args: "intel_iommu=on iommu=pt kvm-intel.nested=1 transparent_hugepage=never"},
@@ -1888,6 +1888,12 @@ func (m model) profileArgs(p kernelProfile) string {
 	// Rewrite CPU-vendor-specific tokens (intel_iommu/kvm-intel/… ↔ amd) to
 	// match the detected processor, so an Intel-written profile boots on AMD.
 	args := system.VendorKernelArgs(p.args, m.cpuVendor)
+	// On AMD, use the modern P-state driver in active mode (hardware-managed
+	// P-states, the AMD equivalent of keeping Intel HWP) for the isolation
+	// profiles. Intel keeps HWP by default, so nothing is added there.
+	if p.isolate && m.cpuVendor == "amd" {
+		args = strings.TrimSpace(args + " amd_pstate=active")
+	}
 	if p.isolate && m.cpuIso.OK {
 		args = strings.TrimSpace(args + " " + m.cpuIso.Args)
 	}

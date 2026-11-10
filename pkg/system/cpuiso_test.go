@@ -33,7 +33,7 @@ func TestComputeCPUIsolation(t *testing.T) {
 	if !ci.OK || ci.Total != 16 || ci.Housekeeping != "0-1" || ci.Isolated != "2-15" {
 		t.Fatalf("isolation wrong: %+v", ci)
 	}
-	for _, want := range []string{"isolcpus=managed_irq,domain,2-15", "nohz_full=2-15", "rcu_nocbs=2-15", "irqaffinity=0-1"} {
+	for _, want := range []string{"isolcpus=domain,nohz,managed_irq,2-15", "nohz_full=2-15", "rcu_nocbs=2-15", "irqaffinity=0-1"} {
 		if !contains([]string{ci.Args}, want) && !containsSub(ci.Args, want) {
 			t.Errorf("args missing %q: %s", want, ci.Args)
 		}

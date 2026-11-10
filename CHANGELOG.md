@@ -21,6 +21,19 @@ for what will and will not be allowed to change once releases begin.
   a profile weakens security or power (`mitigations=off`, `idle=poll`).
   Picking a profile fills the arguments; Custom opens the manual Add/Remove
   form.
+- The Realtime and Telco/RAN profiles were aligned with SUSE Edge/Telco Cloud's
+  documented low-latency kernel command line: the computed isolation now uses
+  `isolcpus=domain,nohz,managed_irq,<list>` (the `nohz` flag was missing);
+  Telco/RAN replaces C-state limiting with `idle=poll` alone (per SUSE, not
+  `intel_idle.max_cstate`/`processor.max_cstate` as well) and gains the RCU and
+  tick tuning — `skew_tick=1 nohz=on mce=off rcu_nocb_poll
+  rcupdate.rcu_cpu_stall_suppress=1 rcupdate.rcu_expedited=1
+  rcupdate.rcu_normal_after_boot=1 rcupdate.rcu_task_stall_timeout=0
+  rcutree.kthread_prio=99` — plus `net.ifnames=1` and `iommu=pt` with the
+  vendor IOMMU (for DPDK/SR-IOV/vRAN). On AMD, these profiles also get
+  `amd_pstate=active` (hardware-managed P-states, the AMD counterpart to Intel
+  HWP); Intel keeps HWP by default with no `intel_pstate` forced. Realtime
+  gains the lighter RCU/tick subset.
 - Kernel profiles adapt to the CPU vendor: the installer detects Intel vs AMD
   (`GenuineIntel`/`AuthenticAMD`/`HygonGenuine` in /proc/cpuinfo) and rewrites
   the vendor-specific arguments so an Intel-written profile boots correctly on

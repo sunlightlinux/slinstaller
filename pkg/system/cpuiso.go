@@ -32,8 +32,9 @@ type CPUIsolation struct {
 // CPUIsolation computes the partitioning following common industry practice
 // (tuned's cpu-partitioning, OpenShift's performance profile): reserve the
 // first physical core — cpu0 and its SMT sibling — for housekeeping, isolate
-// every other online CPU, and apply isolcpus (managed_irq,domain), nohz_full
-// and rcu_nocbs to the isolated set with irqaffinity on the housekeeping set.
+// every other online CPU, and apply isolcpus (domain,nohz,managed_irq),
+// nohz_full and rcu_nocbs to the isolated set with irqaffinity on the
+// housekeeping set.
 func ComputeCPUIsolation() CPUIsolation {
 	online := onlineCPUs()
 	if len(online) == 0 {
@@ -60,7 +61,7 @@ func ComputeCPUIsolation() CPUIsolation {
 	}
 	ci.Housekeeping = formatRanges(hk)
 	ci.Isolated = formatRanges(iso)
-	ci.Args = fmt.Sprintf("isolcpus=managed_irq,domain,%s nohz_full=%s rcu_nocbs=%s irqaffinity=%s",
+	ci.Args = fmt.Sprintf("isolcpus=domain,nohz,managed_irq,%s nohz_full=%s rcu_nocbs=%s irqaffinity=%s",
 		ci.Isolated, ci.Isolated, ci.Isolated, ci.Housekeeping)
 	ci.OK = true
 	return ci
