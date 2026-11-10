@@ -21,6 +21,18 @@ for what will and will not be allowed to change once releases begin.
   a profile weakens security or power (`mitigations=off`, `idle=poll`).
   Picking a profile fills the arguments; Custom opens the manual Add/Remove
   form.
+- The installer detects the live system's consoles and applies them to the
+  installed system's kernel command line: it mirrors the live kernel's
+  `console=` arguments (which carry the serial speed/format, e.g.
+  `console=ttyS0,115200n8`), or, failing that, reads the active consoles from
+  sysfs and gives a serial one a default speed. A serial-console install thus
+  comes up on the same serial port, and a graphical one on the VGA console.
+  The detected consoles are shown in the Kernel Command Line picker and merged
+  into the kernel arguments (de-duplicated), regardless of the chosen profile.
+  New `pkg/system.DetectConsoles`. Added "General (robust defaults)" and
+  "VM Guest" profiles covering common base arguments (tsc=reliable,
+  page_alloc.shuffle, rcu_expedited, rootfstype, cryptomgr.notests,
+  no_timer_check, noreplace-smp).
 - The Realtime and Telco/RAN profiles now compute CPU isolation from the live
   machine instead of leaving it to Custom: the installer reserves the first
   physical core (cpu0 and its SMT sibling) for the OS and IRQs and isolates

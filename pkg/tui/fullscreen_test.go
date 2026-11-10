@@ -1252,3 +1252,35 @@ func TestKernelProfileAutoPinning(t *testing.T) {
 		}
 	}
 }
+
+func TestConsolesAppliedToKernelArgs(t *testing.T) {
+	m := newModel(oneDisk())
+	m.users = []userEntry{{Login: "me", Password: "pw", Admin: true}}
+	m.consoles = []string{"console=tty0", "console=ttyS0,115200n8"}
+	m.kernelArgs = "quiet"
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ka := cfg.KernelArguments
+	if ka == nil {
+		t.Fatal("no kernel arguments")
+	}
+	for _, want := range []string{"quiet", "console=tty0", "console=ttyS0,115200n8"} {
+		if !containsStr(ka.Add, want) {
+			t.Errorf("kernel args missing %q: %v", want, ka.Add)
+		}
+	}
+	// A console already present is not duplicated.
+	m.kernelArgs = "console=tty0 quiet"
+	cfg, _ = m.buildConfig()
+	n := 0
+	for _, a := range cfg.KernelArguments.Add {
+		if a == "console=tty0" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("console=tty0 duplicated %d times", n)
+	}
+}

@@ -79,7 +79,9 @@ func RunFullscreen() (*config.Config, string, error) {
 		return nil, "", fmt.Errorf("tui: no disk to install to (disks that are mounted, in use as swap or the live medium are not offered)")
 	}
 
-	final, err := tea.NewProgram(newModel(disks), tea.WithAltScreen()).Run()
+	start := newModel(disks)
+	start.consoles = system.DetectConsoles() // mirror the live consoles onto the target
+	final, err := tea.NewProgram(start, tea.WithAltScreen()).Run()
 	if err != nil {
 		return nil, "", err
 	}
@@ -122,7 +124,16 @@ func (m model) buildConfig() (*config.Config, error) {
 		AllowInsecureHTTP: m.allowInsecure,
 		ReusePartitions:   m.safeInstall, // Safe install reuses the disk
 	}
-	if add, rem := strings.Fields(m.kernelArgs), strings.Fields(m.kernelArgsRemove); len(add) > 0 || len(rem) > 0 {
+	// The kernel command line: the chosen arguments, plus the live system's
+	// console= arguments so the installed system uses the same console
+	// (important for a serial-console install). Duplicates are dropped.
+	add := strings.Fields(m.kernelArgs)
+	for _, c := range m.consoles {
+		if !containsStr(add, c) {
+			add = append(add, c)
+		}
+	}
+	if rem := strings.Fields(m.kernelArgsRemove); len(add) > 0 || len(rem) > 0 {
 		cfg.KernelArguments = &config.KernelArguments{Add: add, Remove: rem}
 	}
 	cfg.Packages = splitList(m.packages)
@@ -411,7 +422,8 @@ type model struct {
 	// CPU-isolation profile can fill isolcpus=/nohz_full=/… and hugepages.
 	cpuIso   system.CPUIsolation
 	hugeGiB  int
-	packages string // extra xbps packages (shown as "bundles")
+	consoles []string // live console= args, applied to the installed system
+	packages string   // extra xbps packages (shown as "bundles")
 
 	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
 	// default; a static one carries its CIDR address, gateway and DNS.
@@ -1810,6 +1822,8 @@ type kernelProfile struct {
 }
 
 var kernelProfiles = []kernelProfile{
+	{name: "General (robust defaults)", args: "quiet tsc=reliable page_alloc.shuffle=1 rcupdate.rcu_expedited=1 rootfstype=ext4,btrfs,xfs,f2fs cryptomgr.notests mitigations=auto"},
+	{name: "VM Guest", args: "no_timer_check noreplace-smp tsc=reliable rootfstype=ext4,btrfs,xfs,f2fs mitigations=auto"},
 	{name: "Server", args: "mitigations=auto transparent_hugepage=madvise cpufreq.default_governor=schedutil"},
 	{name: "Desktop", args: "quiet splash mitigations=auto transparent_hugepage=madvise"},
 	{name: "Desktop LowLatency", args: "quiet splash preempt=full threadirqs transparent_hugepage=madvise"},
@@ -1852,6 +1866,15 @@ func kernelProfileIndex(name string) int {
 
 func kernelProfileByName(name string) kernelProfile {
 	return kernelProfiles[kernelProfileIndex(name)]
+}
+
+func containsStr(ss []string, v string) bool {
+	for _, s := range ss {
+		if s == v {
+			return true
+		}
+	}
+	return false
 }
 
 // profileArgs is a profile's effective arguments: its base set plus, for a
@@ -2750,6 +2773,9 @@ func (m model) listView() string {
 	items := m.filtered()
 
 	header := []string{itemLabel.Width(w).Render("  " + sectionTitles[m.editing])}
+	if m.editing == secKernelArgs && len(m.consoles) > 0 {
+		header = append(header, footer.Width(w).Render("  consoles (auto): "+clip(strings.Join(m.consoles, " "), w-20)))
+	}
 	if m.listFilter != "" {
 		header = append(header, footer.Width(w).Render("  filter: "+m.listFilter))
 	}
