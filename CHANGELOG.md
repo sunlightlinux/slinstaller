@@ -21,6 +21,11 @@ for what will and will not be allowed to change once releases begin.
   a profile weakens security or power (`mitigations=off`, `idle=poll`).
   Picking a profile fills the arguments; Custom opens the manual Add/Remove
   form.
+- Added a "Telco/RAN Max Perf" profile for maximum determinism: the Telco/RAN
+  base plus the aggressive extras seen on RHEL-RT boxes — `cpuidle.off=1
+  processor.max_cstate=0` (kill C-states entirely, beyond `idle=poll`),
+  `pcie_aspm=off` (PCIe latency) and `audit=0`. Its note warns it draws the
+  most power and is the least secure; the balanced Telco/RAN stays the default.
 - The Realtime and Telco/RAN profiles were aligned with SUSE Edge/Telco Cloud's
   documented low-latency kernel command line: the computed isolation now uses
   `isolcpus=domain,nohz,managed_irq,<list>` (the `nohz` flag was missing);

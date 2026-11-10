@@ -1823,6 +1823,13 @@ type kernelProfile struct {
 	huge    bool // append computed 1GiB hugepages (DPDK/telco)
 }
 
+// telcoArgs is the balanced SUSE-aligned Telco/RAN base; telcoMaxArgs stacks
+// the aggressive extras seen on RHEL-RT boxes (kill cpuidle entirely, PCIe
+// ASPM and audit) for maximum determinism at the cost of power and security.
+const telcoArgs = "preempt=full idle=poll skew_tick=1 nohz=on mce=off nosoftlockup nowatchdog nmi_watchdog=0 rcu_nocb_poll rcupdate.rcu_cpu_stall_suppress=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 rcupdate.rcu_task_stall_timeout=0 rcutree.kthread_prio=99 clocksource=tsc tsc=reliable net.ifnames=1 intel_iommu=on iommu=pt mitigations=off cpufreq.default_governor=performance"
+
+const telcoMaxArgs = telcoArgs + " cpuidle.off=1 processor.max_cstate=0 pcie_aspm=off audit=0"
+
 var kernelProfiles = []kernelProfile{
 	{name: "General (robust defaults)", args: "quiet tsc=reliable page_alloc.shuffle=1 rcupdate.rcu_expedited=1 rootfstype=ext4,btrfs,xfs,f2fs cryptomgr.notests mitigations=auto"},
 	{name: "VM Guest", args: "no_timer_check noreplace-smp tsc=reliable rootfstype=ext4,btrfs,xfs,f2fs mitigations=auto"},
@@ -1832,8 +1839,10 @@ var kernelProfiles = []kernelProfile{
 	{name: "LowLatency", args: "preempt=full threadirqs nowatchdog nmi_watchdog=0"},
 	{name: "Realtime", args: "preempt=full threadirqs nowatchdog nmi_watchdog=0 skew_tick=1 nohz=on nosoftlockup rcu_nocb_poll rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 rcutree.kthread_prio=99 clocksource=tsc tsc=reliable", isolate: true},
 	{name: "Audio/Video Workstation", args: "preempt=full threadirqs tsc=reliable nowatchdog nmi_watchdog=0 cpufreq.default_governor=performance"},
-	{name: "Telco/RAN", args: "preempt=full idle=poll skew_tick=1 nohz=on mce=off nosoftlockup nowatchdog nmi_watchdog=0 rcu_nocb_poll rcupdate.rcu_cpu_stall_suppress=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 rcupdate.rcu_task_stall_timeout=0 rcutree.kthread_prio=99 clocksource=tsc tsc=reliable net.ifnames=1 intel_iommu=on iommu=pt mitigations=off cpufreq.default_governor=performance",
+	{name: "Telco/RAN", args: telcoArgs,
 		note: "mitigations=off + idle=poll: max performance, less secure, high power. idle=poll replaces C-state limiting (per SUSE telco).", isolate: true, huge: true},
+	{name: "Telco/RAN Max Perf", args: telcoMaxArgs,
+		note: "Telco/RAN plus cpuidle.off/max_cstate=0, pcie_aspm=off, audit=0: maximum determinism, highest power draw, weakest security.", isolate: true, huge: true},
 	{name: "HPC / Compute", args: "mitigations=off nowatchdog nmi_watchdog=0 processor.max_cstate=1 intel_idle.max_cstate=0 cpufreq.default_governor=performance transparent_hugepage=always",
 		note: "mitigations=off: faster, but disables CPU-vulnerability mitigations."},
 	{name: "Virtualization Host (KVM)", args: "intel_iommu=on iommu=pt kvm-intel.nested=1 transparent_hugepage=never"},

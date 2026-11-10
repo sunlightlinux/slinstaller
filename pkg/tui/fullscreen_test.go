@@ -1300,3 +1300,18 @@ func TestTelcoAMDPstate(t *testing.T) {
 		t.Errorf("Intel Telco should not force a pstate driver: %s", a)
 	}
 }
+
+func TestTelcoMaxPerfProfile(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m.cpuVendor = "amd"
+	p := kernelProfileByName("Telco/RAN Max Perf")
+	a := m.profileArgs(p)
+	for _, want := range []string{
+		"idle=poll", "cpuidle.off=1", "processor.max_cstate=0", "pcie_aspm=off",
+		"audit=0", "amd_pstate=active", "amd_iommu=on",
+	} {
+		if !strings.Contains(a, want) {
+			t.Errorf("Telco Max Perf missing %q:\n%s", want, a)
+		}
+	}
+}
