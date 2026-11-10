@@ -1315,3 +1315,26 @@ func TestTelcoMaxPerfProfile(t *testing.T) {
 		}
 	}
 }
+
+func TestGPUPassthroughConsumerProfile(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	p := kernelProfileByName("GPU Passthrough (consumer/ACS)")
+	// Intel: igfx_off and ACS override are kept.
+	m.cpuVendor = "intel"
+	for _, want := range []string{"intel_iommu=on,igfx_off", "pcie_acs_override=downstream", "vfio-pci.disable_vga=1", "kvm-intel.nested=1"} {
+		if !strings.Contains(m.profileArgs(p), want) {
+			t.Errorf("Intel consumer passthrough missing %q: %s", want, m.profileArgs(p))
+		}
+	}
+	// AMD: iommu normalizes (igfx_off dropped), kvm and ACS adapt.
+	m.cpuVendor = "amd"
+	a := m.profileArgs(p)
+	for _, want := range []string{"amd_iommu=on", "kvm-amd.nested=1", "pcie_acs_override=downstream"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("AMD consumer passthrough missing %q: %s", want, a)
+		}
+	}
+	if strings.Contains(a, "igfx_off") || strings.Contains(a, "intel_iommu") {
+		t.Errorf("AMD should not carry Intel iommu/igfx_off: %s", a)
+	}
+}

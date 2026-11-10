@@ -21,6 +21,12 @@ for what will and will not be allowed to change once releases begin.
   a profile weakens security or power (`mitigations=off`, `idle=poll`).
   Picking a profile fills the arguments; Custom opens the manual Add/Remove
   form.
+- Added a "GPU Passthrough (consumer/ACS)" profile for passthrough on consumer
+  boards: the VFIO base plus `pcie_acs_override=downstream` (split IOMMU groups)
+  and `intel_iommu=on,igfx_off` (ignore the iGPU, which stays with the host). The
+  strict "GPU Passthrough (VFIO)" profile keeps full isolation. The vendor
+  rewriter now preserves IOMMU flags (igfx_off) on the matching CPU vendor and
+  drops them only when switching to the other vendor (amd_iommu=on on AMD).
 - Added a "Telco/RAN Max Perf" profile for maximum determinism: the Telco/RAN
   base plus the aggressive extras seen on RHEL-RT boxes — `cpuidle.off=1
   processor.max_cstate=0` (kill C-states entirely, beyond `idle=poll`),
