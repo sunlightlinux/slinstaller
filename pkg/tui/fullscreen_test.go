@@ -14,6 +14,7 @@ import (
 
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
+	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
 func send(m tea.Model, k tea.KeyMsg) model {
@@ -1226,5 +1227,28 @@ func TestKernelProfileFilterAndNotes(t *testing.T) {
 	m = send(m, enter)
 	if m.kernelProfile != "Hardened (AppArmor)" || !strings.Contains(m.kernelArgs, "apparmor=1") {
 		t.Fatalf("profile=%q args=%q", m.kernelProfile, m.kernelArgs)
+	}
+}
+
+func TestKernelProfileAutoPinning(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	// Pretend this machine was detected with 16 CPUs (housekeeping 0-1).
+	m.cpuIso = system.CPUIsolation{
+		Total: 16, Housekeeping: "0-1", Isolated: "2-15", OK: true,
+		Args: "isolcpus=managed_irq,domain,2-15 nohz_full=2-15 rcu_nocbs=2-15 irqaffinity=0-1",
+	}
+	m.hugeGiB = 7
+	// Select Telco/RAN.
+	for i := 0; i < kernelProfileIndex("Telco/RAN"); i++ {
+		m = send(m, down)
+	}
+	m = send(m, enter)
+	for _, want := range []string{
+		"isolcpus=managed_irq,domain,2-15", "nohz_full=2-15", "rcu_nocbs=2-15",
+		"irqaffinity=0-1", "hugepages=7", "mitigations=off",
+	} {
+		if !strings.Contains(m.kernelArgs, want) {
+			t.Errorf("Telco/RAN args missing %q:\n%s", want, m.kernelArgs)
+		}
 	}
 }

@@ -18,9 +18,19 @@ for what will and will not be allowed to change once releases begin.
   GPU Passthrough (VFIO), Intel GPU Workstation, Containers/Cloud, Hardened
   (AppArmor), Laptop/Power Save, Debug/Verbose Boot, and Custom. The
   highlighted profile previews its arguments, and a trade-off note warns when
-  a profile weakens security or power (`mitigations=off`, `idle=poll`) or
-  needs a machine-specific step (pinning CPUs). Picking a profile fills the
-  arguments; Custom opens the manual Add/Remove form.
+  a profile weakens security or power (`mitigations=off`, `idle=poll`).
+  Picking a profile fills the arguments; Custom opens the manual Add/Remove
+  form.
+- The Realtime and Telco/RAN profiles now compute CPU isolation from the live
+  machine instead of leaving it to Custom: the installer reserves the first
+  physical core (cpu0 and its SMT sibling) for the OS and IRQs and isolates
+  the rest, filling `isolcpus=managed_irq,domain=`, `nohz_full=`, `rcu_nocbs=`
+  and `irqaffinity=` with the computed CPU lists — following tuned's
+  cpu-partitioning / OpenShift performance-profile practice. Telco/RAN also
+  reserves 1 GiB hugepages sized from RAM (about a quarter, always leaving
+  4 GiB for the OS). The profile's note reports what was computed, and a
+  machine with too few cores is left general-purpose. New `pkg/system`
+  `ComputeCPUIsolation` and `HugepagesGiB`.
 - Safe Installation (install alongside an existing system): the Installation
   Media dialog's Safe mode now works. It reuses the disk's existing EFI
   System Partition and adds a root partition in the largest unallocated

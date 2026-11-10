@@ -406,7 +406,12 @@ type model struct {
 	kernelArgs       string // kernel arguments to add, space-separated
 	kernelArgsRemove string // kernel arguments to remove, space-separated
 	kernelProfile    string // the chosen Kernel Command Line profile name
-	packages         string // extra xbps packages (shown as "bundles")
+
+	// Computed from the live machine when the kernel-profile list opens, so a
+	// CPU-isolation profile can fill isolcpus=/nohz_full=/… and hugepages.
+	cpuIso   system.CPUIsolation
+	hugeGiB  int
+	packages string // extra xbps packages (shown as "bundles")
 
 	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
 	// default; a static one carries its CIDR address, gateway and DNS.
@@ -1198,7 +1203,7 @@ func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.input = ti
 					return m, textinput.Blink
 				}
-				m.kernelArgs, m.kernelArgsRemove = p.args, ""
+				m.kernelArgs, m.kernelArgsRemove = m.profileArgs(p), ""
 			}
 		}
 		m.view = viewHub
@@ -1682,7 +1687,11 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		return m, nil
 	case secKernelArgs:
 		// A scrollable, type-to-filter list of command-line profiles; the
-		// last ("Custom") opens the manual Add/Remove form.
+		// last ("Custom") opens the manual Add/Remove form. Compute the CPU
+		// isolation and hugepages for this machine so an isolation profile can
+		// fill them in.
+		m.cpuIso = system.ComputeCPUIsolation()
+		m.hugeGiB = system.HugepagesGiB()
 		return m.openList(kernelProfileNames(), m.kernelProfile), nil
 	case secMirror:
 		m.view = viewMiniForm
@@ -1793,32 +1802,33 @@ var kernelOptions = []string{"", "kernel-native", "kernel-lts"}
 // (isolcpus=, nohz_full=<list>) is left to Custom, since it depends on the
 // host's topology.
 type kernelProfile struct {
-	name string
-	args string
-	note string
+	name    string
+	args    string
+	note    string
+	isolate bool // append computed isolcpus=/nohz_full=/rcu_nocbs=/irqaffinity=
+	huge    bool // append computed 1GiB hugepages (DPDK/telco)
 }
 
 var kernelProfiles = []kernelProfile{
-	{"Server", "mitigations=auto transparent_hugepage=madvise cpufreq.default_governor=schedutil", ""},
-	{"Desktop", "quiet splash mitigations=auto transparent_hugepage=madvise", ""},
-	{"Desktop LowLatency", "quiet splash preempt=full threadirqs transparent_hugepage=madvise", ""},
-	{"LowLatency", "preempt=full threadirqs nowatchdog nmi_watchdog=0", ""},
-	{"Realtime", "preempt=full threadirqs nowatchdog nmi_watchdog=0 skew_tick=1 nosoftlockup rcu_nocb_poll clocksource=tsc tsc=reliable",
-		"Pin CPUs in Custom: isolcpus=/nohz_full=/rcu_nocbs=<cpu-list>."},
-	{"Audio/Video Workstation", "preempt=full threadirqs tsc=reliable nowatchdog nmi_watchdog=0 cpufreq.default_governor=performance", ""},
-	{"Telco/RAN", "preempt=full processor.max_cstate=1 intel_idle.max_cstate=0 idle=poll nosoftlockup nowatchdog nmi_watchdog=0 rcu_nocb_poll hpet=disable clocksource=tsc tsc=reliable mitigations=off cpufreq.default_governor=performance",
-		"mitigations=off + idle=poll: max performance, less secure, high power. Pin CPUs in Custom."},
-	{"HPC / Compute", "mitigations=off nowatchdog nmi_watchdog=0 processor.max_cstate=1 intel_idle.max_cstate=0 cpufreq.default_governor=performance transparent_hugepage=always",
-		"mitigations=off: faster, but disables CPU-vulnerability mitigations."},
-	{"Virtualization Host (KVM)", "intel_iommu=on iommu=pt kvm-intel.nested=1 transparent_hugepage=never", ""},
-	{"GPU Passthrough (VFIO)", "intel_iommu=on iommu=pt vfio-pci.disable_vga=1 kvm-intel.nested=1 transparent_hugepage=never",
-		"ACS override (pcie_acs_override=) needs a patched kernel; add in Custom."},
-	{"Intel GPU Workstation", "i915.force_probe=* i915.enable_guc=3 i915.enable_fbc=1 mitigations=auto", ""},
-	{"Containers / Cloud", "cgroup_no_v1=all cgroup_enable=memory swapaccount=1 transparent_hugepage=madvise mitigations=auto", ""},
-	{"Hardened (AppArmor)", "apparmor=1 security=apparmor lockdown=integrity mitigations=auto audit=1", ""},
-	{"Laptop / Power Save", "quiet splash mitigations=auto pcie_aspm=force pcie_aspm.policy=powersave nmi_watchdog=0", ""},
-	{"Debug / Verbose Boot", "loglevel=7 ignore_loglevel initcall_debug earlyprintk=vga", ""},
-	{"Custom", "", "Type the Add / Remove arguments yourself."},
+	{name: "Server", args: "mitigations=auto transparent_hugepage=madvise cpufreq.default_governor=schedutil"},
+	{name: "Desktop", args: "quiet splash mitigations=auto transparent_hugepage=madvise"},
+	{name: "Desktop LowLatency", args: "quiet splash preempt=full threadirqs transparent_hugepage=madvise"},
+	{name: "LowLatency", args: "preempt=full threadirqs nowatchdog nmi_watchdog=0"},
+	{name: "Realtime", args: "preempt=full threadirqs nowatchdog nmi_watchdog=0 skew_tick=1 nosoftlockup rcu_nocb_poll clocksource=tsc tsc=reliable", isolate: true},
+	{name: "Audio/Video Workstation", args: "preempt=full threadirqs tsc=reliable nowatchdog nmi_watchdog=0 cpufreq.default_governor=performance"},
+	{name: "Telco/RAN", args: "preempt=full processor.max_cstate=1 intel_idle.max_cstate=0 idle=poll nosoftlockup nowatchdog nmi_watchdog=0 rcu_nocb_poll hpet=disable clocksource=tsc tsc=reliable mitigations=off cpufreq.default_governor=performance",
+		note: "mitigations=off + idle=poll: max performance, less secure, high power.", isolate: true, huge: true},
+	{name: "HPC / Compute", args: "mitigations=off nowatchdog nmi_watchdog=0 processor.max_cstate=1 intel_idle.max_cstate=0 cpufreq.default_governor=performance transparent_hugepage=always",
+		note: "mitigations=off: faster, but disables CPU-vulnerability mitigations."},
+	{name: "Virtualization Host (KVM)", args: "intel_iommu=on iommu=pt kvm-intel.nested=1 transparent_hugepage=never"},
+	{name: "GPU Passthrough (VFIO)", args: "intel_iommu=on iommu=pt vfio-pci.disable_vga=1 kvm-intel.nested=1 transparent_hugepage=never",
+		note: "ACS override (pcie_acs_override=) needs a patched kernel; add in Custom."},
+	{name: "Intel GPU Workstation", args: "i915.force_probe=* i915.enable_guc=3 i915.enable_fbc=1 mitigations=auto"},
+	{name: "Containers / Cloud", args: "cgroup_no_v1=all cgroup_enable=memory swapaccount=1 transparent_hugepage=madvise mitigations=auto"},
+	{name: "Hardened (AppArmor)", args: "apparmor=1 security=apparmor lockdown=integrity mitigations=auto audit=1"},
+	{name: "Laptop / Power Save", args: "quiet splash mitigations=auto pcie_aspm=force pcie_aspm.policy=powersave nmi_watchdog=0"},
+	{name: "Debug / Verbose Boot", args: "loglevel=7 ignore_loglevel initcall_debug earlyprintk=vga"},
+	{name: "Custom", note: "Type the Add / Remove arguments yourself."},
 }
 
 // kernelProfileNames is the picker's list; kernelProfileIndex finds a name
@@ -1842,6 +1852,41 @@ func kernelProfileIndex(name string) int {
 
 func kernelProfileByName(name string) kernelProfile {
 	return kernelProfiles[kernelProfileIndex(name)]
+}
+
+// profileArgs is a profile's effective arguments: its base set plus, for a
+// CPU-isolation profile, the isolcpus=/nohz_full=/… computed from this
+// machine's cores, and the computed 1GiB hugepages for a DPDK/telco profile.
+func (m model) profileArgs(p kernelProfile) string {
+	args := p.args
+	if p.isolate && m.cpuIso.OK {
+		args = strings.TrimSpace(args + " " + m.cpuIso.Args)
+	}
+	if p.huge && m.hugeGiB > 0 {
+		args = strings.TrimSpace(args + fmt.Sprintf(" default_hugepagesz=1G hugepagesz=1G hugepages=%d", m.hugeGiB))
+	}
+	return args
+}
+
+// profileNote is the note shown for a profile: for a CPU-isolation profile it
+// reports what was auto-computed for this machine (or that there were too few
+// cores to isolate), else the profile's static note.
+func (m model) profileNote(p kernelProfile) string {
+	if !p.isolate {
+		return p.note
+	}
+	if !m.cpuIso.OK {
+		return "Too few CPUs to isolate automatically; pin CPUs in Custom."
+	}
+	n := fmt.Sprintf("Auto-pinned for %d CPUs: isolated %s, housekeeping %s.",
+		m.cpuIso.Total, m.cpuIso.Isolated, m.cpuIso.Housekeeping)
+	if p.huge && m.hugeGiB > 0 {
+		n += fmt.Sprintf(" %d x 1GiB hugepages.", m.hugeGiB)
+	}
+	if p.note != "" {
+		n = p.note + " " + n
+	}
+	return n
 }
 
 // yesNoOptions back the Enabled/Disabled choice page (Automatic OS Updates).
@@ -2715,16 +2760,18 @@ func (m model) listView() string {
 	var preview []string
 	if m.editing == secKernelArgs && m.listCursor < len(items) {
 		p := kernelProfileByName(items[m.listCursor])
-		args := p.args
+		args := m.profileArgs(p)
 		if args == "" {
 			args = "(no extra arguments)"
 		}
 		preview = append(preview, lineBG.Width(w).Render(""))
-		for _, ln := range wrapWords(args, w-4, 2) {
+		for _, ln := range wrapWords(args, w-4, 3) {
 			preview = append(preview, footer.Width(w).Render("  "+ln))
 		}
-		if p.note != "" {
-			preview = append(preview, warnText.Width(w).Render("  "+clip(p.note, w-4)))
+		if note := m.profileNote(p); note != "" {
+			for _, ln := range wrapWords(note, w-4, 2) {
+				preview = append(preview, warnText.Width(w).Render("  "+ln))
+			}
 		}
 	}
 
