@@ -21,6 +21,14 @@ for what will and will not be allowed to change once releases begin.
   a profile weakens security or power (`mitigations=off`, `idle=poll`).
   Picking a profile fills the arguments; Custom opens the manual Add/Remove
   form.
+- Kernel profiles adapt to the CPU vendor: the installer detects Intel vs AMD
+  (`GenuineIntel`/`AuthenticAMD`/`HygonGenuine` in /proc/cpuinfo) and rewrites
+  the vendor-specific arguments so an Intel-written profile boots correctly on
+  AMD (Ryzen/EPYC/Threadripper) and vice versa — `intel_iommu=`↔`amd_iommu=`,
+  `kvm-intel.nested`↔`kvm-amd.nested`, and the Intel-only `intel_idle.max_cstate=`
+  dropped on AMD (processor.max_cstate covers it). A non-x86 host leaves the
+  arguments untouched. New `pkg/system.CPUVendor` and `VendorKernelArgs`, plus
+  an "AMD GPU Workstation" profile (amdgpu) alongside the Intel one.
 - The installer detects the live system's consoles and applies them to the
   installed system's kernel command line: it mirrors the live kernel's
   `console=` arguments (which carry the serial speed/format, e.g.

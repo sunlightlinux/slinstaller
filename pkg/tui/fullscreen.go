@@ -81,6 +81,7 @@ func RunFullscreen() (*config.Config, string, error) {
 
 	start := newModel(disks)
 	start.consoles = system.DetectConsoles() // mirror the live consoles onto the target
+	start.cpuVendor = system.CPUVendor()     // rewrite vendor-specific kernel args (intel/amd)
 	final, err := tea.NewProgram(start, tea.WithAltScreen()).Run()
 	if err != nil {
 		return nil, "", err
@@ -420,10 +421,11 @@ type model struct {
 
 	// Computed from the live machine when the kernel-profile list opens, so a
 	// CPU-isolation profile can fill isolcpus=/nohz_full=/… and hugepages.
-	cpuIso   system.CPUIsolation
-	hugeGiB  int
-	consoles []string // live console= args, applied to the installed system
-	packages string   // extra xbps packages (shown as "bundles")
+	cpuIso    system.CPUIsolation
+	hugeGiB   int
+	consoles  []string // live console= args, applied to the installed system
+	cpuVendor string   // "intel"/"amd"/""; rewrites vendor-specific kernel args
+	packages  string   // extra xbps packages (shown as "bundles")
 
 	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
 	// default; a static one carries its CIDR address, gateway and DNS.
@@ -1838,6 +1840,8 @@ var kernelProfiles = []kernelProfile{
 	{name: "GPU Passthrough (VFIO)", args: "intel_iommu=on iommu=pt vfio-pci.disable_vga=1 kvm-intel.nested=1 transparent_hugepage=never",
 		note: "ACS override (pcie_acs_override=) needs a patched kernel; add in Custom."},
 	{name: "Intel GPU Workstation", args: "i915.force_probe=* i915.enable_guc=3 i915.enable_fbc=1 mitigations=auto"},
+	{name: "AMD GPU Workstation", args: "amdgpu.ppfeaturemask=0xffffffff amdgpu.dc=1 amdgpu.gpu_recovery=1 mitigations=auto",
+		note: "ppfeaturemask=0xffffffff unlocks power/clock control (CoreCtrl); use only on a discrete AMD GPU."},
 	{name: "Containers / Cloud", args: "cgroup_no_v1=all cgroup_enable=memory swapaccount=1 transparent_hugepage=madvise mitigations=auto"},
 	{name: "Hardened (AppArmor)", args: "apparmor=1 security=apparmor lockdown=integrity mitigations=auto audit=1"},
 	{name: "Laptop / Power Save", args: "quiet splash mitigations=auto pcie_aspm=force pcie_aspm.policy=powersave nmi_watchdog=0"},
@@ -1881,7 +1885,9 @@ func containsStr(ss []string, v string) bool {
 // CPU-isolation profile, the isolcpus=/nohz_full=/… computed from this
 // machine's cores, and the computed 1GiB hugepages for a DPDK/telco profile.
 func (m model) profileArgs(p kernelProfile) string {
-	args := p.args
+	// Rewrite CPU-vendor-specific tokens (intel_iommu/kvm-intel/… ↔ amd) to
+	// match the detected processor, so an Intel-written profile boots on AMD.
+	args := system.VendorKernelArgs(p.args, m.cpuVendor)
 	if p.isolate && m.cpuIso.OK {
 		args = strings.TrimSpace(args + " " + m.cpuIso.Args)
 	}
