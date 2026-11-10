@@ -29,12 +29,18 @@ type CPUIsolation struct {
 	OK           bool
 }
 
-// CPUIsolation computes the partitioning following common industry practice
-// (tuned's cpu-partitioning, OpenShift's performance profile): reserve the
-// first physical core — cpu0 and its SMT sibling — for housekeeping, isolate
-// every other online CPU, and apply isolcpus (domain,nohz,managed_irq),
-// nohz_full and rcu_nocbs to the isolated set with irqaffinity on the
-// housekeeping set.
+// hkRatio scales the housekeeping reservation with machine size: roughly one
+// housekeeping logical CPU per this many online CPUs, matching SUSE's telco
+// examples (8 of 128, 4 of 64). Always at least one whole physical core.
+const hkRatio = 16
+
+// ComputeCPUIsolation computes the partitioning following common industry
+// practice (tuned's cpu-partitioning, OpenShift's performance profile, SUSE
+// Telco Cloud): reserve the first N physical cores for housekeeping — scaled
+// with machine size and kept as whole SMT-sibling groups so no core is split
+// between housekeeping and isolated — isolate every other online CPU, and
+// apply isolcpus (domain,nohz,managed_irq), nohz_full and rcu_nocbs to the
+// isolated set with irqaffinity on the housekeeping set.
 func ComputeCPUIsolation() CPUIsolation {
 	online := onlineCPUs()
 	if len(online) == 0 {
@@ -42,20 +48,27 @@ func ComputeCPUIsolation() CPUIsolation {
 			online = append(online, i)
 		}
 	}
-	hk := cpu0Siblings(online)
-	hkSet := map[int]bool{}
-	for _, c := range hk {
-		hkSet[c] = true
-	}
-	var iso []int
-	for _, c := range online {
-		if !hkSet[c] {
-			iso = append(iso, c)
-		}
-	}
+	cores := physicalCores(online)
 	ci := CPUIsolation{Total: len(online)}
-	// Fewer than three online CPUs, or nothing left after housekeeping, is
-	// too small to partition — the whole machine stays general-purpose.
+
+	// Reserve whole physical cores for housekeeping: at least one, and enough
+	// to reach about Total/hkRatio logical CPUs.
+	target := ci.Total / hkRatio
+	var hk, iso []int
+	hkLogical := 0
+	for i, core := range cores {
+		if i >= 1 && hkLogical >= target {
+			iso = append(iso, core...)
+			continue
+		}
+		hk = append(hk, core...)
+		hkLogical += len(core)
+	}
+	sort.Ints(hk)
+	sort.Ints(iso)
+
+	// Fewer than three online CPUs, or nothing left to isolate, is too small
+	// to partition — the whole machine stays general-purpose.
 	if ci.Total < 3 || len(iso) == 0 {
 		return ci
 	}
@@ -65,6 +78,49 @@ func ComputeCPUIsolation() CPUIsolation {
 		ci.Isolated, ci.Isolated, ci.Isolated, ci.Housekeeping)
 	ci.OK = true
 	return ci
+}
+
+// physicalCores groups the online CPUs into physical cores by their SMT thread
+// siblings, each core's threads sorted, cores ordered by lowest thread id. A
+// CPU whose topology is unreadable becomes a core of its own.
+func physicalCores(online []int) [][]int {
+	onlineSet := map[int]bool{}
+	for _, c := range online {
+		onlineSet[c] = true
+	}
+	seen := map[int]bool{}
+	var cores [][]int
+	for _, c := range online {
+		if seen[c] {
+			continue
+		}
+		sibs := threadSiblings(c)
+		var core []int
+		for _, s := range sibs {
+			if onlineSet[s] {
+				core = append(core, s)
+				seen[s] = true
+			}
+		}
+		if len(core) == 0 {
+			core = []int{c}
+			seen[c] = true
+		}
+		sort.Ints(core)
+		cores = append(cores, core)
+	}
+	sort.Slice(cores, func(i, j int) bool { return cores[i][0] < cores[j][0] })
+	return cores
+}
+
+// threadSiblings reads cpuN's SMT thread-sibling list, or just the CPU itself
+// when the topology is unreadable.
+func threadSiblings(cpu int) []int {
+	data, err := os.ReadFile(fmt.Sprintf("%s/cpu%d/topology/thread_siblings_list", cpuSysDir, cpu))
+	if err != nil {
+		return []int{cpu}
+	}
+	return parseCPUList(strings.TrimSpace(string(data)))
 }
 
 // HugepagesGiB is a conservative number of 1 GiB hugepages to reserve for a
@@ -105,31 +161,6 @@ func onlineCPUs() []int {
 		return nil
 	}
 	return parseCPUList(strings.TrimSpace(string(data)))
-}
-
-// cpu0Siblings returns cpu0's SMT thread siblings (a full physical core), or
-// just cpu0 when the topology is unreadable or has no siblings.
-func cpu0Siblings(online []int) []int {
-	data, err := os.ReadFile(cpuSysDir + "/cpu0/topology/thread_siblings_list")
-	if err != nil {
-		return []int{0}
-	}
-	sib := parseCPUList(strings.TrimSpace(string(data)))
-	// Keep only online siblings.
-	onlineSet := map[int]bool{}
-	for _, c := range online {
-		onlineSet[c] = true
-	}
-	var out []int
-	for _, c := range sib {
-		if onlineSet[c] {
-			out = append(out, c)
-		}
-	}
-	if len(out) == 0 {
-		return []int{0}
-	}
-	return out
 }
 
 // parseCPUList parses a kernel CPU list such as "0-3,8,10-11" into sorted ids.

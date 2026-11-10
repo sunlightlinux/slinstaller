@@ -1,8 +1,11 @@
 package system
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -69,4 +72,52 @@ func containsSub(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// writeTopology lays out a fake sysfs for n physical cores with the given SMT
+// width, enumerated thread-major (0..n-1 = thread0, n..2n-1 = thread1, ...).
+func writeTopology(t *testing.T, cores, smt int) {
+	t.Helper()
+	saved := cpuSysDir
+	t.Cleanup(func() { cpuSysDir = saved })
+	dir := t.TempDir()
+	cpuSysDir = dir
+	total := cores * smt
+	os.WriteFile(filepath.Join(dir, "online"), []byte(fmt.Sprintf("0-%d\n", total-1)), 0o644)
+	for c := 0; c < cores; c++ {
+		var sib []string
+		for s := 0; s < smt; s++ {
+			sib = append(sib, strconv.Itoa(c+s*cores))
+		}
+		list := strings.Join(sib, ",")
+		for s := 0; s < smt; s++ {
+			cpu := c + s*cores
+			d := filepath.Join(dir, fmt.Sprintf("cpu%d", cpu), "topology")
+			os.MkdirAll(d, 0o755)
+			os.WriteFile(filepath.Join(d, "thread_siblings_list"), []byte(list+"\n"), 0o644)
+		}
+	}
+}
+
+func TestCPUIsolationScales(t *testing.T) {
+	// 64 physical cores, SMT2 = 128 logical: reserve 4 whole cores (8 logical),
+	// matching SUSE's telco example count, kept as sibling groups.
+	writeTopology(t, 64, 2)
+	ci := ComputeCPUIsolation()
+	if !ci.OK || ci.Total != 128 {
+		t.Fatalf("got %+v", ci)
+	}
+	if ci.Housekeeping != "0-3,64-67" {
+		t.Errorf("housekeeping = %q, want 0-3,64-67", ci.Housekeeping)
+	}
+	if ci.Isolated != "4-63,68-127" {
+		t.Errorf("isolated = %q, want 4-63,68-127", ci.Isolated)
+	}
+
+	// 4 cores, SMT2 = 8 logical: minimum one whole core reserved.
+	writeTopology(t, 4, 2)
+	ci = ComputeCPUIsolation()
+	if ci.Housekeeping != "0,4" || ci.Isolated != "1-3,5-7" {
+		t.Errorf("small machine hk=%q iso=%q, want 0,4 / 1-3,5-7", ci.Housekeeping, ci.Isolated)
+	}
 }

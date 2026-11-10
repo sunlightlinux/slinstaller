@@ -55,10 +55,13 @@ for what will and will not be allowed to change once releases begin.
   page_alloc.shuffle, rcu_expedited, rootfstype, cryptomgr.notests,
   no_timer_check, noreplace-smp).
 - The Realtime and Telco/RAN profiles now compute CPU isolation from the live
-  machine instead of leaving it to Custom: the installer reserves the first
-  physical core (cpu0 and its SMT sibling) for the OS and IRQs and isolates
-  the rest, filling `isolcpus=managed_irq,domain=`, `nohz_full=`, `rcu_nocbs=`
-  and `irqaffinity=` with the computed CPU lists — following tuned's
+  machine instead of leaving it to Custom: the installer reserves whole
+  physical cores for the OS and IRQs — scaled with machine size (about one
+  housekeeping logical CPU per 16, so 8 of 128 as in SUSE's telco examples,
+  always at least one whole core) and kept as complete SMT-sibling groups so
+  no core is split — isolates the rest, and fills
+  `isolcpus=domain,nohz,managed_irq=`, `nohz_full=`, `rcu_nocbs=` and
+  `irqaffinity=` with the computed CPU lists — following tuned's
   cpu-partitioning / OpenShift performance-profile practice. Telco/RAN also
   reserves 1 GiB hugepages sized from RAM (about a quarter, always leaving
   4 GiB for the OS). The profile's note reports what was computed, and a
