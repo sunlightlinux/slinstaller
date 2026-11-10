@@ -1814,10 +1814,10 @@ var kernelProfiles = []kernelProfile{
 	{"GPU Passthrough (VFIO)", "intel_iommu=on iommu=pt vfio-pci.disable_vga=1 kvm-intel.nested=1 transparent_hugepage=never",
 		"ACS override (pcie_acs_override=) needs a patched kernel; add in Custom."},
 	{"Intel GPU Workstation", "i915.force_probe=* i915.enable_guc=3 i915.enable_fbc=1 mitigations=auto", ""},
-	{"Containers / Cloud", "systemd.unified_cgroup_hierarchy=1 cgroup_enable=memory swapaccount=1 transparent_hugepage=madvise mitigations=auto", ""},
+	{"Containers / Cloud", "cgroup_no_v1=all cgroup_enable=memory swapaccount=1 transparent_hugepage=madvise mitigations=auto", ""},
 	{"Hardened (AppArmor)", "apparmor=1 security=apparmor lockdown=integrity mitigations=auto audit=1", ""},
 	{"Laptop / Power Save", "quiet splash mitigations=auto pcie_aspm=force pcie_aspm.policy=powersave nmi_watchdog=0", ""},
-	{"Debug / Verbose Boot", "loglevel=7 systemd.show_status=1 initcall_debug ignore_loglevel", ""},
+	{"Debug / Verbose Boot", "loglevel=7 ignore_loglevel initcall_debug earlyprintk=vga", ""},
 	{"Custom", "", "Type the Add / Remove arguments yourself."},
 }
 
