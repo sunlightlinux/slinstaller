@@ -81,7 +81,8 @@ func RunFullscreen() (*config.Config, string, error) {
 
 	start := newModel(disks)
 	start.consoles = system.DetectConsoles() // mirror the live consoles onto the target
-	start.cpuVendor = system.CPUVendor()     // rewrite vendor-specific kernel args (intel/amd)
+	start.vmName, start.vm = system.VirtualMachine()
+	start.cpuVendor = system.CPUVendor() // rewrite vendor-specific kernel args (intel/amd)
 	final, err := tea.NewProgram(start, tea.WithAltScreen()).Run()
 	if err != nil {
 		return nil, "", err
@@ -425,6 +426,8 @@ type model struct {
 	hugeGiB   int
 	consoles  []string // live console= args, applied to the installed system
 	cpuVendor string   // "intel"/"amd"/""; rewrites vendor-specific kernel args
+	vm        bool     // running under a hypervisor
+	vmName    string   // its name from the firmware, when it gives one
 	packages  string   // extra xbps packages (shown as "bundles")
 
 	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
@@ -1218,6 +1221,12 @@ func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, textinput.Blink
 				}
 				m.kernelArgs, m.kernelArgsRemove = m.profileArgs(p), ""
+				if warn := m.busyIdleWarning(m.kernelArgs); warn != nil {
+					m.view = viewHub
+					m.popup = popupMessage
+					m.popupMsg = append([]string{"Kernel Command Line", ""}, warn...)
+					return m, nil
+				}
 			}
 		}
 		m.view = viewHub
@@ -1918,10 +1927,52 @@ func (m model) profileArgs(p kernelProfile) string {
 	return args
 }
 
+// busyIdle reports kernel arguments that keep idle CPUs running instead of
+// sleeping, which is the point of a telco profile on its own hardware.
+func busyIdle(args string) bool {
+	for _, a := range strings.Fields(args) {
+		if a == "idle=poll" || a == "cpuidle.off=1" {
+			return true
+		}
+	}
+	return false
+}
+
+// busyIdleWarning is what to say when such arguments are chosen in a virtual
+// machine, where every virtual CPU spinning is a host CPU busy: a Telco/RAN
+// profile held a 12-CPU guest at 95% while it did nothing. Nil when it does not
+// apply. The choice stands; testing the profile in a VM is legitimate.
+func (m model) busyIdleWarning(args string) []string {
+	if !m.vm || !busyIdle(args) {
+		return nil
+	}
+	what := "This is a virtual machine"
+	if m.vmName != "" {
+		what += " (" + m.vmName + ")"
+	}
+	return []string{
+		what + ".",
+		"idle=poll / cpuidle.off=1 keep every virtual CPU",
+		"busy, so the host sees all of them near 100%",
+		"even while Sunlight is idle.",
+		"",
+		"Fine for testing this profile. For everyday use",
+		"in a VM, choose the VM Guest profile.",
+	}
+}
+
 // profileNote is the note shown for a profile: for a CPU-isolation profile it
 // reports what was auto-computed for this machine (or that there were too few
 // cores to isolate), else the profile's static note.
 func (m model) profileNote(p kernelProfile) string {
+	n := m.profileNoteBase(p)
+	if m.vm && busyIdle(p.args) {
+		n = "In a VM this keeps every host CPU busy. " + n
+	}
+	return n
+}
+
+func (m model) profileNoteBase(p kernelProfile) string {
 	if !p.isolate {
 		return p.note
 	}

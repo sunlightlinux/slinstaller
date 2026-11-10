@@ -1370,3 +1370,46 @@ func TestNvidiaProfile(t *testing.T) {
 		t.Errorf("NVIDIA profile should not carry iommu args: %s", a)
 	}
 }
+
+// In a VM, a profile that keeps idle CPUs spinning says so: a Telco/RAN profile
+// held a 12-CPU guest at 95% doing nothing. On bare metal, or for a profile
+// without such arguments, nothing is said. The choice stands either way.
+func TestBusyIdleProfileWarnsInAVM(t *testing.T) {
+	pick := func(vm bool, name string) model {
+		t.Helper()
+		m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+		m.vm, m.vmName = vm, "QEMU"
+		idx := -1
+		for i, p := range kernelProfiles {
+			if p.name == name {
+				idx = i
+			}
+		}
+		if idx < 0 {
+			t.Fatalf("no profile %q", name)
+		}
+		for i := 0; i < idx; i++ {
+			m = send(m, down)
+		}
+		return send(m, enter)
+	}
+
+	for _, name := range []string{"Telco/RAN", "Telco/RAN Max Perf"} {
+		m := pick(true, name)
+		if m.popup != popupMessage || !strings.Contains(strings.Join(m.popupMsg, " "), "QEMU") {
+			t.Errorf("%s in a VM: popup %v %q", name, m.popup, m.popupMsg)
+		}
+		if m.kernelProfile != name || !strings.Contains(m.kernelArgs, "idle=poll") {
+			t.Errorf("%s in a VM: the choice did not stand: %q", name, m.kernelArgs)
+		}
+		if !strings.Contains(m.profileNote(kernelProfileByName(name)), "host CPU busy") {
+			t.Errorf("%s in a VM: no note", name)
+		}
+		if m = pick(false, name); m.popup == popupMessage {
+			t.Errorf("%s on bare metal: warned %q", name, m.popupMsg)
+		}
+	}
+	if m := pick(true, "VM Guest"); m.popup == popupMessage {
+		t.Errorf("VM Guest in a VM: warned %q", m.popupMsg)
+	}
+}
