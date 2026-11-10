@@ -1202,3 +1202,29 @@ func TestKernelProfileSelect(t *testing.T) {
 		t.Errorf("config kernel-arguments empty")
 	}
 }
+
+func TestKernelProfileFilterAndNotes(t *testing.T) {
+	// The expanded set has the industry profiles.
+	for _, name := range []string{"HPC / Compute", "Virtualization Host (KVM)", "GPU Passthrough (VFIO)", "Hardened (AppArmor)"} {
+		if kernelProfileByName(name).name != name {
+			t.Errorf("missing profile %q", name)
+		}
+	}
+	// Trade-off profiles carry a note.
+	if kernelProfileByName("Telco/RAN").note == "" || kernelProfileByName("HPC / Compute").note == "" {
+		t.Error("aggressive profiles should carry a trade-off note")
+	}
+
+	// Type-to-filter narrows the list, and Enter selects the match.
+	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	for _, r := range "Hardened" {
+		m = send(m, runes(string(r)))
+	}
+	if got := m.filtered(); len(got) != 1 || got[0] != "Hardened (AppArmor)" {
+		t.Fatalf("filter 'Hardened' = %v", got)
+	}
+	m = send(m, enter)
+	if m.kernelProfile != "Hardened (AppArmor)" || !strings.Contains(m.kernelArgs, "apparmor=1") {
+		t.Fatalf("profile=%q args=%q", m.kernelProfile, m.kernelArgs)
+	}
+}

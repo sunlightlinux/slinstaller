@@ -1185,6 +1185,20 @@ func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.language = sel
 			case secKeyboard:
 				m.keyboard = sel
+			case secKernelArgs:
+				p := kernelProfileByName(sel)
+				m.kernelProfile = p.name
+				if p.name == "Custom" {
+					// Keep the current args and open the manual Add/Remove form.
+					m.view = viewMiniForm
+					m.formStep = 0
+					ti := textinput.New()
+					ti.Focus()
+					ti.SetValue(m.kernelArgs)
+					m.input = ti
+					return m, textinput.Blink
+				}
+				m.kernelArgs, m.kernelArgsRemove = p.args, ""
 			}
 		}
 		m.view = viewHub
@@ -1667,12 +1681,9 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.btnFocus = focusList
 		return m, nil
 	case secKernelArgs:
-		// A list of command-line profiles; the last ("Custom") opens the
-		// manual Add/Remove form.
-		m.view = viewSectionChoice
-		m.choices = kernelProfileNames()
-		m.edCursor = kernelProfileIndex(m.kernelProfile)
-		return m, nil
+		// A scrollable, type-to-filter list of command-line profiles; the
+		// last ("Custom") opens the manual Add/Remove form.
+		return m.openList(kernelProfileNames(), m.kernelProfile), nil
 	case secMirror:
 		m.view = viewMiniForm
 		m.formStep = 0
@@ -1776,28 +1787,42 @@ func (m model) openList(items []string, current string) model {
 var kernelOptions = []string{"", "kernel-native", "kernel-lts"}
 
 // kernelProfile is a named set of kernel command-line arguments: a starting
-// point the operator picks, then edits as Custom if needed. The args are
-// sensible, machine-independent defaults — tuning that needs specific CPU
-// ranges (isolcpus=, nohz_full=<list>) is left to Custom.
+// point the operator picks and then edits as Custom if needed. note flags a
+// trade-off (security/power) or a machine-specific step. The args are valid,
+// machine-independent defaults — tuning that needs specific CPU ranges
+// (isolcpus=, nohz_full=<list>) is left to Custom, since it depends on the
+// host's topology.
 type kernelProfile struct {
 	name string
 	args string
+	note string
 }
 
 var kernelProfiles = []kernelProfile{
-	{"Server", "mitigations=auto transparent_hugepage=madvise"},
-	{"Desktop", "quiet splash mitigations=auto"},
-	{"Desktop LowLatency", "quiet splash preempt=full threadirqs"},
-	{"LowLatency", "preempt=full threadirqs"},
-	{"Realtime", "preempt=full threadirqs nowatchdog nmi_watchdog=0 skew_tick=1"},
-	{"Audio/Video Workstation", "preempt=full threadirqs tsc=reliable nowatchdog"},
-	{"Telco/RAN", "preempt=full processor.max_cstate=1 intel_idle.max_cstate=0 idle=poll nosoftlockup"},
-	{"Virtualization Optimized", "intel_iommu=on iommu=pt transparent_hugepage=never"},
-	{"Custom", ""}, // type the Add/Remove arguments yourself
+	{"Server", "mitigations=auto transparent_hugepage=madvise cpufreq.default_governor=schedutil", ""},
+	{"Desktop", "quiet splash mitigations=auto transparent_hugepage=madvise", ""},
+	{"Desktop LowLatency", "quiet splash preempt=full threadirqs transparent_hugepage=madvise", ""},
+	{"LowLatency", "preempt=full threadirqs nowatchdog nmi_watchdog=0", ""},
+	{"Realtime", "preempt=full threadirqs nowatchdog nmi_watchdog=0 skew_tick=1 nosoftlockup rcu_nocb_poll clocksource=tsc tsc=reliable",
+		"Pin CPUs in Custom: isolcpus=/nohz_full=/rcu_nocbs=<cpu-list>."},
+	{"Audio/Video Workstation", "preempt=full threadirqs tsc=reliable nowatchdog nmi_watchdog=0 cpufreq.default_governor=performance", ""},
+	{"Telco/RAN", "preempt=full processor.max_cstate=1 intel_idle.max_cstate=0 idle=poll nosoftlockup nowatchdog nmi_watchdog=0 rcu_nocb_poll hpet=disable clocksource=tsc tsc=reliable mitigations=off cpufreq.default_governor=performance",
+		"mitigations=off + idle=poll: max performance, less secure, high power. Pin CPUs in Custom."},
+	{"HPC / Compute", "mitigations=off nowatchdog nmi_watchdog=0 processor.max_cstate=1 intel_idle.max_cstate=0 cpufreq.default_governor=performance transparent_hugepage=always",
+		"mitigations=off: faster, but disables CPU-vulnerability mitigations."},
+	{"Virtualization Host (KVM)", "intel_iommu=on iommu=pt kvm-intel.nested=1 transparent_hugepage=never", ""},
+	{"GPU Passthrough (VFIO)", "intel_iommu=on iommu=pt vfio-pci.disable_vga=1 kvm-intel.nested=1 transparent_hugepage=never",
+		"ACS override (pcie_acs_override=) needs a patched kernel; add in Custom."},
+	{"Intel GPU Workstation", "i915.force_probe=* i915.enable_guc=3 i915.enable_fbc=1 mitigations=auto", ""},
+	{"Containers / Cloud", "systemd.unified_cgroup_hierarchy=1 cgroup_enable=memory swapaccount=1 transparent_hugepage=madvise mitigations=auto", ""},
+	{"Hardened (AppArmor)", "apparmor=1 security=apparmor lockdown=integrity mitigations=auto audit=1", ""},
+	{"Laptop / Power Save", "quiet splash mitigations=auto pcie_aspm=force pcie_aspm.policy=powersave nmi_watchdog=0", ""},
+	{"Debug / Verbose Boot", "loglevel=7 systemd.show_status=1 initcall_debug ignore_loglevel", ""},
+	{"Custom", "", "Type the Add / Remove arguments yourself."},
 }
 
 // kernelProfileNames is the picker's list; kernelProfileIndex finds a name
-// (defaulting to the first entry).
+// (defaulting to the first entry); kernelProfileByName returns the profile.
 func kernelProfileNames() []string {
 	out := make([]string, len(kernelProfiles))
 	for i, p := range kernelProfiles {
@@ -1813,6 +1838,10 @@ func kernelProfileIndex(name string) int {
 		}
 	}
 	return 0
+}
+
+func kernelProfileByName(name string) kernelProfile {
+	return kernelProfiles[kernelProfileIndex(name)]
 }
 
 // yesNoOptions back the Enabled/Disabled choice page (Automatic OS Updates).
@@ -1988,21 +2017,6 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch m.editing {
 			case secAutoUpdate:
 				m.autoUpdate = m.edCursor + 1 // 1 Enabled, 2 Disabled
-			case secKernelArgs:
-				p := kernelProfiles[m.edCursor]
-				m.kernelProfile = p.name
-				if p.name == "Custom" {
-					// Keep the current args and open the manual Add/Remove form.
-					m.choices = nil
-					m.view = viewMiniForm
-					m.formStep = 0
-					ti := textinput.New()
-					ti.Focus()
-					ti.SetValue(m.kernelArgs)
-					m.input = ti
-					return m, textinput.Blink
-				}
-				m.kernelArgs, m.kernelArgsRemove = p.args, ""
 			default: // kernel
 				m.kernel = m.choices[m.edCursor]
 			}
@@ -2646,12 +2660,8 @@ func (m model) choiceView() string {
 		}
 		return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
 	}
-	title := sectionTitles[m.editing]
-	if m.editing == secKernelArgs {
-		title = "Select a Kernel Command Line Profile"
-	}
 	body := []string{
-		itemLabel.Width(w).Render("  " + title),
+		itemLabel.Width(w).Render("  " + sectionTitles[m.editing]),
 		lineBG.Width(w).Render(""),
 	}
 	// Automatic OS Updates carries an explanatory paragraph above the
@@ -2668,14 +2678,6 @@ func (m model) choiceView() string {
 			label = kernelLabel(c)
 		}
 		body = append(body, row(w, i == m.edCursor, label))
-	}
-	// For the kernel-profile picker, preview the highlighted profile's args.
-	if m.editing == secKernelArgs && m.edCursor < len(kernelProfiles) {
-		args := kernelProfiles[m.edCursor].args
-		if args == "" {
-			args = "(type your own Add / Remove arguments)"
-		}
-		body = append(body, lineBG.Width(w).Render(""), footer.Width(w).Render("  "+clip(args, w-4)))
 	}
 	return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
 }
@@ -2708,9 +2710,27 @@ func (m model) listView() string {
 	}
 	header = append(header, rule(w))
 
+	// For the kernel-profile picker, preview the highlighted profile's
+	// arguments (wrapped) and any trade-off note, below the list.
+	var preview []string
+	if m.editing == secKernelArgs && m.listCursor < len(items) {
+		p := kernelProfileByName(items[m.listCursor])
+		args := p.args
+		if args == "" {
+			args = "(no extra arguments)"
+		}
+		preview = append(preview, lineBG.Width(w).Render(""))
+		for _, ln := range wrapWords(args, w-4, 2) {
+			preview = append(preview, footer.Width(w).Render("  "+ln))
+		}
+		if p.note != "" {
+			preview = append(preview, warnText.Width(w).Render("  "+clip(p.note, w-4)))
+		}
+	}
+
 	// Window the list to the remaining height, leaving room for a blank, the
-	// buttons and the footer.
-	rows := panelHeight(m.height) - len(header) - 4
+	// preview, the buttons and the footer.
+	rows := panelHeight(m.height) - len(header) - len(preview) - 4
 	if rows < 3 {
 		rows = 3
 	}
@@ -2743,9 +2763,36 @@ func (m model) listView() string {
 		body = append(body, strings.Split(block, "\n")...)
 	}
 
+	body = append(body, preview...)
 	body = append(body, lineBG.Width(w).Render(""))
 	return m.screenButtons(body, []string{m.cancelConfirm(w)},
 		"type to filter · [Tab] buttons · [Enter] select · [Esc] back")
+}
+
+// wrapWords wraps s to width on word boundaries, at most maxLines lines; a
+// truncated last line ends with " ...".
+func wrapWords(s string, width, maxLines int) []string {
+	var lines []string
+	cur := ""
+	for _, wd := range strings.Fields(s) {
+		switch {
+		case cur == "":
+			cur = wd
+		case len(cur)+1+len(wd) <= width:
+			cur += " " + wd
+		default:
+			lines = append(lines, cur)
+			cur = wd
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+		lines[maxLines-1] = clip(lines[maxLines-1]+" ...", width)
+	}
+	return lines
 }
 
 // miniFormView renders the two-field forms. Kernel Command Line shows an

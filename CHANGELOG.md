@@ -12,11 +12,15 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
-- Kernel Command Line now offers a list of predefined profiles — Server,
-  Desktop, Desktop LowLatency, LowLatency, Realtime, Audio/Video Workstation,
-  Telco/RAN, Virtualization Optimized, and Custom — each with a sensible,
-  machine-independent set of kernel arguments shown as a preview. Picking a
-  profile fills the arguments; Custom opens the manual Add/Remove form.
+- Kernel Command Line offers a scrollable, type-to-filter list of predefined
+  profiles — Server, Desktop, Desktop LowLatency, LowLatency, Realtime,
+  Audio/Video Workstation, Telco/RAN, HPC/Compute, Virtualization Host (KVM),
+  GPU Passthrough (VFIO), Intel GPU Workstation, Containers/Cloud, Hardened
+  (AppArmor), Laptop/Power Save, Debug/Verbose Boot, and Custom. The
+  highlighted profile previews its arguments, and a trade-off note warns when
+  a profile weakens security or power (`mitigations=off`, `idle=poll`) or
+  needs a machine-specific step (pinning CPUs). Picking a profile fills the
+  arguments; Custom opens the manual Add/Remove form.
 - Safe Installation (install alongside an existing system): the Installation
   Media dialog's Safe mode now works. It reuses the disk's existing EFI
   System Partition and adds a root partition in the largest unallocated
