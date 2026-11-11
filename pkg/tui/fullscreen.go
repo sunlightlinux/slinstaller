@@ -1632,17 +1632,23 @@ func adminTag(admin bool) string {
 
 // visibleSections lists the sections shown under a tab. Required holds the
 // everyday choices; Advanced the ones most installs leave at their defaults —
-// mirroring clr-installer's [R] Required / [A] Advanced split.
-func visibleSections(tab int) []section {
+// mirroring clr-installer's [R] Required / [A] Advanced split. The AMD P-State
+// section is shown only on an AMD host, since Intel tunes P-states differently
+// (intel_pstate/HWP), so it would do nothing there.
+func (m model) visibleSections(tab int) []section {
 	if tab == 1 {
-		return []section{secNetwork, secProxy, secTestNet, secBundles, secHostname,
-			secKernel, secLogLevel, secAmdPstate, secMirror, secAutoUpdate, secSaveConfig}
+		adv := []section{secNetwork, secProxy, secTestNet, secBundles, secHostname,
+			secKernel, secLogLevel}
+		if m.cpuVendor == "amd" {
+			adv = append(adv, secAmdPstate)
+		}
+		return append(adv, secMirror, secAutoUpdate, secSaveConfig)
 	}
 	return []section{secTimezone, secLanguage, secKeyboard, secMedia, secUser, secKernelArgs}
 }
 
 func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	vis := visibleSections(m.tab)
+	vis := m.visibleSections(m.tab)
 	last := len(vis) + 1 // Install at len(vis), Cancel at len(vis)+1
 	switch key.String() {
 	case "up", "k":
@@ -2853,7 +2859,7 @@ func (m model) hubView() string {
 
 	// The section list, windowed to a fixed height with a scrollbar on the
 	// right — the way clr-installer shows there is more below.
-	vis := visibleSections(m.tab)
+	vis := m.visibleSections(m.tab)
 	win := hubVisibleCount(m.height)
 	if win > len(vis) {
 		win = len(vis)

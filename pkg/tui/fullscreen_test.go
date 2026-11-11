@@ -239,7 +239,7 @@ func openSectionInTab(m model, tab int, s section) model {
 	if tab == 1 {
 		m = send(m, runes("A"))
 	}
-	vis := visibleSections(tab)
+	vis := m.visibleSections(tab)
 	for i, vs := range vis {
 		if vs == s {
 			for j := 0; j < i; j++ {
@@ -284,7 +284,7 @@ func TestViewsRenderNoPanic(t *testing.T) {
 
 	// Advanced tab: open each section and render.
 	adv := send(hub, runes("A"))
-	for i, s := range visibleSections(1) {
+	for i, s := range adv.visibleSections(1) {
 		mm := adv
 		for j := 0; j < i; j++ {
 			mm = send(mm, down)
@@ -297,7 +297,7 @@ func TestViewsRenderNoPanic(t *testing.T) {
 
 	// Test Network Settings opens a spinner popup (secondary progress).
 	tn := adv
-	for _, s := range visibleSections(1) {
+	for _, s := range adv.visibleSections(1) {
 		if s == secTestNet {
 			break
 		}
@@ -325,7 +325,7 @@ func TestViewsRenderNoPanic(t *testing.T) {
 
 	// The not-ready warning popup (Install pressed on an empty layout).
 	warn := hub
-	for warn.hubCursor < len(visibleSections(0)) {
+	for warn.hubCursor < len(warn.visibleSections(0)) {
 		warn = send(warn, down)
 	}
 	warn = withSize(send(warn, enter)) // Install while incomplete
@@ -537,7 +537,7 @@ func TestHubScrollbar(t *testing.T) {
 
 	// Moving the cursor to the bottom scrolls it into view.
 	m := adv
-	for i := 0; i < len(visibleSections(1))-1; i++ {
+	for i := 0; i < len(m.visibleSections(1))-1; i++ {
 		m = send(m, down)
 	}
 	if !strings.Contains(plain(m.View()), "Automatic OS Updates") {
@@ -556,7 +556,7 @@ func TestHubScrollbar(t *testing.T) {
 		}
 	}
 	rm := req
-	for i := 0; i < len(visibleSections(0))-1; i++ {
+	for i := 0; i < len(rm.visibleSections(0))-1; i++ {
 		rm = send(rm, down)
 	}
 	if !strings.Contains(plain(rm.View()), sectionLabels[secKernelArgs]) {
@@ -1438,7 +1438,7 @@ func TestBusyIdleProfileWarnsInAVM(t *testing.T) {
 func TestLogLevelSection(t *testing.T) {
 	// The section lives on the Advanced tab.
 	found := false
-	for _, s := range visibleSections(1) {
+	for _, s := range newModel(oneDisk()).visibleSections(1) {
 		if s == secLogLevel {
 			found = true
 		}
@@ -1474,6 +1474,25 @@ func TestLogLevelSection(t *testing.T) {
 	}
 	if cfg.ConsoleLogLevel == nil || *cfg.ConsoleLogLevel != 3 {
 		t.Fatalf("ConsoleLogLevel = %v", cfg.ConsoleLogLevel)
+	}
+}
+
+func TestAmdPstateVisibleOnlyOnAMD(t *testing.T) {
+	has := func(cpuVendor string) bool {
+		m := newModel(oneDisk())
+		m.cpuVendor = cpuVendor
+		for _, s := range m.visibleSections(1) {
+			if s == secAmdPstate {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("amd") {
+		t.Error("AMD P-State section missing on an AMD host")
+	}
+	if has("intel") || has("") {
+		t.Error("AMD P-State section should be hidden on non-AMD hosts")
 	}
 }
 
