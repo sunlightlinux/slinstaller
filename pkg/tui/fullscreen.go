@@ -83,6 +83,8 @@ func RunFullscreen() (*config.Config, string, error) {
 	start.consoles = system.DetectConsoles() // mirror the live consoles onto the target
 	start.vmName, start.vm = system.VirtualMachine()
 	start.cpuVendor = system.CPUVendor() // rewrite vendor-specific kernel args (intel/amd)
+	start.epp = system.EPPCapable()      // EPP (active-mode) CPUs use only performance/powersave
+	start.eppPrefs = system.EPPPreferences()
 	final, err := tea.NewProgram(start, tea.WithAltScreen()).Run()
 	if err != nil {
 		return nil, "", err
@@ -459,6 +461,8 @@ type model struct {
 	amdPstate   string   // amd_pstate mode for AMD RT/telco profiles: active/passive/guided or ""
 	intelPstate string   // intel_pstate mode for Intel RT/telco profiles: active/passive/… or "" (keep HWP)
 	governor    string   // cpufreq.default_governor= override; "" = keep the profile's own
+	epp         bool     // CPU is EPP-capable (active mode): only performance/powersave governors
+	eppPrefs    []string // available EPP preferences (energy_performance_available_preferences)
 	crashkernel string   // kdump memory reservation (crashkernel=); "" = kdump off
 	panicSecs   string   // seconds to auto-reboot after a panic (panic=); "" = not set
 	packages    string   // extra xbps packages (shown as "bundles")
@@ -1855,9 +1859,10 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.edCursor = intelPstateToIndex(m.intelPstate)
 		return m, nil
 	case secGovernor:
+		opts, vals := m.governorChoices()
 		m.view = viewSectionChoice
-		m.choices = governorOptions
-		m.edCursor = governorToIndex(m.governor)
+		m.choices = opts
+		m.edCursor = indexOf(vals, m.governor)
 		return m, nil
 	case secKdump:
 		// Two-field form: crashkernel reservation, then panic-reboot seconds.
@@ -2078,20 +2083,15 @@ var governorOptions = []string{
 
 var governorValues = []string{"", "performance", "schedutil", "ondemand", "conservative", "powersave"}
 
-func governorToIndex(g string) int {
-	for i, v := range governorValues {
-		if v == g {
-			return i
-		}
+// governorChoices returns the governor labels and their values for this
+// machine. An EPP-capable CPU (active mode) only has performance and powersave
+// governors; a passive/legacy driver has the classic set.
+func (m model) governorChoices() (opts, vals []string) {
+	if m.epp {
+		return []string{"Not set (profile default)", "performance", "powersave"},
+			[]string{"", "performance", "powersave"}
 	}
-	return 0
-}
-
-func governorFromIndex(i int) string {
-	if i < 0 || i >= len(governorValues) {
-		return ""
-	}
-	return governorValues[i]
+	return governorOptions, governorValues
 }
 
 // setGovernor replaces any cpufreq.default_governor= in args with the chosen
@@ -2560,7 +2560,9 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
 				}
 			case secGovernor:
-				m.governor = governorFromIndex(m.edCursor)
+				if _, vals := m.governorChoices(); m.edCursor >= 0 && m.edCursor < len(vals) {
+					m.governor = vals[m.edCursor]
+				}
 				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
 					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
 				}

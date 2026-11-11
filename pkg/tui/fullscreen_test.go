@@ -1707,3 +1707,23 @@ func TestGovernorSection(t *testing.T) {
 		t.Errorf("Server args not re-synced to performance: %s", m.kernelArgs)
 	}
 }
+
+func TestGovernorEPPRestriction(t *testing.T) {
+	m := newModel(oneDisk())
+	m.epp = true
+	opts, vals := m.governorChoices()
+	if len(vals) != 3 || vals[1] != "performance" || vals[2] != "powersave" {
+		t.Fatalf("EPP governors = %v", vals)
+	}
+	for _, o := range opts {
+		if strings.Contains(o, "schedutil") || strings.Contains(o, "ondemand") {
+			t.Errorf("EPP list should not offer classic governors: %v", opts)
+		}
+	}
+	// Non-EPP keeps the classic set.
+	m.epp = false
+	_, vals = m.governorChoices()
+	if len(vals) != len(governorValues) {
+		t.Errorf("non-EPP governors = %v", vals)
+	}
+}
