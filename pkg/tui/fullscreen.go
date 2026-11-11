@@ -135,6 +135,19 @@ func (m model) buildConfig() (*config.Config, error) {
 			add = append(add, c)
 		}
 	}
+	// kdump: reserve crash memory and, optionally, auto-reboot after a panic.
+	if ck := strings.TrimSpace(m.crashkernel); ck != "" {
+		if t := "crashkernel=" + ck; !containsStr(add, t) {
+			add = append(add, t)
+		}
+		if ps := strings.TrimSpace(m.panicSecs); ps != "" {
+			if _, err := strconv.Atoi(ps); err == nil {
+				if t := "panic=" + ps; !containsStr(add, t) {
+					add = append(add, t)
+				}
+			}
+		}
+	}
 	if rem := strings.Fields(m.kernelArgsRemove); len(add) > 0 || len(rem) > 0 {
 		cfg.KernelArguments = &config.KernelArguments{Add: add, Remove: rem}
 	}
@@ -320,6 +333,7 @@ const (
 	secSaveConfig
 	secLogLevel
 	secAmdPstate
+	secKdump
 	sectionCount
 )
 
@@ -332,6 +346,7 @@ var sectionLabels = [sectionCount]string{
 	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
 	"Kernel Selection", "Swupd Mirror", "Automatic OS Updates",
 	"Save Configuration Settings", "Kernel Log Level", "AMD P-State Driver",
+	"Crash Dump (kdump)",
 }
 
 var sectionTitles = [sectionCount]string{
@@ -341,7 +356,7 @@ var sectionTitles = [sectionCount]string{
 	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
 	"Select Desired Kernel", "Swupd Mirror", "Automatic OS Updates",
 	"Save Configuration Settings", "Select Console Log Level",
-	"Select AMD P-State Driver Mode",
+	"Select AMD P-State Driver Mode", "Configure Crash Dump (kdump)",
 }
 
 type view int
@@ -431,15 +446,17 @@ type model struct {
 
 	// Computed from the live machine when the kernel-profile list opens, so a
 	// CPU-isolation profile can fill isolcpus=/nohz_full=/… and hugepages.
-	cpuIso    system.CPUIsolation
-	hugeGiB   int
-	consoles  []string // live console= args, applied to the installed system
-	cpuVendor string   // "intel"/"amd"/""; rewrites vendor-specific kernel args
-	vm        bool     // running under a hypervisor
-	vmName    string   // its name from the firmware, when it gives one
-	logLevel  int      // console log level: -1 unset, else 0..7 (loglevel= + kernel.printk)
-	amdPstate string   // amd_pstate mode for AMD RT/telco profiles: active/passive/guided or ""
-	packages  string   // extra xbps packages (shown as "bundles")
+	cpuIso      system.CPUIsolation
+	hugeGiB     int
+	consoles    []string // live console= args, applied to the installed system
+	cpuVendor   string   // "intel"/"amd"/""; rewrites vendor-specific kernel args
+	vm          bool     // running under a hypervisor
+	vmName      string   // its name from the firmware, when it gives one
+	logLevel    int      // console log level: -1 unset, else 0..7 (loglevel= + kernel.printk)
+	amdPstate   string   // amd_pstate mode for AMD RT/telco profiles: active/passive/guided or ""
+	crashkernel string   // kdump memory reservation (crashkernel=); "" = kdump off
+	panicSecs   string   // seconds to auto-reboot after a panic (panic=); "" = not set
+	packages    string   // extra xbps packages (shown as "bundles")
 
 	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
 	// default; a static one carries its CIDR address, gateway and DNS.
@@ -1059,6 +1076,26 @@ func (m model) updateMiniForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = viewHub
 			return m, nil
 		}
+	case secKdump:
+		if key.String() == "enter" {
+			v := strings.TrimSpace(m.input.Value())
+			if m.formStep == 0 {
+				m.crashkernel = v // empty turns kdump off
+				m.formStep = 1
+				ps := m.panicSecs
+				if ps == "" && v != "" {
+					ps = defaultPanicSecs
+				}
+				ti := textinput.New()
+				ti.Focus()
+				ti.SetValue(ps)
+				m.input = ti
+				return m, textinput.Blink
+			}
+			m.panicSecs = strings.TrimSpace(m.input.Value())
+			m.view = viewHub
+			return m, nil
+		}
 	case secMirror:
 		if m.formStep == 1 { // the allow-insecure checkbox
 			switch key.String() {
@@ -1638,7 +1675,7 @@ func adminTag(admin bool) string {
 func (m model) visibleSections(tab int) []section {
 	if tab == 1 {
 		adv := []section{secNetwork, secProxy, secTestNet, secBundles, secHostname,
-			secKernel, secLogLevel}
+			secKernel, secLogLevel, secKdump}
 		if m.cpuVendor == "amd" {
 			adv = append(adv, secAmdPstate)
 		}
@@ -1769,6 +1806,21 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.choices = pstateOptions
 		m.edCursor = pstateToIndex(m.amdPstate)
 		return m, nil
+	case secKdump:
+		// Two-field form: crashkernel reservation, then panic-reboot seconds.
+		// Suggest the RAM-scaled default when nothing is set yet; clearing the
+		// crashkernel field turns kdump off.
+		m.view = viewMiniForm
+		m.formStep = 0
+		ck := m.crashkernel
+		if ck == "" {
+			ck = defaultCrashkernel
+		}
+		ti := textinput.New()
+		ti.Focus()
+		ti.SetValue(ck)
+		m.input = ti
+		return m, textinput.Blink
 	case secNetwork:
 		// The clr-style interface list: the live interfaces, each DHCP until
 		// configured static.
@@ -1901,6 +1953,14 @@ var pstateOptions = []string{
 }
 
 var pstateValues = []string{"active", "passive", "guided", ""}
+
+// Default kdump settings suggested when the section is first opened: a
+// RAM-scaled crashkernel reservation (the portable range syntax) and a 5s
+// auto-reboot after a panic so a crashed node recovers once the dump is taken.
+const (
+	defaultCrashkernel = "1G-4G:192M,4G-64G:256M,64G-:512M"
+	defaultPanicSecs   = "5"
+)
 
 func pstateToIndex(mode string) int {
 	for i, v := range pstateValues {
@@ -2208,6 +2268,15 @@ func (m model) sectionValue(s section) string {
 			return "Not set (AMD RT/telco profiles)"
 		}
 		return fmt.Sprintf("amd_pstate=%s (AMD RT/telco profiles)", m.amdPstate)
+	case secKdump:
+		if strings.TrimSpace(m.crashkernel) == "" {
+			return "Off (no crash dump)"
+		}
+		s := "crashkernel=" + m.crashkernel
+		if m.panicSecs != "" {
+			s += ", panic=" + m.panicSecs
+		}
+		return s
 	}
 	return ""
 }
@@ -3107,6 +3176,26 @@ func (m model) miniFormView() string {
 			lineBG.Width(w).Render(""),
 			row(w, true, box+" Allow installation over insecure connections (http://)"))
 		return m.screen(body, "[Space] toggle · [Enter] confirm · [Esc] cancel")
+	case secKdump:
+		body := []string{
+			itemLabel.Width(w).Render("  Crash Dump (kdump)"),
+			footer.Width(w).Render("  Reserve memory for a crash kernel; leave empty to disable."),
+			rule(w),
+		}
+		if m.formStep == 0 {
+			body = append(body,
+				itemLabel.Width(w).Render("  crashkernel= (size or range, empty = off):"),
+				lineBG.Width(w).Render(""),
+				lineBG.Width(w).Render("  "+m.input.View()))
+			return m.screen(body, "type · [Enter] next · [Esc] cancel")
+		}
+		body = append(body,
+			lineBG.Width(w).Render("  crashkernel = "+orDash(m.crashkernel)),
+			lineBG.Width(w).Render(""),
+			itemLabel.Width(w).Render("  panic= (seconds to reboot after a panic, empty = none):"),
+			lineBG.Width(w).Render(""),
+			lineBG.Width(w).Render("  "+m.input.View()))
+		return m.screen(body, "type · [Enter] confirm · [Esc] cancel")
 	}
 	return m.screen(nil, "")
 }

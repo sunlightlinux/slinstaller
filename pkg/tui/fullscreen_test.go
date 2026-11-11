@@ -1533,3 +1533,52 @@ func TestAmdPstateSelectable(t *testing.T) {
 		t.Errorf("profile args not re-synced: %s", m.kernelArgs)
 	}
 }
+
+func TestKdumpSection(t *testing.T) {
+	// Default: off.
+	m := newModel(oneDisk())
+	if m.crashkernel != "" {
+		t.Fatalf("default crashkernel = %q, want empty", m.crashkernel)
+	}
+	if got := m.sectionValue(secKdump); got != "Off (no crash dump)" {
+		t.Errorf("default value = %q", got)
+	}
+	// Open: step 0 prefilled with the suggested default; accept it, set panic.
+	m = openSectionInTab(newModel(oneDisk()), 1, secKdump)
+	if m.input.Value() != defaultCrashkernel {
+		t.Errorf("crashkernel field not prefilled: %q", m.input.Value())
+	}
+	m = send(m, enter) // accept crashkernel -> panic step (prefilled "5")
+	if m.input.Value() != defaultPanicSecs {
+		t.Errorf("panic field not prefilled: %q", m.input.Value())
+	}
+	m = send(m, enter) // accept panic
+	if m.crashkernel != defaultCrashkernel || m.panicSecs != "5" {
+		t.Fatalf("crashkernel=%q panic=%q", m.crashkernel, m.panicSecs)
+	}
+	// buildConfig puts both on the kernel command line.
+	m.users = []userEntry{{Login: "me", Password: "pw", Admin: true}}
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsStr(cfg.KernelArguments.Add, "crashkernel="+defaultCrashkernel) {
+		t.Errorf("crashkernel not in args: %v", cfg.KernelArguments.Add)
+	}
+	if !containsStr(cfg.KernelArguments.Add, "panic=5") {
+		t.Errorf("panic not in args: %v", cfg.KernelArguments.Add)
+	}
+
+	// Clearing the crashkernel field disables kdump (no crashkernel=/panic=).
+	m2 := openSectionInTab(newModel(oneDisk()), 1, secKdump)
+	m2.input.SetValue("")
+	m2 = send(m2, enter) // empty crashkernel -> panic step
+	m2 = send(m2, enter)
+	m2.users = []userEntry{{Login: "me", Password: "pw", Admin: true}}
+	cfg2, _ := m2.buildConfig()
+	for _, a := range cfg2.KernelArguments.Add {
+		if strings.HasPrefix(a, "crashkernel=") || strings.HasPrefix(a, "panic=") {
+			t.Errorf("kdump off but got %q", a)
+		}
+	}
+}

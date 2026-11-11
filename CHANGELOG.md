@@ -12,6 +12,13 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- New "Crash Dump (kdump)" section on the Advanced tab configures the kernel
+  crash-dump reservation and panic behaviour: a two-field form for
+  `crashkernel=` (prefilled with a RAM-scaled range,
+  `1G-4G:192M,4G-64G:256M,64G-:512M`) and `panic=` (seconds to auto-reboot
+  after a panic, prefilled 5). Both are appended to the kernel command line.
+  Leaving the crashkernel field empty disables kdump; a non-numeric panic value
+  is ignored. Off by default.
 - New "Kernel Log Level" section on the Advanced tab sets the console log
   verbosity (0 emergency … 7 debug) in two places at once: `loglevel=N` on the
   kernel command line and `kernel.printk = N 4 1 7` via `/etc/sysctl.d/10-printk.conf`
