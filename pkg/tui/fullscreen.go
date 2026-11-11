@@ -335,6 +335,7 @@ const (
 	secAmdPstate
 	secKdump
 	secIntelPstate
+	secGovernor
 	sectionCount
 )
 
@@ -347,7 +348,7 @@ var sectionLabels = [sectionCount]string{
 	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
 	"Kernel Selection", "Swupd Mirror", "Automatic OS Updates",
 	"Save Configuration Settings", "Kernel Log Level", "AMD P-State Driver",
-	"Crash Dump (kdump)", "Intel P-State Driver",
+	"Crash Dump (kdump)", "Intel P-State Driver", "CPU Frequency Governor",
 }
 
 var sectionTitles = [sectionCount]string{
@@ -358,7 +359,7 @@ var sectionTitles = [sectionCount]string{
 	"Select Desired Kernel", "Swupd Mirror", "Automatic OS Updates",
 	"Save Configuration Settings", "Select Console Log Level",
 	"Select AMD P-State Driver Mode", "Configure Crash Dump (kdump)",
-	"Select Intel P-State Driver Mode",
+	"Select Intel P-State Driver Mode", "Select CPU Frequency Governor",
 }
 
 type view int
@@ -457,6 +458,7 @@ type model struct {
 	logLevel    int      // console log level: -1 unset, else 0..7 (loglevel= + kernel.printk)
 	amdPstate   string   // amd_pstate mode for AMD RT/telco profiles: active/passive/guided or ""
 	intelPstate string   // intel_pstate mode for Intel RT/telco profiles: active/passive/… or "" (keep HWP)
+	governor    string   // cpufreq.default_governor= override; "" = keep the profile's own
 	crashkernel string   // kdump memory reservation (crashkernel=); "" = kdump off
 	panicSecs   string   // seconds to auto-reboot after a panic (panic=); "" = not set
 	packages    string   // extra xbps packages (shown as "bundles")
@@ -1713,7 +1715,7 @@ func adminTag(admin bool) string {
 func (m model) visibleSections(tab int) []section {
 	if tab == 1 {
 		adv := []section{secNetwork, secProxy, secTestNet, secBundles, secHostname,
-			secKernel, secLogLevel, secKdump}
+			secKernel, secLogLevel, secKdump, secGovernor}
 		if m.cpuVendor == "amd" {
 			adv = append(adv, secAmdPstate)
 		}
@@ -1851,6 +1853,11 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.view = viewSectionChoice
 		m.choices = intelPstateOptions
 		m.edCursor = intelPstateToIndex(m.intelPstate)
+		return m, nil
+	case secGovernor:
+		m.view = viewSectionChoice
+		m.choices = governorOptions
+		m.edCursor = governorToIndex(m.governor)
 		return m, nil
 	case secKdump:
 		// Two-field form: crashkernel reservation, then panic-reboot seconds.
@@ -2056,6 +2063,50 @@ func intelPstateFromIndex(i int) string {
 	return intelPstateValues[i]
 }
 
+// governorOptions are the CPU-frequency governors offered. The first ("",
+// not set) keeps whatever governor a profile already sets (or the kernel
+// default). The chosen one is the authority: it replaces any
+// cpufreq.default_governor= a profile carries.
+var governorOptions = []string{
+	"Not set (profile default)",
+	"performance",
+	"schedutil",
+	"ondemand",
+	"conservative",
+	"powersave",
+}
+
+var governorValues = []string{"", "performance", "schedutil", "ondemand", "conservative", "powersave"}
+
+func governorToIndex(g string) int {
+	for i, v := range governorValues {
+		if v == g {
+			return i
+		}
+	}
+	return 0
+}
+
+func governorFromIndex(i int) string {
+	if i < 0 || i >= len(governorValues) {
+		return ""
+	}
+	return governorValues[i]
+}
+
+// setGovernor replaces any cpufreq.default_governor= in args with the chosen
+// governor (appended), so the CPU Governor section is the single authority.
+func setGovernor(args, gov string) string {
+	var out []string
+	for _, t := range strings.Fields(args) {
+		if !strings.HasPrefix(t, "cpufreq.default_governor=") {
+			out = append(out, t)
+		}
+	}
+	out = append(out, "cpufreq.default_governor="+gov)
+	return strings.Join(out, " ")
+}
+
 // kernelProfile is a named set of kernel command-line arguments: a starting
 // point the operator picks and then edits as Custom if needed. note flags a
 // trade-off (security/power) or a machine-specific step. The args are valid,
@@ -2221,6 +2272,10 @@ func (m model) profileArgs(p kernelProfile) string {
 	}
 	if p.huge && m.hugeGiB > 0 {
 		args = strings.TrimSpace(args + fmt.Sprintf(" default_hugepagesz=1G hugepagesz=1G hugepages=%d", m.hugeGiB))
+	}
+	// A chosen CPU-frequency governor overrides whatever the profile set.
+	if m.governor != "" {
+		args = setGovernor(args, m.governor)
 	}
 	return args
 }
@@ -2411,6 +2466,11 @@ func (m model) sectionValue(s section) string {
 			return "Not set (keep HWP; Intel RT/telco profiles)"
 		}
 		return fmt.Sprintf("intel_pstate=%s (Intel RT/telco profiles)", m.intelPstate)
+	case secGovernor:
+		if m.governor == "" {
+			return "Profile default"
+		}
+		return "cpufreq.default_governor=" + m.governor
 	case secKdump:
 		if strings.TrimSpace(m.crashkernel) == "" {
 			return "Off (no crash dump)"
@@ -2496,6 +2556,11 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			case secIntelPstate:
 				m.intelPstate = intelPstateFromIndex(m.edCursor)
+				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
+					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
+				}
+			case secGovernor:
+				m.governor = governorFromIndex(m.edCursor)
 				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
 					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
 				}

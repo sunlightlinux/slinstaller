@@ -17,6 +17,11 @@ for what will and will not be allowed to change once releases begin.
   note in a separate window, replacing the inline preview that used to sit below
   the list. The list now uses the full dialog height, so many more profiles are
   visible at once. Each profile has a one-line description.
+- New "CPU Frequency Governor" section on the Advanced tab sets
+  `cpufreq.default_governor=` (performance / schedutil / ondemand / conservative
+  / powersave, or not set). It is the single authority: the chosen governor
+  replaces whatever a profile carried. Default is unset (keep the profile's own
+  governor). Pairs with the P-State sections for frequency control.
 - New "Crash Dump (kdump)" section on the Advanced tab configures the kernel
   crash-dump reservation and panic behaviour: a two-field form for
   `crashkernel=` (prefilled with a RAM-scaled range,

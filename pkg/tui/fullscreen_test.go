@@ -1676,3 +1676,34 @@ func TestIntelPstateSelectable(t *testing.T) {
 		t.Errorf("intel_pstate should not apply on AMD: %s", a)
 	}
 }
+
+func TestGovernorSection(t *testing.T) {
+	// On the Advanced tab (any vendor), default = profile default.
+	m := newModel(oneDisk())
+	if m.governor != "" {
+		t.Fatalf("default governor = %q, want empty", m.governor)
+	}
+	if got := m.sectionValue(secGovernor); got != "Profile default" {
+		t.Errorf("default value = %q", got)
+	}
+	// setGovernor replaces an existing cpufreq.default_governor=.
+	got := setGovernor("quiet cpufreq.default_governor=schedutil ro", "performance")
+	if !strings.Contains(got, "cpufreq.default_governor=performance") ||
+		strings.Contains(got, "schedutil") {
+		t.Errorf("setGovernor = %q", got)
+	}
+	// Choosing a governor overrides the Server profile's schedutil.
+	m.kernelProfile = "Server"
+	m.kernelArgs = m.profileArgs(kernelProfileByName("Server"))
+	m = openSectionInTab(m, 1, secGovernor)
+	for i := 0; i < 1; i++ { // Not set(0) -> performance(1)
+		m = send(m, down)
+	}
+	m = send(m, enter)
+	if m.governor != "performance" {
+		t.Fatalf("governor = %q, want performance", m.governor)
+	}
+	if strings.Contains(m.kernelArgs, "schedutil") || !strings.Contains(m.kernelArgs, "cpufreq.default_governor=performance") {
+		t.Errorf("Server args not re-synced to performance: %s", m.kernelArgs)
+	}
+}
