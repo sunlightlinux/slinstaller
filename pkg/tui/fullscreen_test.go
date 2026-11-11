@@ -25,6 +25,7 @@ func send(m tea.Model, k tea.KeyMsg) model {
 var (
 	enter = tea.KeyMsg{Type: tea.KeyEnter}
 	down  = tea.KeyMsg{Type: tea.KeyDown}
+	up    = tea.KeyMsg{Type: tea.KeyUp}
 )
 
 func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
@@ -248,6 +249,16 @@ func openSectionInTab(m model, tab int, s section) model {
 		}
 	}
 	return send(m, enter)
+}
+
+// kernelTop resets the profile-list cursor to the first entry. The list opens
+// on the current selection, which the Server default makes non-zero, so tests
+// that count `down` presses from the top reset first.
+func kernelTop(m model) model {
+	for i := 0; i < len(kernelProfiles); i++ {
+		m = send(m, up)
+	}
+	return m
 }
 
 // TestViewsRenderNoPanic drives the hub, the Installation Media dialog,
@@ -533,19 +544,26 @@ func TestHubScrollbar(t *testing.T) {
 		t.Errorf("last section not visible after scrolling down:\n%s", plain(m.View()))
 	}
 
-	// The Required tab's five sections all fit the 80x24 dialog, with nothing
-	// to scroll. Telemetry, clr's sixth, is left out: Sunlight collects none.
-	req := plain(size(newModel(oneDisk())).View())
-	if strings.Contains(req, "▼") {
-		t.Errorf("Required tab should fit without scrolling:\n%s", req)
-	}
-	for _, sec := range visibleSections(0) {
-		if !strings.Contains(req, sectionLabels[sec]) {
-			t.Errorf("%q not visible on the Required tab:\n%s", sectionLabels[sec], req)
+	// The Required tab now also holds Kernel Command Line, so its six sections
+	// no longer all fit the 80x24 dialog: the first five show at the top and
+	// Kernel Command Line scrolls into view at the bottom. Telemetry, clr's own
+	// sixth, is still left out: Sunlight collects none.
+	req := size(newModel(oneDisk()))
+	reqV := plain(req.View())
+	for _, sec := range []section{secTimezone, secLanguage, secKeyboard, secMedia, secUser} {
+		if !strings.Contains(reqV, sectionLabels[sec]) {
+			t.Errorf("%q not visible at the top of the Required tab:\n%s", sectionLabels[sec], reqV)
 		}
 	}
-	if strings.Contains(req, "Telemetry") {
-		t.Errorf("Telemetry is still offered:\n%s", req)
+	rm := req
+	for i := 0; i < len(visibleSections(0))-1; i++ {
+		rm = send(rm, down)
+	}
+	if !strings.Contains(plain(rm.View()), sectionLabels[secKernelArgs]) {
+		t.Errorf("Kernel Command Line not visible after scrolling the Required tab:\n%s", plain(rm.View()))
+	}
+	if strings.Contains(reqV, "Telemetry") {
+		t.Errorf("Telemetry is still offered:\n%s", reqV)
 	}
 }
 
@@ -596,7 +614,7 @@ func TestBundlesChecklist(t *testing.T) {
 }
 
 func TestKernelArgsAddRemove(t *testing.T) {
-	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs) // profile list
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs) // profile list
 	// Move to the "Custom" profile (last) and open the Add/Remove form.
 	for i := 0; i < kernelProfileIndex("Custom"); i++ {
 		m = send(m, down)
@@ -1176,7 +1194,8 @@ func TestSafeLayoutBuildsAlongsidePlan(t *testing.T) {
 }
 
 func TestKernelProfileSelect(t *testing.T) {
-	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs) // profile list
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs) // profile list
+	m = kernelTop(m)
 	// Select "Realtime".
 	idx := 0
 	for i, p := range kernelProfiles {
@@ -1217,7 +1236,7 @@ func TestKernelProfileFilterAndNotes(t *testing.T) {
 	}
 
 	// Type-to-filter narrows the list, and Enter selects the match.
-	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs)
 	for _, r := range "Hardened" {
 		m = send(m, runes(string(r)))
 	}
@@ -1231,13 +1250,14 @@ func TestKernelProfileFilterAndNotes(t *testing.T) {
 }
 
 func TestKernelProfileAutoPinning(t *testing.T) {
-	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs)
 	// Pretend this machine was detected with 16 CPUs (housekeeping 0-1).
 	m.cpuIso = system.CPUIsolation{
 		Total: 16, Housekeeping: "0-1", Isolated: "2-15", OK: true,
 		Args: "isolcpus=domain,nohz,managed_irq,2-15 nohz_full=2-15 rcu_nocbs=2-15 irqaffinity=0-1",
 	}
 	m.hugeGiB = 7
+	m = kernelTop(m)
 	// Select Telco/RAN.
 	for i := 0; i < kernelProfileIndex("Telco/RAN"); i++ {
 		m = send(m, down)
@@ -1287,7 +1307,7 @@ func TestConsolesAppliedToKernelArgs(t *testing.T) {
 
 func TestTelcoAMDPstate(t *testing.T) {
 	// AMD: the isolation profile gets amd_pstate=active.
-	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs)
 	m.cpuVendor = "amd"
 	p := kernelProfileByName("Telco/RAN")
 	if a := m.profileArgs(p); !strings.Contains(a, "amd_pstate=active") {
@@ -1302,7 +1322,7 @@ func TestTelcoAMDPstate(t *testing.T) {
 }
 
 func TestTelcoMaxPerfProfile(t *testing.T) {
-	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs)
 	m.cpuVendor = "amd"
 	p := kernelProfileByName("Telco/RAN Max Perf")
 	a := m.profileArgs(p)
@@ -1317,7 +1337,7 @@ func TestTelcoMaxPerfProfile(t *testing.T) {
 }
 
 func TestGPUPassthroughConsumerProfile(t *testing.T) {
-	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs)
 	p := kernelProfileByName("GPU Passthrough (consumer/ACS)")
 	// Intel: igfx_off and ACS override are kept.
 	m.cpuVendor = "intel"
@@ -1340,7 +1360,7 @@ func TestGPUPassthroughConsumerProfile(t *testing.T) {
 }
 
 func TestAMDInstinctProfile(t *testing.T) {
-	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs)
 	p := kernelProfileByName("AMD Instinct (GPU compute)")
 	// AMD host: intel_iommu=on becomes amd_iommu=on; required Instinct args present.
 	m.cpuVendor = "amd"
@@ -1358,7 +1378,7 @@ func TestAMDInstinctProfile(t *testing.T) {
 }
 
 func TestNvidiaProfile(t *testing.T) {
-	m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs)
 	m.cpuVendor = "amd" // vendor-neutral args: unchanged by the rewriter
 	a := m.profileArgs(kernelProfileByName("NVIDIA GPU (proprietary)"))
 	for _, want := range []string{"module_blacklist=nouveau", "nouveau.modeset=0", "nvidia-drm.modeset=1"} {
@@ -1377,7 +1397,8 @@ func TestNvidiaProfile(t *testing.T) {
 func TestBusyIdleProfileWarnsInAVM(t *testing.T) {
 	pick := func(vm bool, name string) model {
 		t.Helper()
-		m := openSectionInTab(newModel(oneDisk()), 1, secKernelArgs)
+		m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs)
+		m = kernelTop(m)
 		m.vm, m.vmName = vm, "QEMU"
 		idx := -1
 		for i, p := range kernelProfiles {

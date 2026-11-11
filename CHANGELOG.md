@@ -12,6 +12,11 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Kernel Command Line moved from the Advanced tab to the Required tab, and now
+  defaults to the Server profile (shown as "Server profile" in the hub) instead
+  of being unset — so a plain install gets sensible server tuning without
+  opening the section. Picking Custom from a predefined profile starts the
+  Add/Remove form blank rather than pre-filled with the profile's arguments.
 - Kernel Command Line offers a scrollable, type-to-filter list of predefined
   profiles — Server, Desktop, Desktop LowLatency, LowLatency, Realtime,
   Audio/Video Workstation, Telco/RAN, HPC/Compute, Virtualization Host (KVM),

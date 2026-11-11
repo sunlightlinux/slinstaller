@@ -582,6 +582,10 @@ func newModel(disks []blockdev.Device) model {
 		keyboard: "us", language: "en_US.UTF-8", timezone: "UTC", hostname: "sunlight",
 		autoUpdate: 1, // clr defaults automatic updates on
 		netBar:     bar,
+		// Default the kernel command line to the Server profile so a plain
+		// install gets sensible server tuning without opening the section.
+		kernelProfile: "Server",
+		kernelArgs:    kernelProfileByName("Server").args,
 	}
 }
 
@@ -1209,9 +1213,16 @@ func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.keyboard = sel
 			case secKernelArgs:
 				p := kernelProfileByName(sel)
+				wasCustom := m.kernelProfile == "Custom"
 				m.kernelProfile = p.name
 				if p.name == "Custom" {
-					// Keep the current args and open the manual Add/Remove form.
+					// Open the manual Add/Remove form. Keep the fields when the
+					// user is re-editing their own Custom args; start blank when
+					// switching to Custom from a predefined profile (the profile's
+					// args, e.g. the Server default, are not the user's own).
+					if !wasCustom {
+						m.kernelArgs, m.kernelArgsRemove = "", ""
+					}
 					m.view = viewMiniForm
 					m.formStep = 0
 					ti := textinput.New()
@@ -1612,9 +1623,9 @@ func adminTag(admin bool) string {
 func visibleSections(tab int) []section {
 	if tab == 1 {
 		return []section{secNetwork, secProxy, secTestNet, secBundles, secHostname,
-			secKernelArgs, secKernel, secMirror, secAutoUpdate, secSaveConfig}
+			secKernel, secMirror, secAutoUpdate, secSaveConfig}
 	}
-	return []section{secTimezone, secLanguage, secKeyboard, secMedia, secUser}
+	return []section{secTimezone, secLanguage, secKeyboard, secMedia, secUser, secKernelArgs}
 }
 
 func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
