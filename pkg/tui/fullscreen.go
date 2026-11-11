@@ -1995,10 +1995,11 @@ var pstateOptions = []string{
 	"active (default)",
 	"passive",
 	"guided",
+	"disable (unregister the driver)",
 	"Not set (kernel default)",
 }
 
-var pstateValues = []string{"active", "passive", "guided", ""}
+var pstateValues = []string{"active", "passive", "guided", "disable", ""}
 
 // Default kdump settings suggested when the section is first opened: a
 // RAM-scaled crashkernel reservation (the portable range syntax) and a 5s
