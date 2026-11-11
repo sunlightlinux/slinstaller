@@ -84,7 +84,6 @@ func RunFullscreen() (*config.Config, string, error) {
 	start.vmName, start.vm = system.VirtualMachine()
 	start.cpuVendor = system.CPUVendor() // rewrite vendor-specific kernel args (intel/amd)
 	start.epp = system.EPPCapable()      // EPP (active-mode) CPUs use only performance/powersave
-	start.eppPrefs = system.EPPPreferences()
 	final, err := tea.NewProgram(start, tea.WithAltScreen()).Run()
 	if err != nil {
 		return nil, "", err
@@ -462,7 +461,6 @@ type model struct {
 	intelPstate string   // intel_pstate mode for Intel RT/telco profiles: active/passive/… or "" (keep HWP)
 	governor    string   // cpufreq.default_governor= override; "" = keep the profile's own
 	epp         bool     // CPU is EPP-capable (active mode): only performance/powersave governors
-	eppPrefs    []string // available EPP preferences (energy_performance_available_preferences)
 	crashkernel string   // kdump memory reservation (crashkernel=); "" = kdump off
 	panicSecs   string   // seconds to auto-reboot after a panic (panic=); "" = not set
 	packages    string   // extra xbps packages (shown as "bundles")

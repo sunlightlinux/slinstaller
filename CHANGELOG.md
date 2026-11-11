@@ -24,7 +24,7 @@ for what will and will not be allowed to change once releases begin.
   governor). Pairs with the P-State sections for frequency control. On an
   EPP-capable CPU (active-mode HWP/CPPC) the choices are restricted to the
   governors that actually apply there — performance and powersave — detected
-  from sysfs. New `pkg/system.EPPCapable` and `EPPPreferences`.
+  from sysfs. New `pkg/system.EPPCapable`.
 - New "Crash Dump (kdump)" section on the Advanced tab configures the kernel
   crash-dump reservation and panic behaviour: a two-field form for
   `crashkernel=` (prefilled with a RAM-scaled range,
