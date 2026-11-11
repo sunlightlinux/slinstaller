@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
+	"gopkg.in/yaml.v3"
 )
 
 // These fixtures are real clr-installer config files, copied unchanged
@@ -935,5 +936,30 @@ func TestPlanSafeAlongside(t *testing.T) {
 	}
 	if strings.Contains(flat, "mklabel") || !strings.Contains(flat, "20480MiB 45480MiB") {
 		t.Errorf("Safe table commands wrong:\n%s", flat)
+	}
+}
+
+func TestConsoleLogLevelRoundTrip(t *testing.T) {
+	// Absent in YAML -> nil.
+	var c Config
+	if err := yaml.Unmarshal([]byte("hostname: x\n"), &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.ConsoleLogLevel != nil {
+		t.Errorf("absent console-log-level should be nil, got %v", *c.ConsoleLogLevel)
+	}
+	// Present -> parsed; marshals back under the same key.
+	if err := yaml.Unmarshal([]byte("console-log-level: 3\n"), &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.ConsoleLogLevel == nil || *c.ConsoleLogLevel != 3 {
+		t.Fatalf("console-log-level = %v", c.ConsoleLogLevel)
+	}
+	out, err := yaml.Marshal(&c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "console-log-level: 3") {
+		t.Errorf("marshaled config missing console-log-level:\n%s", out)
 	}
 }

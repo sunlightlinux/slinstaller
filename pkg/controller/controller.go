@@ -567,6 +567,23 @@ func (in *installer) swapfile() error {
 	return cerr
 }
 
+// applyLogLevel makes loglevel= on the kernel command line reflect the
+// configured console log level: any loglevel= already present (e.g. from a
+// kernel profile) is dropped and loglevel=N appended, so the Kernel Log Level
+// section is the single authority. A nil level leaves kargs unchanged.
+func applyLogLevel(kargs []string, level *int) []string {
+	if level == nil {
+		return kargs
+	}
+	kept := kargs[:0]
+	for _, a := range kargs {
+		if !strings.HasPrefix(a, "loglevel=") {
+			kept = append(kept, a)
+		}
+	}
+	return append(kept, fmt.Sprintf("loglevel=%d", *level))
+}
+
 // bootloader installs GRUB onto the ESP and registers the firmware boot
 // entry. Any kernel arguments from the config are written to
 // /etc/default/grub before grub-mkconfig reads it.
@@ -592,6 +609,10 @@ func (in *installer) bootloader() error {
 			}
 		}
 	}
+
+	// Console log level: loglevel=N is the authority. The matching
+	// kernel.printk is written to sysctl.d in firstBoot.
+	kargs = applyLogLevel(kargs, in.cfg.ConsoleLogLevel)
 
 	// slinit is Sunlight's init. sunlight-base points /usr/bin/init at it
 	// already; naming it on the kernel command line as well makes the
@@ -806,6 +827,11 @@ func (in *installer) firstBoot() error {
 	}
 	if err := system.Keymap(root, in.cfg.Keyboard); err != nil {
 		return err
+	}
+	if in.cfg.ConsoleLogLevel != nil {
+		if err := system.PrintkSysctl(root, *in.cfg.ConsoleLogLevel); err != nil {
+			return err
+		}
 	}
 	if generated, err := system.Locale(root, in.cfg.Language); err != nil {
 		return err

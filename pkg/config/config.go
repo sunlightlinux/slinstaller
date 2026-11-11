@@ -50,6 +50,13 @@ type Config struct {
 
 	KernelArguments *KernelArguments `yaml:"kernel-arguments,omitempty"`
 
+	// ConsoleLogLevel sets the kernel console log verbosity (0 emergency … 7
+	// debug) in two places: loglevel=N on the kernel command line, and
+	// kernel.printk = N 4 1 7 via /etc/sysctl.d on the installed system. nil
+	// leaves the kernel default untouched. This is a Sunlight extension, not a
+	// clr-installer field, and is ignored when absent.
+	ConsoleLogLevel *int `yaml:"console-log-level,omitempty"`
+
 	Bundles     []string `yaml:"bundles,omitempty"`
 	SwupdMirror string   `yaml:"swupdMirror,omitempty"`
 	HTTPSProxy  string   `yaml:"httpsProxy,omitempty"`

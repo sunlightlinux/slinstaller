@@ -1434,3 +1434,45 @@ func TestBusyIdleProfileWarnsInAVM(t *testing.T) {
 		t.Errorf("VM Guest in a VM: warned %q", m.popupMsg)
 	}
 }
+
+func TestLogLevelSection(t *testing.T) {
+	// The section lives on the Advanced tab.
+	found := false
+	for _, s := range visibleSections(1) {
+		if s == secLogLevel {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("Kernel Log Level not on the Advanced tab")
+	}
+	// Default is unset.
+	m := newModel(oneDisk())
+	if m.logLevel != -1 {
+		t.Fatalf("default logLevel = %d, want -1", m.logLevel)
+	}
+	if got := m.sectionValue(secLogLevel); got != "Kernel default (not set)" {
+		t.Errorf("default value = %q", got)
+	}
+	// Open and select "3 - error" (index 4: unset,0,1,2,3 -> 3 at index 4).
+	m = openSectionInTab(newModel(oneDisk()), 1, secLogLevel)
+	for i := 0; i < 4; i++ {
+		m = send(m, down)
+	}
+	m = send(m, enter)
+	if m.logLevel != 3 {
+		t.Fatalf("logLevel = %d, want 3", m.logLevel)
+	}
+	if got := m.sectionValue(secLogLevel); got != "loglevel=3, kernel.printk = 3 4 1 7" {
+		t.Errorf("value = %q", got)
+	}
+	// buildConfig carries it.
+	m.users = []userEntry{{Login: "me", Password: "pw", Admin: true}}
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ConsoleLogLevel == nil || *cfg.ConsoleLogLevel != 3 {
+		t.Fatalf("ConsoleLogLevel = %v", cfg.ConsoleLogLevel)
+	}
+}

@@ -319,3 +319,23 @@ func TestExpandHookVars(t *testing.T) {
 		t.Errorf("expandHookVars = %q, want %q", got, want)
 	}
 }
+
+func TestApplyLogLevel(t *testing.T) {
+	three := 3
+	// Nil leaves args untouched.
+	in := []string{"quiet", "loglevel=7"}
+	if got := applyLogLevel(append([]string{}, in...), nil); len(got) != 2 || got[1] != "loglevel=7" {
+		t.Errorf("nil changed args: %v", got)
+	}
+	// A configured level drops an existing loglevel= and appends the new one.
+	got := applyLogLevel([]string{"quiet", "loglevel=7", "ro"}, &three)
+	want := []string{"quiet", "ro", "loglevel=3"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}

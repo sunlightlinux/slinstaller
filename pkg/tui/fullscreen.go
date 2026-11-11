@@ -138,6 +138,12 @@ func (m model) buildConfig() (*config.Config, error) {
 	if rem := strings.Fields(m.kernelArgsRemove); len(add) > 0 || len(rem) > 0 {
 		cfg.KernelArguments = &config.KernelArguments{Add: add, Remove: rem}
 	}
+	// Console log level: the controller turns this into loglevel=N on the
+	// kernel command line and kernel.printk = N 4 1 7 via sysctl.
+	if m.logLevel >= 0 {
+		lv := m.logLevel
+		cfg.ConsoleLogLevel = &lv
+	}
 	cfg.Packages = splitList(m.packages)
 	for _, ni := range m.netIfaces {
 		if !ni.Static {
@@ -312,6 +318,7 @@ const (
 	secMirror
 	secAutoUpdate
 	secSaveConfig
+	secLogLevel
 	sectionCount
 )
 
@@ -323,7 +330,7 @@ var sectionLabels = [sectionCount]string{
 	"Configure Network Interfaces", "Proxy", "Test Network Settings",
 	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
 	"Kernel Selection", "Swupd Mirror", "Automatic OS Updates",
-	"Save Configuration Settings",
+	"Save Configuration Settings", "Kernel Log Level",
 }
 
 var sectionTitles = [sectionCount]string{
@@ -332,7 +339,7 @@ var sectionTitles = [sectionCount]string{
 	"Configure Network Interfaces", "Configure the Network Proxy", "Test Network Settings",
 	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
 	"Select Desired Kernel", "Swupd Mirror", "Automatic OS Updates",
-	"Save Configuration Settings",
+	"Save Configuration Settings", "Select Console Log Level",
 }
 
 type view int
@@ -428,6 +435,7 @@ type model struct {
 	cpuVendor string   // "intel"/"amd"/""; rewrites vendor-specific kernel args
 	vm        bool     // running under a hypervisor
 	vmName    string   // its name from the firmware, when it gives one
+	logLevel  int      // console log level: -1 unset, else 0..7 (loglevel= + kernel.printk)
 	packages  string   // extra xbps packages (shown as "bundles")
 
 	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
@@ -586,6 +594,7 @@ func newModel(disks []blockdev.Device) model {
 		// install gets sensible server tuning without opening the section.
 		kernelProfile: "Server",
 		kernelArgs:    kernelProfileByName("Server").args,
+		logLevel:      -1, // console log level unset: keep the kernel default
 	}
 }
 
@@ -1623,7 +1632,7 @@ func adminTag(admin bool) string {
 func visibleSections(tab int) []section {
 	if tab == 1 {
 		return []section{secNetwork, secProxy, secTestNet, secBundles, secHostname,
-			secKernel, secMirror, secAutoUpdate, secSaveConfig}
+			secKernel, secLogLevel, secMirror, secAutoUpdate, secSaveConfig}
 	}
 	return []section{secTimezone, secLanguage, secKeyboard, secMedia, secUser, secKernelArgs}
 }
@@ -1740,6 +1749,11 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.choices = yesNoOptions
 		m.edCursor = triToIndex(m.autoUpdate)
 		return m, nil
+	case secLogLevel:
+		m.view = viewSectionChoice
+		m.choices = logLevelOptions
+		m.edCursor = logLevelToIndex(m.logLevel)
+		return m, nil
 	case secNetwork:
 		// The clr-style interface list: the live interfaces, each DHCP until
 		// configured static.
@@ -1828,6 +1842,38 @@ func (m model) openList(items []string, current string) model {
 // kernelOptions are the kernels offered in the selection dialog; the empty
 // first entry keeps the base system's default kernel.
 var kernelOptions = []string{"", "kernel-native", "kernel-lts"}
+
+// logLevelOptions are the console log-verbosity choices. The first keeps the
+// kernel default (nothing written); the rest set loglevel=N on the kernel
+// command line and kernel.printk = N 4 1 7 via sysctl. Index i>0 means
+// loglevel N = i-1 (0 emergency … 7 debug).
+var logLevelOptions = []string{
+	"Kernel default (not set)",
+	"0 - emergency (silent)",
+	"1 - alert",
+	"2 - critical",
+	"3 - error",
+	"4 - warning",
+	"5 - notice",
+	"6 - info",
+	"7 - debug (verbose)",
+}
+
+// logLevelToIndex maps a stored log level (-1 = unset, 0..7) to its index in
+// logLevelOptions; logLevelFromIndex is the inverse.
+func logLevelToIndex(lv int) int {
+	if lv < 0 {
+		return 0
+	}
+	return lv + 1
+}
+
+func logLevelFromIndex(i int) int {
+	if i <= 0 {
+		return -1
+	}
+	return i - 1
+}
 
 // kernelProfile is a named set of kernel command-line arguments: a starting
 // point the operator picks and then edits as Custom if needed. note flags a
@@ -2109,6 +2155,11 @@ func (m model) sectionValue(s section) string {
 		return triLabel(m.autoUpdate)
 	case secSaveConfig:
 		return "Save the installation configuration to a file"
+	case secLogLevel:
+		if m.logLevel < 0 {
+			return "Kernel default (not set)"
+		}
+		return fmt.Sprintf("loglevel=%d, kernel.printk = %d 4 1 7", m.logLevel, m.logLevel)
 	}
 	return ""
 }
@@ -2174,6 +2225,8 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch m.editing {
 			case secAutoUpdate:
 				m.autoUpdate = m.edCursor + 1 // 1 Enabled, 2 Disabled
+			case secLogLevel:
+				m.logLevel = logLevelFromIndex(m.edCursor)
 			default: // kernel
 				m.kernel = m.choices[m.edCursor]
 			}

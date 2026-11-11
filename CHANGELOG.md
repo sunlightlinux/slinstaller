@@ -12,6 +12,13 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- New "Kernel Log Level" section on the Advanced tab sets the console log
+  verbosity (0 emergency … 7 debug) in two places at once: `loglevel=N` on the
+  kernel command line and `kernel.printk = N 4 1 7` via `/etc/sysctl.d/10-printk.conf`
+  on the installed system. The level is the single authority — it overrides any
+  `loglevel=` a kernel profile already carried. The default is unset (kernel
+  default, nothing written). New config field `console-log-level` (a Sunlight
+  extension), `system.PrintkSysctl`.
 - Kernel Command Line moved from the Advanced tab to the Required tab, and now
   defaults to the Server profile (shown as "Server profile" in the hub) instead
   of being unset — so a plain install gets sensible server tuning without
