@@ -103,7 +103,7 @@ func writeTopology(t *testing.T, cores, smt int) {
 
 func TestCPUIsolationScales(t *testing.T) {
 	// 64 physical cores, SMT2 = 128 logical: reserve 4 whole cores (8 logical),
-	// matching SUSE's telco example count, kept as sibling groups.
+	// a common telco housekeeping count, kept as sibling groups.
 	writeTopology(t, 64, 2)
 	ci := ComputeCPUIsolation()
 	if !ci.OK || ci.Total != 128 {

@@ -31,14 +31,13 @@ type CPUIsolation struct {
 }
 
 // hkRatio scales the housekeeping reservation with machine size: roughly one
-// housekeeping logical CPU per this many online CPUs, matching SUSE's telco
-// examples (8 of 128, 4 of 64). Always at least one whole physical core.
+// housekeeping logical CPU per this many online CPUs, a common telco
+// reservation (8 of 128, 4 of 64). Always at least one whole physical core.
 const hkRatio = 16
 
-// ComputeCPUIsolation computes the partitioning following common industry
-// practice (tuned's cpu-partitioning, OpenShift's performance profile, SUSE
-// Telco Cloud): reserve whole physical cores for housekeeping on each NUMA
-// node — so every socket keeps local housekeeping/IRQ cores — scaled with
+// ComputeCPUIsolation computes the partitioning following common real-time
+// CPU-partitioning practice: reserve whole physical cores for housekeeping on
+// each NUMA node — so every socket keeps local housekeeping/IRQ cores — scaled with
 // machine size and kept as whole SMT-sibling groups so no core is split
 // between housekeeping and isolated — isolate every other online CPU, and
 // apply isolcpus (domain,nohz,managed_irq), nohz_full and rcu_nocbs to the

@@ -2069,9 +2069,10 @@ type kernelProfile struct {
 	huge    bool // append computed 1GiB hugepages (DPDK/telco)
 }
 
-// telcoArgs is the balanced SUSE-aligned Telco/RAN base; telcoMaxArgs stacks
-// the aggressive extras seen on RHEL-RT boxes (kill cpuidle entirely, PCIe
-// ASPM and audit) for maximum determinism at the cost of power and security.
+// telcoArgs is the balanced Telco/RAN real-time base; telcoMaxArgs stacks the
+// aggressive extras used on real-time production systems (kill cpuidle
+// entirely, PCIe ASPM and audit) for maximum determinism at the cost of power
+// and security.
 const telcoArgs = "preempt=full idle=poll skew_tick=1 nohz=on mce=off nosoftlockup nowatchdog nmi_watchdog=0 rcu_nocb_poll rcupdate.rcu_cpu_stall_suppress=1 rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 rcupdate.rcu_task_stall_timeout=0 rcutree.kthread_prio=99 clocksource=tsc tsc=reliable net.ifnames=1 intel_iommu=on iommu=pt mitigations=off cpufreq.default_governor=performance"
 
 const telcoMaxArgs = telcoArgs + " cpuidle.off=1 processor.max_cstate=0 pcie_aspm=off audit=0"
@@ -2086,13 +2087,13 @@ var kernelProfiles = []kernelProfile{
 	{name: "Realtime", args: "preempt=full threadirqs nowatchdog nmi_watchdog=0 skew_tick=1 nohz=on nosoftlockup rcu_nocb_poll rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 rcutree.kthread_prio=99 clocksource=tsc tsc=reliable", isolate: true},
 	{name: "Audio/Video Workstation", args: "preempt=full threadirqs tsc=reliable nowatchdog nmi_watchdog=0 cpufreq.default_governor=performance"},
 	{name: "Telco/RAN", args: telcoArgs,
-		note: "mitigations=off + idle=poll: max performance, less secure, high power. idle=poll replaces C-state limiting (per SUSE telco).", isolate: true, huge: true},
+		note: "mitigations=off + idle=poll: max performance, less secure, high power. idle=poll replaces C-state limiting.", isolate: true, huge: true},
 	{name: "Telco/RAN Max Perf", args: telcoMaxArgs,
 		note: "Telco/RAN plus cpuidle.off/max_cstate=0, pcie_aspm=off, audit=0: maximum determinism, highest power draw, weakest security.", isolate: true, huge: true},
 	{name: "HPC / Compute", args: "mitigations=off nowatchdog nmi_watchdog=0 processor.max_cstate=1 intel_idle.max_cstate=0 cpufreq.default_governor=performance transparent_hugepage=always",
 		note: "mitigations=off: faster, but disables CPU-vulnerability mitigations."},
 	{name: "AMD Instinct (GPU compute)", args: "iommu=pt intel_iommu=on pci=realloc=off pci=bfsort numa_balancing=disable mitigations=off pcie_aspm=off processor.max_cstate=0 nmi_watchdog=0 nowatchdog tsc=nowatchdog transparent_hugepage=always quiet",
-		note: "AMD Instinct GPU nodes (per AMD's guide); iommu adapts to the host CPU. Max-tuning extras in Custom: modprobe.blacklist=amdgpu, nokaslr, norandmaps, biosdevname=0."},
+		note: "AMD Instinct GPU-compute nodes; iommu adapts to the host CPU. Max-tuning extras in Custom: modprobe.blacklist=amdgpu, nokaslr, norandmaps, biosdevname=0."},
 	{name: "Virtualization Host (KVM)", args: "intel_iommu=on iommu=pt kvm-intel.nested=1 transparent_hugepage=never"},
 	{name: "GPU Passthrough (VFIO)", args: "intel_iommu=on iommu=pt vfio-pci.disable_vga=1 kvm-intel.nested=1 transparent_hugepage=never",
 		note: "Strict isolation. For consumer boards that need ACS override, use the consumer/ACS profile."},
@@ -2121,10 +2122,10 @@ var kernelProfileDesc = map[string]string{
 	"LowLatency":                     "Low-latency preemption and threaded IRQs, without the full real-time set.",
 	"Realtime":                       "Real-time tuning for deterministic latency; auto-isolates CPUs.",
 	"Audio/Video Workstation":        "Low-latency audio/video production (threaded IRQs, performance governor).",
-	"Telco/RAN":                      "SUSE-aligned telco/RAN real-time profile: CPU isolation, DPDK IOMMU, hugepages.",
+	"Telco/RAN":                      "Standard telco/RAN real-time profile: CPU isolation, DPDK IOMMU, hugepages.",
 	"Telco/RAN Max Perf":             "Telco/RAN pushed to maximum determinism; highest power draw, least secure.",
 	"HPC / Compute":                  "Throughput-oriented HPC compute (mitigations off, performance governor).",
-	"AMD Instinct (GPU compute)":     "AMD Instinct GPU-compute nodes, per AMD's acceptance guide.",
+	"AMD Instinct (GPU compute)":     "Tuning for AMD Instinct GPU-compute nodes (reliable PCI enumeration, IOMMU).",
 	"Virtualization Host (KVM)":      "KVM hypervisor host with IOMMU passthrough and nested virtualization.",
 	"GPU Passthrough (VFIO)":         "Strict VFIO GPU passthrough with full IOMMU isolation.",
 	"GPU Passthrough (consumer/ACS)": "GPU passthrough on consumer boards that need ACS override.",

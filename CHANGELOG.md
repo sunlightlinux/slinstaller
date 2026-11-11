@@ -51,8 +51,8 @@ for what will and will not be allowed to change once releases begin.
   Intel and AMD GPU profiles. Its note warns the GPU has no driver until the
   proprietary NVIDIA driver is installed. (NVIDIA Grace / ARM64 tuning is out of
   scope while the installer is x86_64-only.)
-- Added an "AMD Instinct (GPU compute)" profile following AMD's Instinct
-  acceptance guide: the required `iommu=pt`, `pci=realloc=off` and `pci=bfsort`
+- Added an "AMD Instinct (GPU compute)" profile for AMD Instinct GPU-compute
+  nodes: the required `iommu=pt`, `pci=realloc=off` and `pci=bfsort`
   (reliable GPU enumeration/ordering) with the vendor IOMMU (amd_iommu on an
   AMD EPYC host, intel_iommu on an Intel host), plus the recommended
   `numa_balancing=disable`, `tsc=nowatchdog`, `pcie_aspm=off`,
@@ -67,14 +67,14 @@ for what will and will not be allowed to change once releases begin.
   rewriter now preserves IOMMU flags (igfx_off) on the matching CPU vendor and
   drops them only when switching to the other vendor (amd_iommu=on on AMD).
 - Added a "Telco/RAN Max Perf" profile for maximum determinism: the Telco/RAN
-  base plus the aggressive extras seen on RHEL-RT boxes — `cpuidle.off=1
-  processor.max_cstate=0` (kill C-states entirely, beyond `idle=poll`),
+  base plus the aggressive extras used on real-time production systems —
+  `cpuidle.off=1 processor.max_cstate=0` (kill C-states entirely, beyond `idle=poll`),
   `pcie_aspm=off` (PCIe latency) and `audit=0`. Its note warns it draws the
   most power and is the least secure; the balanced Telco/RAN stays the default.
-- The Realtime and Telco/RAN profiles were aligned with SUSE Edge/Telco Cloud's
-  documented low-latency kernel command line: the computed isolation now uses
+- The Realtime and Telco/RAN profiles were aligned with industry low-latency /
+  real-time kernel practice: the computed isolation now uses
   `isolcpus=domain,nohz,managed_irq,<list>` (the `nohz` flag was missing);
-  Telco/RAN replaces C-state limiting with `idle=poll` alone (per SUSE, not
+  Telco/RAN replaces C-state limiting with `idle=poll` alone (not
   `intel_idle.max_cstate`/`processor.max_cstate` as well) and gains the RCU and
   tick tuning — `skew_tick=1 nohz=on mce=off rcu_nocb_poll
   rcupdate.rcu_cpu_stall_suppress=1 rcupdate.rcu_expedited=1
@@ -119,12 +119,12 @@ for what will and will not be allowed to change once releases begin.
 - The Realtime and Telco/RAN profiles now compute CPU isolation from the live
   machine instead of leaving it to Custom: the installer reserves whole
   physical cores for the OS and IRQs — scaled with machine size (about one
-  housekeeping logical CPU per 16, so 8 of 128 as in SUSE's telco examples,
+  housekeeping logical CPU per 16, so 8 of 128 — a common telco reservation,
   always at least one whole core) and kept as complete SMT-sibling groups so
   no core is split — isolates the rest, and fills
   `isolcpus=domain,nohz,managed_irq=`, `nohz_full=`, `rcu_nocbs=` and
-  `irqaffinity=` with the computed CPU lists — following tuned's
-  cpu-partitioning / OpenShift performance-profile practice. Telco/RAN also
+  `irqaffinity=` with the computed CPU lists — following common real-time
+  CPU-partitioning practice. Telco/RAN also
   reserves 1 GiB hugepages sized from RAM (about a quarter, always leaving
   4 GiB for the OS). The profile's note reports what was computed, and a
   machine with too few cores is left general-purpose. New `pkg/system`
