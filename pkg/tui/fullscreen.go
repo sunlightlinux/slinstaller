@@ -319,6 +319,7 @@ const (
 	secAutoUpdate
 	secSaveConfig
 	secLogLevel
+	secAmdPstate
 	sectionCount
 )
 
@@ -330,7 +331,7 @@ var sectionLabels = [sectionCount]string{
 	"Configure Network Interfaces", "Proxy", "Test Network Settings",
 	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
 	"Kernel Selection", "Swupd Mirror", "Automatic OS Updates",
-	"Save Configuration Settings", "Kernel Log Level",
+	"Save Configuration Settings", "Kernel Log Level", "AMD P-State Driver",
 }
 
 var sectionTitles = [sectionCount]string{
@@ -340,6 +341,7 @@ var sectionTitles = [sectionCount]string{
 	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
 	"Select Desired Kernel", "Swupd Mirror", "Automatic OS Updates",
 	"Save Configuration Settings", "Select Console Log Level",
+	"Select AMD P-State Driver Mode",
 }
 
 type view int
@@ -436,6 +438,7 @@ type model struct {
 	vm        bool     // running under a hypervisor
 	vmName    string   // its name from the firmware, when it gives one
 	logLevel  int      // console log level: -1 unset, else 0..7 (loglevel= + kernel.printk)
+	amdPstate string   // amd_pstate mode for AMD RT/telco profiles: active/passive/guided or ""
 	packages  string   // extra xbps packages (shown as "bundles")
 
 	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
@@ -594,7 +597,8 @@ func newModel(disks []blockdev.Device) model {
 		// install gets sensible server tuning without opening the section.
 		kernelProfile: "Server",
 		kernelArgs:    kernelProfileByName("Server").args,
-		logLevel:      -1, // console log level unset: keep the kernel default
+		logLevel:      -1,       // console log level unset: keep the kernel default
+		amdPstate:     "active", // AMD RT/telco default: hardware-managed P-states
 	}
 }
 
@@ -1632,7 +1636,7 @@ func adminTag(admin bool) string {
 func visibleSections(tab int) []section {
 	if tab == 1 {
 		return []section{secNetwork, secProxy, secTestNet, secBundles, secHostname,
-			secKernel, secLogLevel, secMirror, secAutoUpdate, secSaveConfig}
+			secKernel, secLogLevel, secAmdPstate, secMirror, secAutoUpdate, secSaveConfig}
 	}
 	return []section{secTimezone, secLanguage, secKeyboard, secMedia, secUser, secKernelArgs}
 }
@@ -1753,6 +1757,11 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.view = viewSectionChoice
 		m.choices = logLevelOptions
 		m.edCursor = logLevelToIndex(m.logLevel)
+		return m, nil
+	case secAmdPstate:
+		m.view = viewSectionChoice
+		m.choices = pstateOptions
+		m.edCursor = pstateToIndex(m.amdPstate)
 		return m, nil
 	case secNetwork:
 		// The clr-style interface list: the live interfaces, each DHCP until
@@ -1875,6 +1884,34 @@ func logLevelFromIndex(i int) int {
 	return i - 1
 }
 
+// pstateOptions are the amd_pstate driver modes offered for the AMD RT/telco
+// isolation profiles; "" (last) adds nothing. The stored value is the mode
+// token ("active"/"passive"/"guided") or "".
+var pstateOptions = []string{
+	"active (default)",
+	"passive",
+	"guided",
+	"Not set (kernel default)",
+}
+
+var pstateValues = []string{"active", "passive", "guided", ""}
+
+func pstateToIndex(mode string) int {
+	for i, v := range pstateValues {
+		if v == mode {
+			return i
+		}
+	}
+	return 0
+}
+
+func pstateFromIndex(i int) string {
+	if i < 0 || i >= len(pstateValues) {
+		return "active"
+	}
+	return pstateValues[i]
+}
+
 // kernelProfile is a named set of kernel command-line arguments: a starting
 // point the operator picks and then edits as Custom if needed. note flags a
 // trade-off (security/power) or a machine-specific step. The args are valid,
@@ -1969,11 +2006,11 @@ func (m model) profileArgs(p kernelProfile) string {
 	// Rewrite CPU-vendor-specific tokens (intel_iommu/kvm-intel/… ↔ amd) to
 	// match the detected processor, so an Intel-written profile boots on AMD.
 	args := system.VendorKernelArgs(p.args, m.cpuVendor)
-	// On AMD, use the modern P-state driver in active mode (hardware-managed
-	// P-states, the AMD equivalent of keeping Intel HWP) for the isolation
-	// profiles. Intel keeps HWP by default, so nothing is added there.
-	if p.isolate && m.cpuVendor == "amd" {
-		args = strings.TrimSpace(args + " amd_pstate=active")
+	// On AMD, select the P-state driver mode for the isolation profiles
+	// (default active = hardware-managed P-states, the AMD equivalent of
+	// keeping Intel HWP). Intel keeps HWP by default, so nothing is added there.
+	if p.isolate && m.cpuVendor == "amd" && m.amdPstate != "" {
+		args = strings.TrimSpace(args + " amd_pstate=" + m.amdPstate)
 	}
 	if p.isolate && m.cpuIso.OK {
 		args = strings.TrimSpace(args + " " + m.cpuIso.Args)
@@ -2160,6 +2197,11 @@ func (m model) sectionValue(s section) string {
 			return "Kernel default (not set)"
 		}
 		return fmt.Sprintf("loglevel=%d, kernel.printk = %d 4 1 7", m.logLevel, m.logLevel)
+	case secAmdPstate:
+		if m.amdPstate == "" {
+			return "Not set (AMD RT/telco profiles)"
+		}
+		return fmt.Sprintf("amd_pstate=%s (AMD RT/telco profiles)", m.amdPstate)
 	}
 	return ""
 }
@@ -2227,6 +2269,13 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.autoUpdate = m.edCursor + 1 // 1 Enabled, 2 Disabled
 			case secLogLevel:
 				m.logLevel = logLevelFromIndex(m.edCursor)
+			case secAmdPstate:
+				m.amdPstate = pstateFromIndex(m.edCursor)
+				// amd_pstate is part of an isolation profile's args, so keep a
+				// chosen predefined profile's args in sync with the new mode.
+				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
+					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
+				}
 			default: // kernel
 				m.kernel = m.choices[m.edCursor]
 			}

@@ -1476,3 +1476,41 @@ func TestLogLevelSection(t *testing.T) {
 		t.Fatalf("ConsoleLogLevel = %v", cfg.ConsoleLogLevel)
 	}
 }
+
+func TestAmdPstateSelectable(t *testing.T) {
+	// profileArgs honours the chosen mode.
+	m := newModel(oneDisk())
+	m.cpuVendor = "amd"
+	m.amdPstate = "passive"
+	if a := m.profileArgs(kernelProfileByName("Telco/RAN")); !strings.Contains(a, "amd_pstate=passive") {
+		t.Errorf("passive not applied: %s", a)
+	}
+	// "Not set" adds no amd_pstate.
+	m.amdPstate = ""
+	if a := m.profileArgs(kernelProfileByName("Telco/RAN")); strings.Contains(a, "amd_pstate") {
+		t.Errorf("unset should add no amd_pstate: %s", a)
+	}
+
+	// The section updates the mode and re-applies the current profile so its
+	// args stay in sync. Start on an AMD host with Telco/RAN selected.
+	m = newModel(oneDisk())
+	m.cpuVendor = "amd"
+	m.kernelProfile = "Telco/RAN"
+	m.cpuIso = system.CPUIsolation{OK: false} // isolation not relevant here
+	m.kernelArgs = m.profileArgs(kernelProfileByName("Telco/RAN"))
+	if !strings.Contains(m.kernelArgs, "amd_pstate=active") {
+		t.Fatalf("precondition: %s", m.kernelArgs)
+	}
+	// Open AMD P-State section, move to "guided" (index 2), select.
+	m = openSectionInTab(m, 1, secAmdPstate)
+	for i := 0; i < 2; i++ {
+		m = send(m, down)
+	}
+	m = send(m, enter)
+	if m.amdPstate != "guided" {
+		t.Fatalf("mode = %q, want guided", m.amdPstate)
+	}
+	if !strings.Contains(m.kernelArgs, "amd_pstate=guided") || strings.Contains(m.kernelArgs, "amd_pstate=active") {
+		t.Errorf("profile args not re-synced: %s", m.kernelArgs)
+	}
+}

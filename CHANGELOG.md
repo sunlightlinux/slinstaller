@@ -92,6 +92,14 @@ for what will and will not be allowed to change once releases begin.
   "VM Guest" profiles covering common base arguments (tsc=reliable,
   page_alloc.shuffle, rcu_expedited, rootfstype, cryptomgr.notests,
   no_timer_check, noreplace-smp).
+- The computed CPU isolation is NUMA-aware: housekeeping cores are reserved on
+  each NUMA node (every socket keeps local housekeeping/IRQ cores) instead of
+  all coming from the first socket — matching multi-socket telco practice. A
+  single-node machine is unaffected.
+- The AMD P-State driver mode for the RT/telco profiles is selectable in a new
+  "AMD P-State Driver" Advanced section (active / passive / guided / not set),
+  defaulting to active; it replaces the previously hard-coded
+  `amd_pstate=active` and only applies on AMD isolation profiles.
 - The Realtime and Telco/RAN profiles now compute CPU isolation from the live
   machine instead of leaving it to Custom: the installer reserves whole
   physical cores for the OS and IRQs — scaled with machine size (about one

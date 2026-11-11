@@ -24,10 +24,11 @@ func TestParseAndFormatCPUList(t *testing.T) {
 }
 
 func TestComputeCPUIsolation(t *testing.T) {
-	saved := cpuSysDir
-	defer func() { cpuSysDir = saved }()
+	saved, savedN := cpuSysDir, nodeSysDir
+	defer func() { cpuSysDir, nodeSysDir = saved, savedN }()
 	dir := t.TempDir()
 	cpuSysDir = dir
+	nodeSysDir = filepath.Join(dir, "no-numa") // force single-pool fallback
 	os.WriteFile(filepath.Join(dir, "online"), []byte("0-15\n"), 0o644)
 	os.MkdirAll(filepath.Join(dir, "cpu0", "topology"), 0o755)
 	os.WriteFile(filepath.Join(dir, "cpu0", "topology", "thread_siblings_list"), []byte("0,1\n"), 0o644)
@@ -78,10 +79,11 @@ func containsSub(s, sub string) bool {
 // width, enumerated thread-major (0..n-1 = thread0, n..2n-1 = thread1, ...).
 func writeTopology(t *testing.T, cores, smt int) {
 	t.Helper()
-	saved := cpuSysDir
-	t.Cleanup(func() { cpuSysDir = saved })
+	saved, savedN := cpuSysDir, nodeSysDir
+	t.Cleanup(func() { cpuSysDir, nodeSysDir = saved, savedN })
 	dir := t.TempDir()
 	cpuSysDir = dir
+	nodeSysDir = filepath.Join(dir, "no-numa") // single-pool unless a test sets nodes
 	total := cores * smt
 	os.WriteFile(filepath.Join(dir, "online"), []byte(fmt.Sprintf("0-%d\n", total-1)), 0o644)
 	for c := 0; c < cores; c++ {
@@ -119,5 +121,27 @@ func TestCPUIsolationScales(t *testing.T) {
 	ci = ComputeCPUIsolation()
 	if ci.Housekeeping != "0,4" || ci.Isolated != "1-3,5-7" {
 		t.Errorf("small machine hk=%q iso=%q, want 0,4 / 1-3,5-7", ci.Housekeeping, ci.Isolated)
+	}
+}
+
+func TestCPUIsolationNUMAAware(t *testing.T) {
+	saved, savedN := cpuSysDir, nodeSysDir
+	defer func() { cpuSysDir, nodeSysDir = saved, savedN }()
+	cdir, ndir := t.TempDir(), t.TempDir()
+	cpuSysDir, nodeSysDir = cdir, ndir
+	// 16 CPUs, no SMT, two NUMA nodes: 0-7 and 8-15.
+	os.WriteFile(filepath.Join(cdir, "online"), []byte("0-15\n"), 0o644)
+	os.MkdirAll(filepath.Join(ndir, "node0"), 0o755)
+	os.MkdirAll(filepath.Join(ndir, "node1"), 0o755)
+	os.WriteFile(filepath.Join(ndir, "node0", "cpulist"), []byte("0-7\n"), 0o644)
+	os.WriteFile(filepath.Join(ndir, "node1", "cpulist"), []byte("8-15\n"), 0o644)
+
+	ci := ComputeCPUIsolation()
+	// One housekeeping core reserved on each node: 0 and 8.
+	if ci.Housekeeping != "0,8" {
+		t.Errorf("housekeeping = %q, want 0,8 (one per node)", ci.Housekeeping)
+	}
+	if ci.Isolated != "1-7,9-15" {
+		t.Errorf("isolated = %q, want 1-7,9-15", ci.Isolated)
 	}
 }

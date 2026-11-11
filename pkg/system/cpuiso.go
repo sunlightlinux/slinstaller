@@ -13,6 +13,7 @@ import (
 // variables so tests can point them elsewhere.
 var (
 	cpuSysDir   = "/sys/devices/system/cpu"
+	nodeSysDir  = "/sys/devices/system/node"
 	meminfoFile = "/proc/meminfo"
 )
 
@@ -36,8 +37,9 @@ const hkRatio = 16
 
 // ComputeCPUIsolation computes the partitioning following common industry
 // practice (tuned's cpu-partitioning, OpenShift's performance profile, SUSE
-// Telco Cloud): reserve the first N physical cores for housekeeping — scaled
-// with machine size and kept as whole SMT-sibling groups so no core is split
+// Telco Cloud): reserve whole physical cores for housekeeping on each NUMA
+// node — so every socket keeps local housekeeping/IRQ cores — scaled with
+// machine size and kept as whole SMT-sibling groups so no core is split
 // between housekeeping and isolated — isolate every other online CPU, and
 // apply isolcpus (domain,nohz,managed_irq), nohz_full and rcu_nocbs to the
 // isolated set with irqaffinity on the housekeeping set.
@@ -48,21 +50,16 @@ func ComputeCPUIsolation() CPUIsolation {
 			online = append(online, i)
 		}
 	}
-	cores := physicalCores(online)
 	ci := CPUIsolation{Total: len(online)}
 
-	// Reserve whole physical cores for housekeeping: at least one, and enough
-	// to reach about Total/hkRatio logical CPUs.
-	target := ci.Total / hkRatio
+	// Reserve housekeeping on each NUMA node independently, so a multi-socket
+	// machine keeps housekeeping cores local to every socket rather than
+	// isolating a whole socket.
 	var hk, iso []int
-	hkLogical := 0
-	for i, core := range cores {
-		if i >= 1 && hkLogical >= target {
-			iso = append(iso, core...)
-			continue
-		}
-		hk = append(hk, core...)
-		hkLogical += len(core)
+	for _, nodeCPUs := range numaNodes(online) {
+		h, i := reserveHousekeeping(nodeCPUs)
+		hk = append(hk, h...)
+		iso = append(iso, i...)
 	}
 	sort.Ints(hk)
 	sort.Ints(iso)
@@ -78,6 +75,75 @@ func ComputeCPUIsolation() CPUIsolation {
 		ci.Isolated, ci.Isolated, ci.Isolated, ci.Housekeeping)
 	ci.OK = true
 	return ci
+}
+
+// reserveHousekeeping splits one NUMA node's CPUs into whole housekeeping
+// cores (at least one, enough to reach about node-size/hkRatio logical CPUs)
+// and the isolated remainder.
+func reserveHousekeeping(nodeCPUs []int) (hk, iso []int) {
+	cores := physicalCores(nodeCPUs)
+	target := len(nodeCPUs) / hkRatio
+	hkLogical := 0
+	for i, core := range cores {
+		if i >= 1 && hkLogical >= target {
+			iso = append(iso, core...)
+			continue
+		}
+		hk = append(hk, core...)
+		hkLogical += len(core)
+	}
+	return hk, iso
+}
+
+// numaNodes returns the online CPUs grouped by NUMA node (ordered by node id).
+// When the node topology is unreadable it returns a single group of all online
+// CPUs, so the computation degrades to a flat, single-pool reservation.
+func numaNodes(online []int) [][]int {
+	onlineSet := map[int]bool{}
+	for _, c := range online {
+		onlineSet[c] = true
+	}
+	entries, err := os.ReadDir(nodeSysDir)
+	if err != nil {
+		return [][]int{online}
+	}
+	type rec struct {
+		id   int
+		cpus []int
+	}
+	var recs []rec
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "node") {
+			continue
+		}
+		id, err := strconv.Atoi(strings.TrimPrefix(name, "node"))
+		if err != nil {
+			continue
+		}
+		data, err := os.ReadFile(nodeSysDir + "/" + name + "/cpulist")
+		if err != nil {
+			continue
+		}
+		var cpus []int
+		for _, c := range parseCPUList(strings.TrimSpace(string(data))) {
+			if onlineSet[c] {
+				cpus = append(cpus, c)
+			}
+		}
+		if len(cpus) > 0 {
+			recs = append(recs, rec{id, cpus})
+		}
+	}
+	if len(recs) == 0 {
+		return [][]int{online}
+	}
+	sort.Slice(recs, func(i, j int) bool { return recs[i].id < recs[j].id })
+	out := make([][]int, len(recs))
+	for i, r := range recs {
+		out[i] = r.cpus
+	}
+	return out
 }
 
 // physicalCores groups the online CPUs into physical cores by their SMT thread
