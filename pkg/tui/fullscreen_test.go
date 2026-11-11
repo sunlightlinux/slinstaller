@@ -23,9 +23,10 @@ func send(m tea.Model, k tea.KeyMsg) model {
 }
 
 var (
-	enter = tea.KeyMsg{Type: tea.KeyEnter}
-	down  = tea.KeyMsg{Type: tea.KeyDown}
-	up    = tea.KeyMsg{Type: tea.KeyUp}
+	enter  = tea.KeyMsg{Type: tea.KeyEnter}
+	down   = tea.KeyMsg{Type: tea.KeyDown}
+	up     = tea.KeyMsg{Type: tea.KeyUp}
+	tabKey = tea.KeyMsg{Type: tea.KeyTab}
 )
 
 func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
@@ -1580,5 +1581,48 @@ func TestKdumpSection(t *testing.T) {
 		if strings.HasPrefix(a, "crashkernel=") || strings.HasPrefix(a, "panic=") {
 			t.Errorf("kdump off but got %q", a)
 		}
+	}
+}
+
+func TestKernelDetailsButton(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs)
+	m = kernelTop(m)
+	// Move to Telco/RAN.
+	for i := 0; i < kernelProfileIndex("Telco/RAN"); i++ {
+		m = send(m, down)
+	}
+	// Tab once -> Details is the first stop after the list.
+	m = send(m, tabKey)
+	if m.btnFocus != focusDetails {
+		t.Fatalf("first Tab stop = %d, want focusDetails", m.btnFocus)
+	}
+	m = send(m, enter) // open Details
+	if m.popup != popupMessage {
+		t.Fatalf("Details did not open a window: popup=%v", m.popup)
+	}
+	joined := strings.Join(m.popupMsg, " ")
+	for _, want := range []string{"Telco/RAN", "Parameters:", "idle=poll", "real-time"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("Details window missing %q:\n%s", want, joined)
+		}
+	}
+	// Any key closes it, back to the list (not the hub).
+	m = send(m, enter)
+	if m.popup != popupNone || m.view != viewList {
+		t.Errorf("closing Details should return to the list: popup=%v view=%v", m.popup, m.view)
+	}
+}
+
+func TestKernelListNoInlinePreview(t *testing.T) {
+	// The profile picker no longer shows the args inline (that moved to the
+	// Details window), so the list is not narrowed by a preview block.
+	m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs)
+	m.width, m.height = 90, 30
+	v := stripANSIForTest(m.View())
+	if strings.Contains(v, "mitigations=auto transparent_hugepage") {
+		t.Errorf("list still shows an inline args preview:\n%s", v)
+	}
+	if !strings.Contains(v, "Details") {
+		t.Errorf("Details button missing from the list:\n%s", v)
 	}
 }

@@ -1124,27 +1124,53 @@ const (
 	focusList = iota
 	focusCancel
 	focusConfirm
+	focusDetails
 )
+
+// focusStops are the focusable positions below the current page's list, in
+// Tab order. The kernel-profile picker adds a Details button; other list
+// pages have just Cancel / Confirm.
+func (m model) focusStops() []int {
+	if m.view == viewList && m.editing == secKernelArgs {
+		return []int{focusList, focusDetails, focusCancel, focusConfirm}
+	}
+	return []int{focusList, focusCancel, focusConfirm}
+}
 
 // moveButtonFocus handles the keys that move focus between a page's list
 // and its Cancel / Confirm buttons: Tab and Shift+Tab cycle list, Cancel,
 // Confirm; Left and Right move between the buttons; Up from a button goes
 // back to the list. It reports whether it used the key.
 func (m *model) moveButtonFocus(key tea.KeyMsg) bool {
+	stops := m.focusStops()
+	cur := 0
+	for i, s := range stops {
+		if s == m.btnFocus {
+			cur = i
+		}
+	}
 	switch key.String() {
 	case "tab":
-		m.btnFocus = (m.btnFocus + 1) % 3
+		m.btnFocus = stops[(cur+1)%len(stops)]
 	case "shift+tab":
-		m.btnFocus = (m.btnFocus + 2) % 3
+		m.btnFocus = stops[(cur-1+len(stops))%len(stops)]
 	case "left", "right":
 		if m.btnFocus == focusList {
 			return false
 		}
-		if m.btnFocus == focusCancel {
-			m.btnFocus = focusConfirm
-		} else {
-			m.btnFocus = focusCancel
+		btns := stops[1:] // the buttons, excluding the list itself
+		bi := 0
+		for i, s := range btns {
+			if s == m.btnFocus {
+				bi = i
+			}
 		}
+		if key.String() == "right" {
+			bi = (bi + 1) % len(btns)
+		} else {
+			bi = (bi - 1 + len(btns)) % len(btns)
+		}
+		m.btnFocus = btns[bi]
 	case "up":
 		if m.btnFocus == focusList {
 			return false
@@ -1237,6 +1263,15 @@ func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if key.String() == "enter" && m.btnFocus == focusCancel {
 		m.view = viewHub
+		return m, nil
+	}
+	// Details: open the highlighted profile's description/parameters in a
+	// separate window, so the list itself stays full height.
+	if key.String() == "enter" && m.btnFocus == focusDetails {
+		if m.editing == secKernelArgs && len(items) > 0 {
+			m.popupMsg = m.profileDetails(kernelProfileByName(items[m.listCursor]))
+			m.popup = popupMessage
+		}
 		return m, nil
 	}
 	switch {
@@ -2031,6 +2066,58 @@ var kernelProfiles = []kernelProfile{
 	{name: "Laptop / Power Save", args: "quiet splash mitigations=auto pcie_aspm=force pcie_aspm.policy=powersave nmi_watchdog=0"},
 	{name: "Debug / Verbose Boot", args: "loglevel=7 ignore_loglevel initcall_debug earlyprintk=vga"},
 	{name: "Custom", note: "Type the Add / Remove arguments yourself."},
+}
+
+// kernelProfileDesc is a one-line description of what each profile is for,
+// shown in the Details window (not inline, so the list stays full height).
+var kernelProfileDesc = map[string]string{
+	"General (robust defaults)":      "Safe, broadly useful boot defaults for a general-purpose system.",
+	"VM Guest":                       "Tweaks for running as a virtual-machine guest (timer and SMP compatibility).",
+	"Server":                         "Balanced server defaults: schedutil governor and transparent hugepages.",
+	"Desktop":                        "Quiet graphical boot for a desktop workstation.",
+	"Desktop LowLatency":             "Desktop with a low-latency preemptible kernel for responsiveness.",
+	"LowLatency":                     "Low-latency preemption and threaded IRQs, without the full real-time set.",
+	"Realtime":                       "Real-time tuning for deterministic latency; auto-isolates CPUs.",
+	"Audio/Video Workstation":        "Low-latency audio/video production (threaded IRQs, performance governor).",
+	"Telco/RAN":                      "SUSE-aligned telco/RAN real-time profile: CPU isolation, DPDK IOMMU, hugepages.",
+	"Telco/RAN Max Perf":             "Telco/RAN pushed to maximum determinism; highest power draw, least secure.",
+	"HPC / Compute":                  "Throughput-oriented HPC compute (mitigations off, performance governor).",
+	"AMD Instinct (GPU compute)":     "AMD Instinct GPU-compute nodes, per AMD's acceptance guide.",
+	"Virtualization Host (KVM)":      "KVM hypervisor host with IOMMU passthrough and nested virtualization.",
+	"GPU Passthrough (VFIO)":         "Strict VFIO GPU passthrough with full IOMMU isolation.",
+	"GPU Passthrough (consumer/ACS)": "GPU passthrough on consumer boards that need ACS override.",
+	"Intel GPU Workstation":          "Intel integrated-GPU workstation tuning (i915).",
+	"AMD GPU Workstation":            "Discrete AMD GPU workstation tuning (amdgpu).",
+	"NVIDIA GPU (proprietary)":       "Blocks nouveau so the proprietary NVIDIA driver can load.",
+	"Containers / Cloud":             "Container/cloud host: unified cgroups and memory accounting.",
+	"Hardened (AppArmor)":            "Security-hardened boot with AppArmor and kernel lockdown.",
+	"Laptop / Power Save":            "Laptop power saving (PCIe ASPM, quiet boot).",
+	"Debug / Verbose Boot":           "Verbose boot diagnostics for troubleshooting.",
+	"Custom":                         "Type your own Add / Remove kernel arguments.",
+}
+
+// profileDetails builds the Details popup for a profile: its description, the
+// effective parameters for this machine, and any trade-off / auto-computed
+// note. Reuses the message-popup rendering (popupMsg[0] is the title).
+func (m model) profileDetails(p kernelProfile) []string {
+	msg := []string{p.name, ""}
+	if d := kernelProfileDesc[p.name]; d != "" {
+		msg = append(msg, wrapWords(d, 66, 4)...)
+		msg = append(msg, "")
+	}
+	msg = append(msg, "Parameters:")
+	args := m.profileArgs(p)
+	if strings.TrimSpace(args) == "" {
+		args = "(none - type them in Custom)"
+	}
+	for _, ln := range wrapWords(args, 64, 20) {
+		msg = append(msg, "  "+ln)
+	}
+	if note := m.profileNote(p); note != "" {
+		msg = append(msg, "")
+		msg = append(msg, wrapWords("Note: "+note, 66, 5)...)
+	}
+	return msg
 }
 
 // kernelProfileNames is the picker's list; kernelProfileIndex finds a name
@@ -3047,29 +3134,11 @@ func (m model) listView() string {
 	}
 	header = append(header, rule(w))
 
-	// For the kernel-profile picker, preview the highlighted profile's
-	// arguments (wrapped) and any trade-off note, below the list.
-	var preview []string
-	if m.editing == secKernelArgs && m.listCursor < len(items) {
-		p := kernelProfileByName(items[m.listCursor])
-		args := m.profileArgs(p)
-		if args == "" {
-			args = "(no extra arguments)"
-		}
-		preview = append(preview, lineBG.Width(w).Render(""))
-		for _, ln := range wrapWords(args, w-4, 3) {
-			preview = append(preview, footer.Width(w).Render("  "+ln))
-		}
-		if note := m.profileNote(p); note != "" {
-			for _, ln := range wrapWords(note, w-4, 2) {
-				preview = append(preview, warnText.Width(w).Render("  "+ln))
-			}
-		}
-	}
-
 	// Window the list to the remaining height, leaving room for a blank, the
-	// preview, the buttons and the footer.
-	rows := panelHeight(m.height) - len(header) - len(preview) - 4
+	// buttons and the footer. The kernel-profile picker shows no inline
+	// preview — its Details button opens a separate window instead — so the
+	// list uses the full height.
+	rows := panelHeight(m.height) - len(header) - 4
 	if rows < 3 {
 		rows = 3
 	}
@@ -3102,10 +3171,19 @@ func (m model) listView() string {
 		body = append(body, strings.Split(block, "\n")...)
 	}
 
-	body = append(body, preview...)
 	body = append(body, lineBG.Width(w).Render(""))
-	return m.screenButtons(body, []string{m.cancelConfirm(w)},
-		"type to filter · [Tab] buttons · [Enter] select · [Esc] back")
+
+	// The kernel-profile picker adds a Details button to the button row.
+	btnLine := m.cancelConfirm(w)
+	hint := "type to filter · [Tab] buttons · [Enter] select · [Esc] back"
+	if m.editing == secKernelArgs {
+		btnLine = buttonLine(w,
+			button{"Details", pick(m.btnFocus == focusDetails)},
+			button{"Cancel", pick(m.btnFocus == focusCancel)},
+			button{"Confirm", pick(m.btnFocus == focusConfirm)})
+		hint = "type to filter · [Tab] Details/buttons · [Enter] select · [Esc] back"
+	}
+	return m.screenButtons(body, []string{btnLine}, hint)
 }
 
 // wrapWords wraps s to width on word boundaries, at most maxLines lines; a

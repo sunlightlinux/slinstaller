@@ -12,6 +12,11 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- The Kernel Command Line profile picker gains a Details button that opens the
+  highlighted profile's description, full parameters and trade-off/auto-computed
+  note in a separate window, replacing the inline preview that used to sit below
+  the list. The list now uses the full dialog height, so many more profiles are
+  visible at once. Each profile has a one-line description.
 - New "Crash Dump (kdump)" section on the Advanced tab configures the kernel
   crash-dump reservation and panic behaviour: a two-field form for
   `crashkernel=` (prefilled with a RAM-scaled range,
