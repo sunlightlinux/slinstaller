@@ -1626,3 +1626,53 @@ func TestKernelListNoInlinePreview(t *testing.T) {
 		t.Errorf("Details button missing from the list:\n%s", v)
 	}
 }
+
+func TestIntelPstateVisibleOnlyOnIntel(t *testing.T) {
+	has := func(cpuVendor string) bool {
+		m := newModel(oneDisk())
+		m.cpuVendor = cpuVendor
+		for _, s := range m.visibleSections(1) {
+			if s == secIntelPstate {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("intel") {
+		t.Error("Intel P-State section missing on an Intel host")
+	}
+	if has("amd") || has("") {
+		t.Error("Intel P-State section should be hidden on non-Intel hosts")
+	}
+}
+
+func TestIntelPstateSelectable(t *testing.T) {
+	// Default: nothing added (HWP kept).
+	m := newModel(oneDisk())
+	m.cpuVendor = "intel"
+	if a := m.profileArgs(kernelProfileByName("Telco/RAN")); strings.Contains(a, "intel_pstate") {
+		t.Errorf("default should force no intel_pstate: %s", a)
+	}
+	if got := m.sectionValue(secIntelPstate); got != "Not set (keep HWP; Intel RT/telco profiles)" {
+		t.Errorf("default value = %q", got)
+	}
+	// Choose passive via the section; Telco/RAN picks it up.
+	m.kernelProfile = "Telco/RAN"
+	m.kernelArgs = m.profileArgs(kernelProfileByName("Telco/RAN"))
+	m = openSectionInTab(m, 1, secIntelPstate)
+	for i := 0; i < 2; i++ { // Not set(0) -> active(1) -> passive(2)
+		m = send(m, down)
+	}
+	m = send(m, enter)
+	if m.intelPstate != "passive" {
+		t.Fatalf("mode = %q, want passive", m.intelPstate)
+	}
+	if !strings.Contains(m.kernelArgs, "intel_pstate=passive") {
+		t.Errorf("profile args not re-synced: %s", m.kernelArgs)
+	}
+	// AMD host leaves intel_pstate untouched even if set.
+	m.cpuVendor = "amd"
+	if a := m.profileArgs(kernelProfileByName("Telco/RAN")); strings.Contains(a, "intel_pstate") {
+		t.Errorf("intel_pstate should not apply on AMD: %s", a)
+	}
+}

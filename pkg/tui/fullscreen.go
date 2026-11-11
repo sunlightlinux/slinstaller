@@ -334,6 +334,7 @@ const (
 	secLogLevel
 	secAmdPstate
 	secKdump
+	secIntelPstate
 	sectionCount
 )
 
@@ -346,7 +347,7 @@ var sectionLabels = [sectionCount]string{
 	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
 	"Kernel Selection", "Swupd Mirror", "Automatic OS Updates",
 	"Save Configuration Settings", "Kernel Log Level", "AMD P-State Driver",
-	"Crash Dump (kdump)",
+	"Crash Dump (kdump)", "Intel P-State Driver",
 }
 
 var sectionTitles = [sectionCount]string{
@@ -357,6 +358,7 @@ var sectionTitles = [sectionCount]string{
 	"Select Desired Kernel", "Swupd Mirror", "Automatic OS Updates",
 	"Save Configuration Settings", "Select Console Log Level",
 	"Select AMD P-State Driver Mode", "Configure Crash Dump (kdump)",
+	"Select Intel P-State Driver Mode",
 }
 
 type view int
@@ -454,6 +456,7 @@ type model struct {
 	vmName      string   // its name from the firmware, when it gives one
 	logLevel    int      // console log level: -1 unset, else 0..7 (loglevel= + kernel.printk)
 	amdPstate   string   // amd_pstate mode for AMD RT/telco profiles: active/passive/guided or ""
+	intelPstate string   // intel_pstate mode for Intel RT/telco profiles: active/passive/… or "" (keep HWP)
 	crashkernel string   // kdump memory reservation (crashkernel=); "" = kdump off
 	panicSecs   string   // seconds to auto-reboot after a panic (panic=); "" = not set
 	packages    string   // extra xbps packages (shown as "bundles")
@@ -1704,15 +1707,18 @@ func adminTag(admin bool) string {
 
 // visibleSections lists the sections shown under a tab. Required holds the
 // everyday choices; Advanced the ones most installs leave at their defaults —
-// mirroring clr-installer's [R] Required / [A] Advanced split. The AMD P-State
-// section is shown only on an AMD host, since Intel tunes P-states differently
-// (intel_pstate/HWP), so it would do nothing there.
+// mirroring clr-installer's [R] Required / [A] Advanced split. The AMD and
+// Intel P-State sections are each shown only on the matching CPU vendor, since
+// amd_pstate= / intel_pstate= would do nothing on the other.
 func (m model) visibleSections(tab int) []section {
 	if tab == 1 {
 		adv := []section{secNetwork, secProxy, secTestNet, secBundles, secHostname,
 			secKernel, secLogLevel, secKdump}
 		if m.cpuVendor == "amd" {
 			adv = append(adv, secAmdPstate)
+		}
+		if m.cpuVendor == "intel" {
+			adv = append(adv, secIntelPstate)
 		}
 		return append(adv, secMirror, secAutoUpdate, secSaveConfig)
 	}
@@ -1840,6 +1846,11 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.view = viewSectionChoice
 		m.choices = pstateOptions
 		m.edCursor = pstateToIndex(m.amdPstate)
+		return m, nil
+	case secIntelPstate:
+		m.view = viewSectionChoice
+		m.choices = intelPstateOptions
+		m.edCursor = intelPstateToIndex(m.intelPstate)
 		return m, nil
 	case secKdump:
 		// Two-field form: crashkernel reservation, then panic-reboot seconds.
@@ -2013,6 +2024,37 @@ func pstateFromIndex(i int) string {
 	return pstateValues[i]
 }
 
+// intelPstateOptions are the intel_pstate driver modes for the Intel RT/telco
+// isolation profiles. The default ("", first) adds nothing, keeping HWP — the
+// recommendation for real-time, where forcing intel_pstate off HWP hurts
+// latency. The stored value is the mode token or "".
+var intelPstateOptions = []string{
+	"Not set (keep HWP, default)",
+	"active",
+	"passive",
+	"no_hwp (disable HWP)",
+	"disable (use acpi-cpufreq)",
+	"force",
+}
+
+var intelPstateValues = []string{"", "active", "passive", "no_hwp", "disable", "force"}
+
+func intelPstateToIndex(mode string) int {
+	for i, v := range intelPstateValues {
+		if v == mode {
+			return i
+		}
+	}
+	return 0
+}
+
+func intelPstateFromIndex(i int) string {
+	if i < 0 || i >= len(intelPstateValues) {
+		return ""
+	}
+	return intelPstateValues[i]
+}
+
 // kernelProfile is a named set of kernel command-line arguments: a starting
 // point the operator picks and then edits as Custom if needed. note flags a
 // trade-off (security/power) or a machine-specific step. The args are valid,
@@ -2164,6 +2206,11 @@ func (m model) profileArgs(p kernelProfile) string {
 	// keeping Intel HWP). Intel keeps HWP by default, so nothing is added there.
 	if p.isolate && m.cpuVendor == "amd" && m.amdPstate != "" {
 		args = strings.TrimSpace(args + " amd_pstate=" + m.amdPstate)
+	}
+	// On Intel, intel_pstate is left unset by default (HWP kept, best for RT);
+	// a chosen mode is applied to the isolation profiles.
+	if p.isolate && m.cpuVendor == "intel" && m.intelPstate != "" {
+		args = strings.TrimSpace(args + " intel_pstate=" + m.intelPstate)
 	}
 	if p.isolate && m.cpuIso.OK {
 		args = strings.TrimSpace(args + " " + m.cpuIso.Args)
@@ -2355,6 +2402,11 @@ func (m model) sectionValue(s section) string {
 			return "Not set (AMD RT/telco profiles)"
 		}
 		return fmt.Sprintf("amd_pstate=%s (AMD RT/telco profiles)", m.amdPstate)
+	case secIntelPstate:
+		if m.intelPstate == "" {
+			return "Not set (keep HWP; Intel RT/telco profiles)"
+		}
+		return fmt.Sprintf("intel_pstate=%s (Intel RT/telco profiles)", m.intelPstate)
 	case secKdump:
 		if strings.TrimSpace(m.crashkernel) == "" {
 			return "Off (no crash dump)"
@@ -2435,6 +2487,11 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.amdPstate = pstateFromIndex(m.edCursor)
 				// amd_pstate is part of an isolation profile's args, so keep a
 				// chosen predefined profile's args in sync with the new mode.
+				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
+					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
+				}
+			case secIntelPstate:
+				m.intelPstate = intelPstateFromIndex(m.edCursor)
 				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
 					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
 				}

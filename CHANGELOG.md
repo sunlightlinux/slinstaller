@@ -112,6 +112,10 @@ for what will and will not be allowed to change once releases begin.
   "AMD P-State Driver" Advanced section (active / passive / guided / not set),
   defaulting to active; it replaces the previously hard-coded
   `amd_pstate=active` and only applies on AMD isolation profiles.
+- An equivalent "Intel P-State Driver" Advanced section (shown only on Intel)
+  sets `intel_pstate=` on the RT/telco isolation profiles: not set (default,
+  keep HWP — best for real-time), active, passive, no_hwp, disable or force.
+  Each P-State section appears only on the matching CPU vendor.
 - The Realtime and Telco/RAN profiles now compute CPU isolation from the live
   machine instead of leaving it to Custom: the installer reserves whole
   physical cores for the OS and IRQs — scaled with machine size (about one
