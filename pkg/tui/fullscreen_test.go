@@ -1727,3 +1727,22 @@ func TestGovernorEPPRestriction(t *testing.T) {
 		t.Errorf("non-EPP governors = %v", vals)
 	}
 }
+
+func TestConfigRecordsKernelProfile(t *testing.T) {
+	m := newModel(oneDisk())
+	m.users = []userEntry{{Login: "me", Password: "pw", Admin: true}}
+	// Default profile is Server.
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.KernelProfile != "Server" {
+		t.Errorf("KernelProfile = %q, want Server", cfg.KernelProfile)
+	}
+	// A different profile is recorded.
+	m.kernelProfile = "Telco/RAN"
+	cfg, _ = m.buildConfig()
+	if cfg.KernelProfile != "Telco/RAN" {
+		t.Errorf("KernelProfile = %q, want Telco/RAN", cfg.KernelProfile)
+	}
+}

@@ -12,6 +12,10 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- The saved configuration records the Kernel Command Line profile used in a new
+  `kernel-profile` field (e.g. `kernel-profile: Server`), next to the expanded
+  `kernel-arguments`. It is informational — the arguments are what apply — and a
+  Sunlight extension, omitted when unset.
 - The Kernel Command Line profile picker gains a Details button that opens the
   highlighted profile's description, full parameters and trade-off/auto-computed
   note in a separate window, replacing the inline preview that used to sit below

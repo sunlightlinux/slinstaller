@@ -152,6 +152,8 @@ func (m model) buildConfig() (*config.Config, error) {
 	if rem := strings.Fields(m.kernelArgsRemove); len(add) > 0 || len(rem) > 0 {
 		cfg.KernelArguments = &config.KernelArguments{Add: add, Remove: rem}
 	}
+	// Record which Kernel Command Line profile the arguments came from.
+	cfg.KernelProfile = m.kernelProfile
 	// Console log level: the controller turns this into loglevel=N on the
 	// kernel command line and kernel.printk = N 4 1 7 via sysctl.
 	if m.logLevel >= 0 {

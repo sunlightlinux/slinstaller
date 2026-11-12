@@ -48,6 +48,12 @@ type Config struct {
 	Timezone string `yaml:"timezone,omitempty"`
 	Kernel   string `yaml:"kernel,omitempty"`
 
+	// KernelProfile records which Kernel Command Line profile the arguments
+	// came from (e.g. "Server", "Telco/RAN", "Custom"). It is informational —
+	// KernelArguments holds the expanded arguments that actually apply — and a
+	// Sunlight extension, ignored when absent.
+	KernelProfile string `yaml:"kernel-profile,omitempty"`
+
 	KernelArguments *KernelArguments `yaml:"kernel-arguments,omitempty"`
 
 	// ConsoleLogLevel sets the kernel console log verbosity (0 emergency … 7

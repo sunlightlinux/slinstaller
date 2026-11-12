@@ -963,3 +963,23 @@ func TestConsoleLogLevelRoundTrip(t *testing.T) {
 		t.Errorf("marshaled config missing console-log-level:\n%s", out)
 	}
 }
+
+func TestKernelProfileRoundTrip(t *testing.T) {
+	var c Config
+	if err := yaml.Unmarshal([]byte("kernel-profile: Telco/RAN\n"), &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.KernelProfile != "Telco/RAN" {
+		t.Fatalf("KernelProfile = %q", c.KernelProfile)
+	}
+	out, _ := yaml.Marshal(&c)
+	if !strings.Contains(string(out), "kernel-profile: Telco/RAN") {
+		t.Errorf("marshaled config missing kernel-profile:\n%s", out)
+	}
+	// Absent -> empty, omitted on marshal.
+	var c2 Config
+	yaml.Unmarshal([]byte("hostname: x\n"), &c2)
+	if out, _ := yaml.Marshal(&c2); strings.Contains(string(out), "kernel-profile") {
+		t.Errorf("empty kernel-profile should be omitted:\n%s", out)
+	}
+}
