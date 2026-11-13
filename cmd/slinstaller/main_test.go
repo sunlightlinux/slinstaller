@@ -55,6 +55,11 @@ func TestDefaultPackagesBootSlinit(t *testing.T) {
 	if strings.Contains(set, ",base-system,") {
 		t.Errorf("defaultPackages = %q: base-system pulls runit-void, which conflicts with slinit", defaultPackages)
 	}
+	// pam-base's system-login names pam_slinit.so; without slpam a login
+	// opens no session at all, silently, as the line is "-session".
+	if !strings.Contains(set, ",slpam,") {
+		t.Errorf("defaultPackages = %q, want slpam in it", defaultPackages)
+	}
 }
 
 func TestUnderRoot(t *testing.T) {

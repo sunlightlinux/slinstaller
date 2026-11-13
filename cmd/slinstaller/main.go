@@ -42,19 +42,21 @@ const (
 	defaultRepo    = "https://repo-default.voidlinux.org/current"
 	defaultKeysDir = "/var/db/xbps/keys"
 	// defaultLocalRepo is where the live ISO keeps the packages no remote
-	// repository has yet: slinit and slinit-services.
+	// repository has yet: slinit, slinit-services and slpam.
 	defaultLocalRepo = "/usr/share/slinstaller/repo"
 	// sunlight-base is Void's base-system with slinit in place of runit:
 	// the same packages minus runit-void, plus slinit-services (slinit
 	// and its boot services). It brings glibc-locales, so the configured
 	// locale can be generated. grub-x86_64-efi is the UEFI bootloader
-	// (x86_64 — override --packages for another architecture).
-	defaultPackages = "sunlight-base,grub-x86_64-efi"
+	// (x86_64 — override --packages for another architecture). slpam is
+	// pam_slinit.so, which registers logins with slinit-logind; the
+	// live medium's pam-base names it in system-login.
+	defaultPackages = "sunlight-base,grub-x86_64-efi,slpam"
 )
 
 // localOnlyPackages exist only in the live medium's repository; asking
 // for one without that repository cannot succeed.
-var localOnlyPackages = []string{"slinit", "slinit-services", "sunlight-base"}
+var localOnlyPackages = []string{"slinit", "slinit-services", "sunlight-base", "slpam"}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
