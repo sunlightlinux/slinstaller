@@ -23,6 +23,11 @@ const (
 	DefaultID     = "Sunlight"
 	DefaultTarget = "x86_64-efi"
 	configPath    = "/boot/grub/grub.cfg"
+
+	// Distributor names the system in the boot menu. grub-mkconfig's
+	// 10_linux turns it into "Sunlight OS GNU/Linux" and the menu class
+	// "sunlight"; the grub package's own default still says "Void".
+	Distributor = "Sunlight OS"
 )
 
 // Options is a bootloader install: the target tree, where the ESP is
@@ -81,4 +86,11 @@ func (o Options) CmdlineConfig() string {
 		return ""
 	}
 	return fmt.Sprintf("GRUB_CMDLINE_LINUX_DEFAULT=%q\n", strings.Join(o.KernelArgs, " "))
+}
+
+// DistributorConfig renders the /etc/default/grub line that names the
+// system in the boot menu. Like CmdlineConfig it is appended after the
+// package default, so it wins.
+func DistributorConfig() string {
+	return fmt.Sprintf("GRUB_DISTRIBUTOR=%q\n", Distributor)
 }

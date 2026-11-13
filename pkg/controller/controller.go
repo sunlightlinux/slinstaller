@@ -672,11 +672,13 @@ func (in *installer) bootloader() error {
 	g := grub.Options{Root: in.opts.Root, ESPDir: esp, KernelArgs: kargs}
 
 	// Extra /etc/default/grub lines, written before grub-install and
-	// grub-mkconfig both read it: the kernel command line, and — when /boot
+	// grub-mkconfig both read it: the name in the boot menu, the kernel
+	// command line, and — when /boot
 	// is on an encrypted device (no unencrypted ESP mounted at /boot) —
 	// GRUB_ENABLE_CRYPTODISK=y, without which grub-install refuses to set up
 	// a loader that must unlock LUKS to read the kernel.
 	var grubDefault strings.Builder
+	grubDefault.WriteString("\n# boot menu name set by slinstaller\n" + grub.DistributorConfig())
 	if line := g.CmdlineConfig(); line != "" {
 		grubDefault.WriteString("\n# kernel command line set by slinstaller\n" + line)
 	}

@@ -53,3 +53,11 @@ func TestCmdlineConfig(t *testing.T) {
 		t.Errorf("CmdlineConfig = %q, want %q", got, want)
 	}
 }
+
+// The installed system's boot menu said "Void GNU/Linux": the grub
+// package's default distributor was never overridden.
+func TestDistributorConfig(t *testing.T) {
+	if got, want := DistributorConfig(), "GRUB_DISTRIBUTOR=\"Sunlight OS\"\n"; got != want {
+		t.Errorf("DistributorConfig = %q, want %q", got, want)
+	}
+}
