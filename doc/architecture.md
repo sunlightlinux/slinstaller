@@ -71,13 +71,21 @@ clr-installer's; the code and the scope are ours:
   a disk except `RunCommands`, so there is one gate to hold and one list
   to audit.
 
-### Next
+- **`pkg/luks`, `pkg/lvm`, `pkg/mdadm`** — encrypted volumes, volume groups
+  and software RAID arrays, layered under the filesystems.
+- **`pkg/blockdev`** — discovers the machine's disks and what is in use.
+- **`pkg/controller`** — sequences the install from a `config.Config`:
+  partition, mount (parent-first, with `proc`/`sys`/`dev` bound for chroot),
+  base install, `fstab` by UUID, bootloader, first boot, network.
+- **`pkg/xbps`** — the base-system install.
+- **`pkg/grub`** — GRUB for UEFI and the kernel command line.
+- **`pkg/system`** — first-boot configuration (hostname, time zone, keymap,
+  locale, accounts, slinit services) and the machine detection the wizard's
+  kernel sections use.
+- **`pkg/network`** — `dhcpcd` configuration and the connectivity check.
+- **`pkg/tui`** — the full-screen wizard and the plain prompt flow.
 
-- Mount the target tree parent-first, bind-mount `proc`/`sys`/`dev` for
-  chroot, and write `fstab` by UUID.
-- A controller that sequences the subsystems from a `config.Config`.
-- Base-system install (`xbps`), bootloader registration (`efibootmgr`),
-  and first-boot configuration (slinit as PID 1).
+What is still to port is tracked in [port-status.md](port-status.md).
 
 ## Safety
 
