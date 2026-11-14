@@ -147,6 +147,11 @@ Three things to know:
   (or none) is never rewritten — there `--apply` only refuses, before
   touching the disk, a CPU list naming CPUs the machine lacks or hugepages
   that would leave it under 1 GiB.
+
+  Two things the install does not put right, left to services on the
+  installed system: `intel_idle.max_cstate`, dropped when a config goes to
+  AMD, is not restored if it later returns to Intel; and a governor chosen
+  for a P-State mode the other vendor lacks is kept as written.
 - **The profiles run on the stock kernel.** They rely on dynamic preemption
   (`preempt=full`), `nohz_full` and RCU callback offloading, which the
   packaged `linux` kernel has. That is low-latency tuning, not a
