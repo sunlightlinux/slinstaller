@@ -1905,12 +1905,12 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 	case secAmdPstate:
 		m.view = viewSectionChoice
 		m.choices = pstateOptions
-		m.edCursor = pstateToIndex(m.amdPstate)
+		m.edCursor = indexOf(pstateValues, m.amdPstate)
 		return m, nil
 	case secIntelPstate:
 		m.view = viewSectionChoice
 		m.choices = intelPstateOptions
-		m.edCursor = intelPstateToIndex(m.intelPstate)
+		m.edCursor = indexOf(intelPstateValues, m.intelPstate)
 		return m, nil
 	case secGovernor:
 		opts, vals := m.governorChoices()
@@ -2076,22 +2076,6 @@ const (
 	defaultPanicSecs   = "5"
 )
 
-func pstateToIndex(mode string) int {
-	for i, v := range pstateValues {
-		if v == mode {
-			return i
-		}
-	}
-	return 0
-}
-
-func pstateFromIndex(i int) string {
-	if i < 0 || i >= len(pstateValues) {
-		return "active"
-	}
-	return pstateValues[i]
-}
-
 // intelPstateOptions are the intel_pstate driver modes for the Intel RT/telco
 // isolation profiles. The default ("", first) adds nothing, keeping HWP — the
 // recommendation for real-time, where forcing intel_pstate off HWP hurts
@@ -2106,22 +2090,6 @@ var intelPstateOptions = []string{
 }
 
 var intelPstateValues = []string{"", "active", "passive", "no_hwp", "disable", "force"}
-
-func intelPstateToIndex(mode string) int {
-	for i, v := range intelPstateValues {
-		if v == mode {
-			return i
-		}
-	}
-	return 0
-}
-
-func intelPstateFromIndex(i int) string {
-	if i < 0 || i >= len(intelPstateValues) {
-		return ""
-	}
-	return intelPstateValues[i]
-}
 
 // governorOptions are the CPU-frequency governors offered. The first ("",
 // not set) keeps whatever governor a profile already sets (or the kernel
@@ -2472,6 +2440,24 @@ func kernelLabel(k string) string {
 	}
 }
 
+// valueAt is the inverse of indexOf for a choice list: the value at cursor i,
+// or the first (default) one when i is out of range.
+func valueAt(vals []string, i int) string {
+	if i < 0 || i >= len(vals) {
+		return vals[0]
+	}
+	return vals[i]
+}
+
+// resyncProfileArgs rebuilds a predefined profile's arguments after a setting
+// that feeds them (P-State mode, governor) changed. Custom arguments are the
+// operator's own text and are left alone.
+func (m *model) resyncProfileArgs() {
+	if m.kernelProfile != "" && m.kernelProfile != "Custom" {
+		m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
+	}
+}
+
 func indexOf(ss []string, v string) int {
 	for i, s := range ss {
 		if s == v {
@@ -2652,27 +2638,20 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case secLogLevel:
 				m.logLevel = logLevelFromIndex(m.edCursor)
 			case secAmdPstate:
-				m.amdPstate = pstateFromIndex(m.edCursor)
 				// The mode decides which governors exist, and amd_pstate is
 				// part of an isolation profile's args: drop a governor the new
 				// mode does not have, then re-sync the profile's args.
+				m.amdPstate = valueAt(pstateValues, m.edCursor)
 				staleGov = m.dropStaleGovernor()
-				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
-					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
-				}
+				m.resyncProfileArgs()
 			case secIntelPstate:
-				m.intelPstate = intelPstateFromIndex(m.edCursor)
+				m.intelPstate = valueAt(intelPstateValues, m.edCursor)
 				staleGov = m.dropStaleGovernor()
-				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
-					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
-				}
+				m.resyncProfileArgs()
 			case secGovernor:
-				if _, vals := m.governorChoices(); m.edCursor >= 0 && m.edCursor < len(vals) {
-					m.governor = vals[m.edCursor]
-				}
-				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
-					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
-				}
+				_, vals := m.governorChoices()
+				m.governor = valueAt(vals, m.edCursor)
+				m.resyncProfileArgs()
 			default: // kernel
 				m.kernel = m.choices[m.edCursor]
 			}
