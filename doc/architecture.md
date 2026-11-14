@@ -60,17 +60,17 @@ clr-installer's; the code and the scope are ours:
 - Clear Linux specifics — `swupd`, telemetry, bundles — are dropped in
   favour of the Void lineage slinstaller inherits (`xbps`, slinit).
 
-### Ported so far
+### The packages
 
 - **`pkg/config`** — reads clr-installer's config schema and produces a
   `storage.Plan` from the target disk's layout.
 - **`pkg/storage`** — partition the disk and make its filesystems.
   `parted` for the GPT label, the partitions and the ESP type,
   `mkfs.*` / `mkswap` for filesystems. The destructive work is a command
-  list computed purely from the plan (`Plan.Commands`); nothing writes to
-  a disk except `RunCommands`, so there is one gate to hold and one list
-  to audit.
-
+  list computed purely from the plan (`Plan.Commands`) and run by
+  `RunCommands`, so there is one list to audit. The one exception is
+  `cryptsetup`, which the controller runs itself because it is fed the
+  passphrase on stdin.
 - **`pkg/luks`, `pkg/lvm`, `pkg/mdadm`** — encrypted volumes, volume groups
   and software RAID arrays, layered under the filesystems.
 - **`pkg/blockdev`** — discovers the machine's disks and what is in use.
