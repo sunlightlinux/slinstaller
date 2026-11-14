@@ -144,3 +144,61 @@ func memTotalBytes() uint64 {
 func gib(b uint64) string {
 	return strconv.FormatFloat(float64(b)/(1<<30), 'f', 1, 64) + " GiB"
 }
+
+// HugepagesArgs is the kernel command line that reserves n 1 GiB hugepages,
+// or "" for none.
+func HugepagesArgs(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("default_hugepagesz=1G hugepagesz=1G hugepages=%d", n)
+}
+
+// isolationArg reports whether a kernel argument is one the isolation
+// profiles compute per machine: a CPU list, or (when hugepages is set) part of
+// the hugepage reservation.
+func isolationArg(arg string, hugepages bool) bool {
+	name, _, ok := strings.Cut(arg, "=")
+	if !ok {
+		return false
+	}
+	switch name {
+	case "isolcpus", "nohz_full", "rcu_nocbs", "irqaffinity":
+		return true
+	case "default_hugepagesz", "hugepagesz", "hugepages":
+		return hugepages
+	}
+	return false
+}
+
+// RefitIsolation recomputes, for the machine it runs on, the arguments an
+// isolation profile derives from the hardware: the isolcpus=, nohz_full=,
+// rcu_nocbs= and irqaffinity= CPU lists and, when hugepages is set, the
+// 1 GiB hugepage reservation. A saved config holds these literally for the
+// machine it was written on; this makes them right for the one being
+// installed. Every other argument is kept, in place.
+//
+// It returns the refitted arguments, and the machine-specific ones as they
+// were and as they are now, so the caller can say what changed. When the two
+// are the same the arguments come back untouched. A machine too small to
+// partition gets no CPU lists, and one with too little memory no hugepages —
+// the same as the wizard would give it.
+func RefitIsolation(args []string, hugepages bool) (out, was, now []string) {
+	if ci := ComputeCPUIsolation(); ci.OK {
+		now = strings.Fields(ci.Args)
+	}
+	if hugepages {
+		now = append(now, strings.Fields(HugepagesArgs(HugepagesGiB()))...)
+	}
+	for _, a := range args {
+		if isolationArg(a, hugepages) {
+			was = append(was, a)
+		} else {
+			out = append(out, a)
+		}
+	}
+	if strings.Join(was, " ") == strings.Join(now, " ") {
+		return args, was, now
+	}
+	return append(out, now...), was, now
+}

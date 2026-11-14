@@ -49,9 +49,12 @@ type Config struct {
 	Kernel   string `yaml:"kernel,omitempty"`
 
 	// KernelProfile records which Kernel Command Line profile the arguments
-	// came from (e.g. "Server", "Telco/RAN", "Custom"). It is informational —
-	// KernelArguments holds the expanded arguments that actually apply — and a
-	// Sunlight extension, ignored when absent.
+	// came from (e.g. "Server", "Telco/RAN", "Custom"). KernelArguments holds
+	// the expanded arguments that apply, with one exception: for a profile
+	// that isolates CPUs (Realtime, Telco/RAN, …) an install recomputes the
+	// CPU lists and hugepage count for the machine it runs on, since those
+	// belong to the hardware rather than to the config. "Custom", or no
+	// profile, keeps every argument as written. A Sunlight extension.
 	KernelProfile string `yaml:"kernel-profile,omitempty"`
 
 	KernelArguments *KernelArguments `yaml:"kernel-arguments,omitempty"`

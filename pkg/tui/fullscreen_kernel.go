@@ -282,6 +282,20 @@ func (m model) profileDetails(p kernelProfile) []string {
 
 // kernelProfileNames is the picker's list; kernelProfileIndex finds a name
 // (defaulting to the first entry); kernelProfileByName returns the profile.
+// KernelProfileIsolation reports whether the named profile derives arguments
+// from the machine's hardware — CPU isolation lists and, for hugepages, a
+// 1 GiB hugepage reservation — so an install can recompute them for the
+// machine it runs on. known is false for a name that is not a profile
+// (including "Custom" and ""), whose arguments are the operator's own.
+func KernelProfileIsolation(name string) (isolate, hugepages, known bool) {
+	for _, p := range kernelProfiles {
+		if p.name == name && name != "Custom" {
+			return p.isolate, p.huge, true
+		}
+	}
+	return false, false, false
+}
+
 func kernelProfileNames() []string {
 	out := make([]string, len(kernelProfiles))
 	for i, p := range kernelProfiles {
@@ -325,7 +339,7 @@ func (m model) profileArgs(p kernelProfile) string {
 		args = strings.TrimSpace(args + " " + m.cpuIso.Args)
 	}
 	if p.huge && m.hugeGiB > 0 {
-		args = strings.TrimSpace(args + fmt.Sprintf(" default_hugepagesz=1G hugepagesz=1G hugepages=%d", m.hugeGiB))
+		args = strings.TrimSpace(args + " " + system.HugepagesArgs(m.hugeGiB))
 	}
 	// A chosen CPU-frequency governor overrides whatever the profile set.
 	if m.governor != "" {

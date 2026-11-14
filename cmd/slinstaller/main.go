@@ -398,6 +398,11 @@ restart:
 		return fmt.Errorf("--apply must run as root")
 	}
 
+	// An isolation profile's CPU lists and hugepages belong to a machine,
+	// not to a config: make them right for this one before they are checked
+	// and installed.
+	refitKernelArgs(cfg, os.Stderr)
+
 	// Preflight: a full install needs these on the live system. Check
 	// before confirming, so a missing tool fails here rather than partway
 	// through partitioning. (Staged --through runs skip this — the
@@ -716,6 +721,41 @@ func printDisks() error {
 		}
 	}
 	return nil
+}
+
+// refitKernelArgs recomputes, for the machine being installed, the kernel
+// arguments an isolation profile derives from its hardware. A saved config
+// carries the isolcpus=/nohz_full=/rcu_nocbs=/irqaffinity= lists and the
+// hugepage count of the machine the wizard ran on; when kernel-profile names
+// such a profile (Realtime, Telco/RAN, …) they are replaced with this
+// machine's, and the change is reported to w. Every other argument is left as
+// written. A config with kernel-profile Custom, or none, is not touched: its
+// arguments are the operator's own.
+func refitKernelArgs(cfg *config.Config, w io.Writer) {
+	isolate, hugepages, known := tui.KernelProfileIsolation(cfg.KernelProfile)
+	if !known || !isolate {
+		return
+	}
+	var add []string
+	if cfg.KernelArguments != nil {
+		add = cfg.KernelArguments.Add
+	}
+	out, was, now := system.RefitIsolation(add, hugepages)
+	if strings.Join(was, " ") == strings.Join(now, " ") {
+		return
+	}
+	if cfg.KernelArguments == nil {
+		cfg.KernelArguments = &config.KernelArguments{}
+	}
+	cfg.KernelArguments.Add = out
+	none := func(s []string) string {
+		if len(s) == 0 {
+			return "(none)"
+		}
+		return strings.Join(s, " ")
+	}
+	fmt.Fprintf(w, "\nkernel-profile %s: CPU isolation recomputed for this machine\n  was: %s\n  now: %s\n",
+		cfg.KernelProfile, none(was), none(now))
 }
 
 // humanSize formats a byte count in binary units.

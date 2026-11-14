@@ -1818,3 +1818,35 @@ func TestEverySectionIsLabelled(t *testing.T) {
 		}
 	}
 }
+
+func TestKernelProfileIsolation(t *testing.T) {
+	for name, want := range map[string][3]bool{
+		"Telco/RAN":          {true, true, true},
+		"Telco/RAN Max Perf": {true, true, true},
+		"Realtime":           {true, false, true},
+		"Server":             {false, false, true},
+		"Custom":             {false, false, false}, // the operator's own arguments
+		"":                   {false, false, false},
+		"No Such Profile":    {false, false, false},
+	} {
+		iso, huge, known := KernelProfileIsolation(name)
+		if got := [3]bool{iso, huge, known}; got != want {
+			t.Errorf("KernelProfileIsolation(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestRefitLeavesTheWizardsOwnOutputAlone(t *testing.T) {
+	// What the wizard computes on a machine is what an install on that
+	// machine would recompute, so its config is not rewritten at install.
+	for _, name := range []string{"Realtime", "Telco/RAN", "Telco/RAN Max Perf"} {
+		m := openSectionInTab(newModel(oneDisk()), 0, secKernelArgs) // detects this machine
+		m.governor = "performance"
+		args := strings.Fields(m.profileArgs(kernelProfileByName(name)))
+		_, huge, _ := KernelProfileIsolation(name)
+		out, was, now := system.RefitIsolation(args, huge)
+		if strings.Join(was, " ") != strings.Join(now, " ") || strings.Join(out, " ") != strings.Join(args, " ") {
+			t.Errorf("%s: install would rewrite the wizard's arguments\n was: %v\n now: %v", name, was, now)
+		}
+	}
+}

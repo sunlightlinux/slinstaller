@@ -34,6 +34,14 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- A saved config is now portable across machines for the isolation profiles.
+  When `kernel-profile` names Realtime, Telco/RAN or Telco/RAN Max Perf,
+  `--apply` recomputes `isolcpus=`, `nohz_full=`, `rcu_nocbs=`, `irqaffinity=`
+  and (for Telco) the 1 GiB hugepage count for the machine being installed,
+  replaces the saved values, and reports the change. Other arguments are kept
+  as written, and `kernel-profile: Custom` (or no profile) is never rewritten.
+  This makes `kernel-profile` operative for those profiles rather than purely
+  informational.
 - Preflight now checks that the kernel arguments fit the machine being
   installed: an `isolcpus=`/`nohz_full=`/`rcu_nocbs=`/`irqaffinity=` list
   naming CPUs it does not have, `isolcpus=` covering every CPU, or a hugepage
