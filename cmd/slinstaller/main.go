@@ -9,6 +9,7 @@ package main
 
 import (
 	"bufio"
+	"embed"
 	"flag"
 	"fmt"
 	"io"
@@ -52,7 +53,23 @@ const (
 	// pam_slinit.so, which registers logins with slinit-logind; the
 	// live medium's pam-base names it in system-login.
 	defaultPackages = "sunlight-base,grub-x86_64-efi,slpam"
+
+	// defaultExtraRepo is the Sunlight package mirror, layered ahead of Void
+	// (see --extra-repo). It is signed, so http is safe — the RSA signature,
+	// not the transport, is the integrity guarantee; its key is embedded below.
+	defaultExtraRepo = "http://repo-default.ionutnechita.ro/current"
+
+	// sunlightKeyFile is the Sunlight repo key's xbps filename (its RSA
+	// fingerprint). Seeded into the target so the mirror's signatures verify.
+	sunlightKeyFile = "d8:42:05:80:77:16:f2:b7:20:a0:d9:60:35:00:6d:5a.plist"
 )
+
+// sunlightKeyFS carries the Sunlight mirror's public signing key, so an
+// install verifies what it pulls from the mirror without relying on the
+// live medium already trusting it.
+//
+//go:embed keys/sunlight-repo.plist
+var sunlightKeyFS embed.FS
 
 // localOnlyPackages exist only in the live medium's repository; asking
 // for one without that repository cannot succeed.
@@ -73,6 +90,7 @@ func run(args []string) error {
 		root        string
 		repo        string
 		localRepo   string
+		extraRepo   string
 		keys        string
 		arch        string
 		pkgs        string
@@ -87,6 +105,8 @@ func run(args []string) error {
 		"xbps repository for the base system (default: the config's swupdMirror, else Void's official repo)")
 	fs.StringVar(&localRepo, "local-repo", defaultLocalRepo,
 		"comma-separated xbps repositories on the live medium, searched before --repo (slinit comes from here); paths without a repository index are skipped")
+	fs.StringVar(&extraRepo, "extra-repo", defaultExtraRepo,
+		"comma-separated remote xbps repositories searched ahead of --repo (defaults to the Sunlight mirror, layered over Void); signature-checked, so their key must be in --keys (the Sunlight key is built in)")
 	fs.StringVar(&keys, "keys", defaultKeysDir, "directory of xbps signing keys to seed into the target")
 	fs.StringVar(&arch, "arch", "", "XBPS_TARGET_ARCH for the base system (default: host architecture)")
 	fs.StringVar(&pkgs, "packages", defaultPackages, "comma-separated base packages to install")
@@ -309,6 +329,16 @@ restart:
 	if cfg.Offline && strings.HasPrefix(repo, "http") {
 		repo = ""
 	}
+	// Extra remote repositories (the Sunlight mirror). Dropped offline, like
+	// the remote repo above — they too would reach the network.
+	var extraRepos []string
+	if !cfg.Offline {
+		for _, r := range strings.Split(extraRepo, ",") {
+			if r = strings.TrimSpace(r); r != "" {
+				extraRepos = append(extraRepos, r)
+			}
+		}
+	}
 	var packages []string
 	seen := map[string]bool{}
 	addPkg := func(p string) {
@@ -372,10 +402,21 @@ restart:
 		}
 	}
 
+	// Seed the Sunlight mirror's signing key next to the live medium's keys,
+	// so the install verifies what it pulls from the mirror. A temp dir,
+	// because the live keys directory may be read-only.
+	if merged, err := seedSunlightKey(keys); err != nil {
+		return fmt.Errorf("seed the Sunlight repo key: %w", err)
+	} else {
+		defer os.RemoveAll(merged)
+		keys = merged
+	}
+
 	opts := controller.Options{
 		Root:       root,
 		Through:    through,
 		LocalRepos: localRepos,
+		ExtraRepos: extraRepos,
 		Repo:       repo,
 		KeysDir:    keys,
 		Arch:       arch,
@@ -1011,4 +1052,41 @@ func writeTemplate(path string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Wrote %s. Add users (password hashes from --genpass) and point the disk alias at the target.\n", path)
 	return nil
+}
+
+// seedSunlightKey returns a keys directory holding the live medium's xbps
+// keys plus the embedded Sunlight repo key, so an install can verify the
+// Sunlight mirror's signatures. The caller removes the directory.
+func seedSunlightKey(liveKeys string) (string, error) {
+	dir, err := os.MkdirTemp("", "slinstaller-keys-")
+	if err != nil {
+		return "", err
+	}
+	// The live medium's keys (Void's), when the directory is there.
+	if ents, err := os.ReadDir(liveKeys); err == nil {
+		for _, e := range ents {
+			if e.IsDir() {
+				continue
+			}
+			b, err := os.ReadFile(filepath.Join(liveKeys, e.Name()))
+			if err != nil {
+				os.RemoveAll(dir)
+				return "", err
+			}
+			if err := os.WriteFile(filepath.Join(dir, e.Name()), b, 0o644); err != nil {
+				os.RemoveAll(dir)
+				return "", err
+			}
+		}
+	}
+	key, err := sunlightKeyFS.ReadFile("keys/sunlight-repo.plist")
+	if err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(dir, sunlightKeyFile), key, 0o644); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
 }

@@ -156,3 +156,60 @@ func TestGenpassRejectsShortPassword(t *testing.T) {
 		t.Errorf("--genpass short: %v", err)
 	}
 }
+
+// The installer must default to the Sunlight mirror, layered over Void.
+func TestExtraRepoDefaultsToMirror(t *testing.T) {
+	if defaultExtraRepo != "http://repo-default.ionutnechita.ro/current" {
+		t.Errorf("defaultExtraRepo = %q, want the Sunlight mirror", defaultExtraRepo)
+	}
+	// The embedded key must be a real plist, named by its fingerprint.
+	key, err := sunlightKeyFS.ReadFile("keys/sunlight-repo.plist")
+	if err != nil || len(key) == 0 {
+		t.Fatalf("embedded Sunlight key missing: %v", err)
+	}
+	if !strings.Contains(string(key), "public-key") {
+		t.Error("embedded key is not an xbps key plist")
+	}
+	if !strings.HasSuffix(sunlightKeyFile, ".plist") || !strings.Contains(sunlightKeyFile, ":") {
+		t.Errorf("sunlightKeyFile = %q, want a fingerprint .plist", sunlightKeyFile)
+	}
+}
+
+// seedSunlightKey must merge the live medium's keys with the Sunlight key.
+func TestSeedSunlightKey(t *testing.T) {
+	live := t.TempDir()
+	if err := os.WriteFile(filepath.Join(live, "void-a.plist"), []byte("void key"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := seedSunlightKey(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	// Void's key carried over.
+	if b, err := os.ReadFile(filepath.Join(dir, "void-a.plist")); err != nil || string(b) != "void key" {
+		t.Errorf("live key not merged: %v", err)
+	}
+	// Sunlight key added, matching the embedded content.
+	got, err := os.ReadFile(filepath.Join(dir, sunlightKeyFile))
+	if err != nil {
+		t.Fatalf("Sunlight key not seeded: %v", err)
+	}
+	want, _ := sunlightKeyFS.ReadFile("keys/sunlight-repo.plist")
+	if string(got) != string(want) {
+		t.Error("seeded Sunlight key differs from the embedded one")
+	}
+}
+
+// A missing live keys dir is not fatal — the Sunlight key is still seeded.
+func TestSeedSunlightKeyNoLiveDir(t *testing.T) {
+	dir, err := seedSunlightKey(filepath.Join(t.TempDir(), "does-not-exist"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	if _, err := os.Stat(filepath.Join(dir, sunlightKeyFile)); err != nil {
+		t.Errorf("Sunlight key not seeded without a live dir: %v", err)
+	}
+}

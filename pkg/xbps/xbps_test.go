@@ -94,6 +94,44 @@ func TestCommandsLocalRepos(t *testing.T) {
 	}
 }
 
+func TestCommandsExtraRepos(t *testing.T) {
+	// Layering: the live medium first, then the Sunlight mirror, then Void.
+	// A package the mirror carries at a higher revision wins because the
+	// mirror is searched before the default remote.
+	cmds, err := Options{
+		Root:       "/mnt",
+		Repo:       "https://repo-default.voidlinux.org/current",
+		ExtraRepos: []string{"https://mirror.sunlightlinux.org/current"},
+		LocalRepos: []string{"/usr/share/slinstaller/repo"},
+		Packages:   []string{"base-system"},
+	}.Commands()
+	if err != nil {
+		t.Fatalf("Commands: %v", err)
+	}
+	want := "xbps-install -Sy -R /usr/share/slinstaller/repo " +
+		"-R https://mirror.sunlightlinux.org/current " +
+		"-R https://repo-default.voidlinux.org/current -r /mnt base-system"
+	if got := strings.Join(cmds[0], " "); got != want {
+		t.Errorf("install =\n  %s\nwant\n  %s", got, want)
+	}
+}
+
+// An extra repo alone (no Repo, no LocalRepos) is a valid install source.
+func TestCommandsExtraRepoOnly(t *testing.T) {
+	cmds, err := Options{
+		Root:       "/mnt",
+		ExtraRepos: []string{"https://mirror.sunlightlinux.org/current"},
+		Packages:   []string{"base-system"},
+	}.Commands()
+	if err != nil {
+		t.Fatalf("Commands: %v", err)
+	}
+	want := "xbps-install -Sy -R https://mirror.sunlightlinux.org/current -r /mnt base-system"
+	if got := strings.Join(cmds[0], " "); got != want {
+		t.Errorf("install =\n  %s\nwant\n  %s", got, want)
+	}
+}
+
 func TestCommandsOfflineLocalOnly(t *testing.T) {
 	// Offline: no remote Repo, only a local repository on the live medium.
 	// The install command must carry the local -R and no empty remote -R.

@@ -32,6 +32,13 @@ type Options struct {
 	// signatures only for remote repositories, so these need no key.
 	LocalRepos []string
 
+	// ExtraRepos are additional REMOTE repositories searched ahead of Repo
+	// — the Sunlight mirror layered over Void's. Like Repo they are
+	// signature-checked, so their signing key must be in KeysDir. A package
+	// they carry wins over Repo's when its version is higher (Sunlight's +1
+	// revision does this), or on a tie because they are listed first.
+	ExtraRepos []string
+
 	// KeysDir holds the repository signing keys to seed into the target
 	// before installing; without them xbps cannot verify what it
 	// fetches. On the live medium this is /var/db/xbps/keys. Empty skips
@@ -63,7 +70,7 @@ func (o Options) Commands() ([][]string, error) {
 	}
 	// A repository is needed, but a local one is enough: an offline install
 	// pulls everything from the live medium's repository with no remote Repo.
-	if o.Repo == "" && len(o.LocalRepos) == 0 {
+	if o.Repo == "" && len(o.LocalRepos) == 0 && len(o.ExtraRepos) == 0 {
 		return nil, fmt.Errorf("xbps: no repository")
 	}
 	if len(o.Packages) == 0 {
@@ -97,6 +104,12 @@ func (o Options) Commands() ([][]string, error) {
 	}
 	install = append(install, "xbps-install", "-Sy")
 	for _, r := range o.LocalRepos {
+		install = append(install, "-R", r)
+	}
+	// Extra remote repositories (the Sunlight mirror) before the default
+	// remote: on a version tie the first-listed wins, and a higher revision
+	// wins regardless, so these override Repo for the packages they carry.
+	for _, r := range o.ExtraRepos {
 		install = append(install, "-R", r)
 	}
 	// The remote repository, when there is one. Offline installs have none:

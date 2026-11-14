@@ -61,6 +61,10 @@ type Options struct {
 	// of Repo — where slinit and slinit-services come from.
 	LocalRepos []string
 
+	// ExtraRepos are additional remote xbps repositories searched ahead of
+	// Repo — the Sunlight mirror layered over Void's.
+	ExtraRepos []string
+
 	// Passphrase unlocks the LUKS partitions. Required when the config
 	// has any encrypted partition; ignored otherwise.
 	Passphrase string
@@ -385,6 +389,7 @@ func (in *installer) baseInstall() error {
 		Root:       in.opts.Root,
 		Repo:       in.opts.Repo,
 		LocalRepos: in.opts.LocalRepos,
+		ExtraRepos: in.opts.ExtraRepos,
 		KeysDir:    in.opts.KeysDir,
 		Arch:       in.opts.Arch,
 		Proxy:      in.cfg.HTTPSProxy,
