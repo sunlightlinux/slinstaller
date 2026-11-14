@@ -20,6 +20,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
+	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
 // rootFilesystems are the choices offered for the root partition.
@@ -72,6 +73,14 @@ func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
 		Swap: swap, SwapSize: swapSize,
 		Hostname: hostname, Login: login, PassHash: hash,
 	})
+
+	// Keep the live system's consoles for the installed one, as the
+	// full-screen wizard does. This flow is the one that runs over a serial
+	// console, where an install without console= comes up with no console.
+	if consoles := system.DetectConsoles(); len(consoles) > 0 {
+		mirrorConsoles(cfg, consoles)
+		fmt.Fprintf(w, "\nConsole:  %s (kept for the installed system)\n", strings.Join(consoles, " "))
+	}
 
 	summarise(w, disk, fs, encrypt, swap, swapSize, hostname, login)
 	if !promptYesNo(in, w, "Proceed with this layout?", false) {
@@ -147,6 +156,22 @@ func assemble(a assembly) *config.Config {
 		cfg.SwapFileSize = a.SwapSize
 	}
 	return cfg
+}
+
+// mirrorConsoles adds the live system's console= arguments to the config's
+// kernel command line, skipping any it already has.
+func mirrorConsoles(cfg *config.Config, consoles []string) {
+	if len(consoles) == 0 {
+		return
+	}
+	if cfg.KernelArguments == nil {
+		cfg.KernelArguments = &config.KernelArguments{}
+	}
+	for _, c := range consoles {
+		if !containsStr(cfg.KernelArguments.Add, c) {
+			cfg.KernelArguments.Add = append(cfg.KernelArguments.Add, c)
+		}
+	}
 }
 
 func summarise(w io.Writer, disk blockdev.Device, fs string, encrypt bool, swap, swapSize, hostname, login string) {

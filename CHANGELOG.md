@@ -12,6 +12,10 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- The plain prompt flow now keeps the live system's `console=` arguments for
+  the installed system, as the full-screen wizard does. It is the flow that
+  runs over a serial console, so an install made through it used to come up
+  with no serial console.
 - The CPU Frequency Governor list now follows the driver mode the installed
   system will run in, not only how the live medium booted: a P-State mode chosen
   for an isolation profile decides it (active offers performance/powersave;

@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/sunlightlinux/slinstaller/pkg/config"
 )
 
 func TestAssemblePlain(t *testing.T) {
@@ -89,5 +91,27 @@ func TestAssembleNoSwap(t *testing.T) {
 	}
 	if !strings.Contains(flat, " 100%") {
 		t.Errorf("root does not fill the disk:\n%s", flat)
+	}
+}
+
+func TestMirrorConsoles(t *testing.T) {
+	// A serial install keeps its serial console on the installed system.
+	cfg := &config.Config{}
+	mirrorConsoles(cfg, []string{"console=tty0", "console=ttyS0,115200n8"})
+	if cfg.KernelArguments == nil || len(cfg.KernelArguments.Add) != 2 ||
+		cfg.KernelArguments.Add[1] != "console=ttyS0,115200n8" {
+		t.Fatalf("kernel arguments = %+v", cfg.KernelArguments)
+	}
+	// Already present: not added twice. Other arguments are kept.
+	cfg = &config.Config{KernelArguments: &config.KernelArguments{Add: []string{"quiet", "console=tty0"}}}
+	mirrorConsoles(cfg, []string{"console=tty0", "console=ttyS0,115200n8"})
+	if got := strings.Join(cfg.KernelArguments.Add, " "); got != "quiet console=tty0 console=ttyS0,115200n8" {
+		t.Errorf("kernel arguments = %q", got)
+	}
+	// No console detected: the config is left without kernel arguments.
+	cfg = &config.Config{}
+	mirrorConsoles(cfg, nil)
+	if cfg.KernelArguments != nil {
+		t.Errorf("kernel arguments created for no consoles: %+v", cfg.KernelArguments)
 	}
 }
