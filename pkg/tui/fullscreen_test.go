@@ -1849,4 +1849,18 @@ func TestRefitLeavesTheWizardsOwnOutputAlone(t *testing.T) {
 			t.Errorf("%s: install would rewrite the wizard's arguments\n was: %v\n now: %v", name, was, now)
 		}
 	}
+	// The same holds for the vendor-specific arguments, on either vendor and
+	// with each P-State mode the wizard offers.
+	for _, p := range kernelProfiles {
+		for _, vendor := range []string{"intel", "amd"} {
+			for _, mode := range []string{"", "active", "passive", "disable"} {
+				m := newModel(oneDisk())
+				m.cpuVendor, m.amdPstate, m.intelPstate = vendor, mode, mode
+				args := strings.Fields(m.profileArgs(p))
+				if got := system.RefitVendor(args, vendor); strings.Join(got, " ") != strings.Join(args, " ") {
+					t.Errorf("%s on %s (pstate %q): install would rewrite %v to %v", p.name, vendor, mode, args, got)
+				}
+			}
+		}
+	}
 }

@@ -62,7 +62,7 @@ func TestRefitRecomputesAnIsolationProfile(t *testing.T) {
 	if probs := system.CheckKernelArgs(add); len(probs) != 0 {
 		t.Errorf("refitted arguments do not fit this machine: %v", probs)
 	}
-	if out := log.String(); !strings.Contains(out, "kernel-profile Telco/RAN: CPU isolation recomputed") ||
+	if out := log.String(); !strings.Contains(out, "kernel-profile Telco/RAN: kernel arguments adapted to this machine") ||
 		!strings.Contains(out, "was: isolcpus=domain,nohz,managed_irq,4-4000,4068-8127") {
 		t.Errorf("the change was not reported:\n%s", out)
 	}

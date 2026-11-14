@@ -119,7 +119,7 @@ console-log-level: 3              # 0 (emergency) to 7 (debug)
 | Key / section | What it does |
 |---------------|--------------|
 | `kernel-arguments` | `add` goes on the GRUB command line; `remove` is left out of it |
-| `kernel-profile` | names the Kernel Command Line profile used (Server by default). For a profile that isolates CPUs, the install recomputes the CPU lists and hugepages for the machine — see below |
+| `kernel-profile` | names the Kernel Command Line profile used (Server by default). The install recomputes what the profile derives from the hardware — see below |
 | `console-log-level` | sets `loglevel=N` on the command line and `kernel.printk = N 4 1 7` in `/etc/sysctl.d/10-printk.conf`; overrides a `loglevel=` among the arguments |
 | Kernel Command Line | a profile picker (Server, Desktop, Realtime, Telco/RAN, virtualization, GPU, …) or Custom arguments; Details shows what a profile adds |
 | CPU Frequency Governor | `cpufreq.default_governor=`; only the governors the chosen driver mode has are offered |
@@ -137,12 +137,16 @@ Three things to know:
   Realtime and Telco/RAN profiles compute `isolcpus=`, `nohz_full=`,
   `rcu_nocbs=`, `irqaffinity=` and the 1 GiB hugepage count from that
   machine's CPUs, NUMA nodes and RAM, and the saved config holds the result.
-  Those values belong to the hardware, so when `kernel-profile` names one of
-  these profiles, `--apply` recomputes them for the machine it runs on and
-  reports what changed; every other argument is installed as written. A
-  config with `kernel-profile: Custom` (or none) is never rewritten — there
-  `--apply` only refuses, before touching the disk, a CPU list naming CPUs the
-  machine lacks or hugepages that would leave it under 1 GiB.
+  Those values belong to the hardware, so when `kernel-profile` names a
+  profile, `--apply` recomputes them for the machine it runs on and reports
+  what changed: the vendor arguments for any profile (`intel_iommu`↔`amd_iommu`,
+  `kvm-intel`↔`kvm-amd`, and the P-State mode where the other vendor has the
+  same one), and the CPU lists and hugepages for the isolating profiles. Every
+  other argument is installed as written, so a saved config moves between
+  machines, and between Intel and AMD. A config with `kernel-profile: Custom`
+  (or none) is never rewritten — there `--apply` only refuses, before
+  touching the disk, a CPU list naming CPUs the machine lacks or hugepages
+  that would leave it under 1 GiB.
 - **The profiles run on the stock kernel.** They rely on dynamic preemption
   (`preempt=full`), `nohz_full` and RCU callback offloading, which the
   packaged `linux` kernel has. That is low-latency tuning, not a

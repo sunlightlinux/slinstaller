@@ -72,3 +72,44 @@ func VendorKernelArgs(args, vendor string) string {
 	}
 	return strings.Join(out, " ")
 }
+
+// RefitVendor makes a kernel command line written for one CPU vendor right
+// for another, for a config replayed on different hardware. It applies
+// VendorKernelArgs (IOMMU, nested KVM, intel_idle) and carries the P-State
+// driver mode across: active, passive and disable exist on both vendors and
+// are translated; a mode with no counterpart (amd_pstate=guided,
+// intel_pstate=no_hwp or force) is dropped, leaving the kernel default. A
+// P-State argument for the machine's own vendor wins over a translated one.
+// An unknown or non-x86 vendor leaves the arguments untouched.
+func RefitVendor(args []string, vendor string) []string {
+	if vendor != "intel" && vendor != "amd" {
+		return args
+	}
+	other := "intel"
+	if vendor == "intel" {
+		other = "amd"
+	}
+	own, foreign := vendor+"_pstate=", other+"_pstate="
+
+	hasOwn := false
+	for _, a := range args {
+		if strings.HasPrefix(a, own) {
+			hasOwn = true
+		}
+	}
+	var out []string
+	for _, a := range strings.Fields(VendorKernelArgs(strings.Join(args, " "), vendor)) {
+		mode, isForeign := strings.CutPrefix(a, foreign)
+		if !isForeign {
+			out = append(out, a)
+			continue
+		}
+		switch mode {
+		case "active", "passive", "disable":
+			if !hasOwn {
+				out = append(out, own+mode)
+			}
+		}
+	}
+	return out
+}

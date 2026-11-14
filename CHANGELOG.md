@@ -34,6 +34,13 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- A saved config is now portable between Intel and AMD as well. When
+  `kernel-profile` names any wizard profile, `--apply` rewrites the
+  vendor-specific arguments for the CPU it runs on — `intel_iommu`↔`amd_iommu`,
+  `kvm-intel.nested`↔`kvm-amd.nested`, the Intel-only `intel_idle.max_cstate`
+  — and carries the P-State mode across where both vendors have it (active,
+  passive, disable); a mode with no counterpart is dropped. `Custom` is never
+  rewritten.
 - A saved config is now portable across machines for the isolation profiles.
   When `kernel-profile` names Realtime, Telco/RAN or Telco/RAN Max Perf,
   `--apply` recomputes `isolcpus=`, `nohz_full=`, `rcu_nocbs=`, `irqaffinity=`
