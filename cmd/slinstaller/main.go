@@ -592,7 +592,9 @@ restart:
 			// and on a terminal twice, as a typo here locks the disk. A pipe
 			// gives it once, as it always has.
 			if isTerminal(os.Stdin) {
-				opts.Passphrase = tui.PromptNewPassphrase(stdin, os.Stderr)
+				if opts.Passphrase, err = tui.PromptNewPassphrase(stdin, os.Stderr); err != nil {
+					return err
+				}
 			} else {
 				opts.Passphrase = tui.ReadSecret(stdin, os.Stderr, "LUKS passphrase")
 			}

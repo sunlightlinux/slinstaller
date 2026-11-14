@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -133,5 +136,107 @@ func TestPromptFlowStartsFromTheWizardsKernelProfile(t *testing.T) {
 	got := strings.Join(cfg.KernelArguments.Add, " ")
 	if want := strings.Join(wizard.KernelArguments.Add, " "); got != want || got == "" {
 		t.Errorf("prompt flow kernel arguments = %q, wizard default = %q", got, want)
+	}
+}
+
+// answers is an input holding the given lines.
+func answers(lines ...string) *bufio.Reader {
+	text := ""
+	for _, l := range lines {
+		text += l + "\n"
+	}
+	return bufio.NewReader(strings.NewReader(text))
+}
+
+func TestSecretPromptsGiveUpWhenTheInputEnds(t *testing.T) {
+	// An ended input reads as an empty answer every time. A prompt that
+	// re-asks on an invalid answer must stop, not re-ask forever.
+	var out bytes.Buffer
+	if _, err := PromptNewPassphrase(answers(), &out); !errors.Is(err, ErrNoInput) {
+		t.Errorf("passphrase on ended input: %v, want ErrNoInput", err)
+	}
+	// Ended after the first entry, before it could be confirmed.
+	if _, err := PromptNewPassphrase(answers("a long enough passphrase"), &out); !errors.Is(err, ErrNoInput) {
+		t.Errorf("passphrase with no confirmation: %v, want ErrNoInput", err)
+	}
+	// Refused answers, then the input ends.
+	if _, err := PromptNewPassphrase(answers("x", "x", "y", "z"), &out); !errors.Is(err, ErrNoInput) {
+		t.Errorf("only refused answers: %v, want ErrNoInput", err)
+	}
+}
+
+func TestPromptNewPassphraseAsksUntilValidAndMatching(t *testing.T) {
+	var out bytes.Buffer
+	good := "correct horse battery staple"
+	got, err := PromptNewPassphrase(answers(
+		"short", "short", // too short: refused with the reason
+		good, "a typo instead", // do not match
+		good, good,
+	), &out)
+	if err != nil || got != good {
+		t.Fatalf("passphrase = %q, %v", got, err)
+	}
+	if log := out.String(); !strings.Contains(log, "try again") || !strings.Contains(log, "they do not match") {
+		t.Errorf("the refusals were not explained:\n%s", log)
+	}
+	// A last line without its newline is still an answer.
+	in := bufio.NewReader(strings.NewReader(good + "\n" + good))
+	if got, err := PromptNewPassphrase(in, &out); err != nil || got != good {
+		t.Errorf("unterminated last line: %q, %v", got, err)
+	}
+}
+
+func TestPromptChoices(t *testing.T) {
+	var out bytes.Buffer
+	opts := []string{"ext4", "btrfs", "xfs"}
+	if got := promptChoice(answers("btrfs"), &out, "Root filesystem", opts, "ext4"); got != "btrfs" {
+		t.Errorf("choice = %q", got)
+	}
+	// Empty, unrecognised or ended input: the default, never a guess.
+	for _, in := range []*bufio.Reader{answers(""), answers("ntfs"), answers("EXT4"), answers()} {
+		if got := promptChoice(in, &out, "Root filesystem", opts, "ext4"); got != "ext4" {
+			t.Errorf("choice = %q, want the default", got)
+		}
+	}
+	if got := promptDefault(answers("  box  "), &out, "Hostname", "sunlight"); got != "box" {
+		t.Errorf("promptDefault = %q", got)
+	}
+	if got := promptDefault(answers(""), &out, "Hostname", "sunlight"); got != "sunlight" {
+		t.Errorf("promptDefault empty = %q", got)
+	}
+}
+
+func TestPromptYesNoOnlyYesMeansYes(t *testing.T) {
+	var out bytes.Buffer
+	for _, yes := range []string{"y", "Y", "yes", "YES", " yes "} {
+		if !promptYesNo(answers(yes), &out, "Proceed?", false) {
+			t.Errorf("%q should be yes", yes)
+		}
+	}
+	// "Proceed with this layout?" defaults to no: anything that is not a
+	// clear yes — including nothing typed and an ended input — is no.
+	for _, in := range []*bufio.Reader{answers(""), answers("n"), answers("maybe"), answers("ye"), answers("1"), answers()} {
+		if promptYesNo(in, &out, "Proceed?", false) {
+			t.Error("a non-yes answer proceeded")
+		}
+	}
+	// With a yes default, only an explicit other answer is no.
+	if !promptYesNo(answers(""), &out, "Encrypt?", true) || promptYesNo(answers("n"), &out, "Encrypt?", true) {
+		t.Error("yes-default prompt")
+	}
+}
+
+func TestPromptIndex(t *testing.T) {
+	var out bytes.Buffer
+	// Out-of-range and non-numeric answers are asked again.
+	if got := promptIndex(answers("0", "9", "two", "2"), &out, "Install to which disk", 3); got != 2 {
+		t.Errorf("index = %d, want 2", got)
+	}
+	if n := strings.Count(out.String(), "Install to which disk"); n != 4 {
+		t.Errorf("asked %d times, want 4", n)
+	}
+	// It ends rather than spinning when the input does.
+	if got := promptIndex(answers("9"), &out, "Install to which disk", 3); got != 1 {
+		t.Errorf("index on ended input = %d", got)
 	}
 }

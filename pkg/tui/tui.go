@@ -42,7 +42,9 @@ func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
 	encrypt := promptYesNo(in, w, "Encrypt the root partition?", false)
 	passphrase := ""
 	if encrypt {
-		passphrase = PromptNewPassphrase(in, w)
+		if passphrase, err = PromptNewPassphrase(in, w); err != nil {
+			return nil, "", err
+		}
 	}
 
 	swap := promptChoice(in, w, "Swap", []string{"partition", "file", "none"}, "partition")
@@ -58,10 +60,9 @@ func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
 		fmt.Fprintf(w, "  %v, try again\n", err)
 		login = promptDefault(in, w, "Username", "user")
 	}
-	pw := promptSecret(in, w, "Password for "+login)
-	for err := config.ValidPassword(pw); err != nil; err = config.ValidPassword(pw) {
-		fmt.Fprintf(w, "  %v, try again\n", err)
-		pw = promptSecret(in, w, "Password for "+login)
+	pw, err := promptValidSecret(in, w, "Password for "+login, config.ValidPassword)
+	if err != nil {
+		return nil, "", err
 	}
 	hash, err := cryptHash(pw)
 	if err != nil {
@@ -235,26 +236,42 @@ func promptDefault(in *bufio.Reader, w io.Writer, label, def string) string {
 }
 
 // PromptNewPassphrase reads a new LUKS passphrase, twice, until it is valid
-// and the two entries match.
-func PromptNewPassphrase(in *bufio.Reader, w io.Writer) string {
+// and the two entries match. It returns ErrNoInput if the input ends first.
+func PromptNewPassphrase(in *bufio.Reader, w io.Writer) (string, error) {
+	return promptValidSecret(in, w, "LUKS passphrase", config.ValidPassphrase)
+}
+
+// promptValidSecret asks for a secret until valid accepts it, saying why
+// each refused one was refused. It gives up with ErrNoInput when the input
+// ends, rather than re-asking an input that will never answer.
+func promptValidSecret(in *bufio.Reader, w io.Writer, label string, valid func(string) error) (string, error) {
 	for {
-		p := promptSecret(in, w, "LUKS passphrase")
-		err := config.ValidPassphrase(p)
-		if err == nil {
-			return p
+		s, err := promptSecret(in, w, label)
+		if err != nil {
+			return "", err
 		}
-		fmt.Fprintf(w, "  %v, try again\n", err)
+		if err := valid(s); err != nil {
+			fmt.Fprintf(w, "  %v, try again\n", err)
+			continue
+		}
+		return s, nil
 	}
 }
 
 // promptSecret reads a value twice and requires the two to match, so a
 // mistyped password or passphrase is caught here, not at the login prompt.
-func promptSecret(in *bufio.Reader, w io.Writer, label string) string {
+func promptSecret(in *bufio.Reader, w io.Writer, label string) (string, error) {
 	for {
-		a := ReadSecret(in, w, label)
-		b := ReadSecret(in, w, label+" (again)")
+		a, err := readSecret(in, w, label)
+		if err != nil {
+			return "", err
+		}
+		b, err := readSecret(in, w, label+" (again)")
+		if err != nil {
+			return "", err
+		}
 		if a == b {
-			return a
+			return a, nil
 		}
 		fmt.Fprintln(w, "  they do not match, try again")
 	}

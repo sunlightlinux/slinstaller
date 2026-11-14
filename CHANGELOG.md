@@ -12,6 +12,11 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- The prompt flow no longer spins forever when its input ends (a closed pipe,
+  a serial line that dropped) at a password or passphrase prompt: an ended
+  input read as an empty answer, which the prompt refused and asked for again,
+  endlessly. It now stops with an error. Nothing was erased either way — the
+  final confirmation defaults to no.
 - The plain prompt flow now installs the same default kernel command line as
   the full-screen wizard (the Server profile, recorded as `kernel-profile`) and
   shows it, with the kept console, in its summary. It used to install no kernel
