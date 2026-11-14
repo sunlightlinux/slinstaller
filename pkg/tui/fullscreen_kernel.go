@@ -166,6 +166,10 @@ func setGovernor(args, gov string) string {
 	return strings.Join(out, " ")
 }
 
+// defaultKernelProfile is the profile an install gets when the operator does
+// not choose one — in the wizard and in the prompt flow alike.
+const defaultKernelProfile = "Server"
+
 // kernelProfile is a named set of kernel command-line arguments: a starting
 // point the operator picks and then edits as Custom if needed. note flags a
 // trade-off (security/power) or a machine-specific step. The args are valid,

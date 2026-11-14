@@ -77,12 +77,15 @@ func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
 	// Keep the live system's consoles for the installed one, as the
 	// full-screen wizard does. This flow is the one that runs over a serial
 	// console, where an install without console= comes up with no console.
-	if consoles := system.DetectConsoles(); len(consoles) > 0 {
-		mirrorConsoles(cfg, consoles)
-		fmt.Fprintf(w, "\nConsole:  %s (kept for the installed system)\n", strings.Join(consoles, " "))
-	}
+	consoles := system.DetectConsoles()
+	mirrorConsoles(cfg, consoles)
 
 	summarise(w, disk, fs, encrypt, swap, swapSize, hostname, login)
+	fmt.Fprintf(w, "  Kernel:      %s profile\n", cfg.KernelProfile)
+	if len(consoles) > 0 {
+		fmt.Fprintf(w, "  Console:     %s (kept from this system)\n", strings.Join(consoles, " "))
+	}
+	fmt.Fprintln(w)
 	if !promptYesNo(in, w, "Proceed with this layout?", false) {
 		return nil, "", fmt.Errorf("cancelled")
 	}
@@ -151,6 +154,12 @@ func assemble(a assembly) *config.Config {
 		Keyboard:    "us",
 		Language:    "en_US.UTF-8",
 		Users:       []*config.User{{Login: a.Login, Password: a.PassHash, Admin: true}},
+		// The same kernel command line the full-screen wizard starts from:
+		// this flow has no kernel section, so the default is all it offers.
+		KernelProfile: defaultKernelProfile,
+		KernelArguments: &config.KernelArguments{
+			Add: strings.Fields(kernelProfileByName(defaultKernelProfile).args),
+		},
 	}
 	if a.Swap == "file" {
 		cfg.SwapFileSize = a.SwapSize
@@ -191,7 +200,7 @@ func summarise(w io.Writer, disk blockdev.Device, fs string, encrypt bool, swap,
 	fmt.Fprintf(w, "  Encryption:  %s\n", enc)
 	fmt.Fprintf(w, "  Swap:        %s\n", sw)
 	fmt.Fprintf(w, "  Hostname:    %s\n", hostname)
-	fmt.Fprintf(w, "  Admin user:  %s\n\n", login)
+	fmt.Fprintf(w, "  Admin user:  %s\n", login)
 }
 
 // cryptHash turns a plaintext password into a crypt(3) SHA-512 hash with

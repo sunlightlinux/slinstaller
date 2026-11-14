@@ -115,3 +115,23 @@ func TestMirrorConsoles(t *testing.T) {
 		t.Errorf("kernel arguments created for no consoles: %+v", cfg.KernelArguments)
 	}
 }
+
+func TestPromptFlowStartsFromTheWizardsKernelProfile(t *testing.T) {
+	cfg := assemble(assembly{Disk: "sda", RootFS: "ext4", Swap: "none", Hostname: "box", Login: "ion", PassHash: "$6$x"})
+	if cfg.KernelProfile != defaultKernelProfile {
+		t.Errorf("kernel profile = %q, want %q", cfg.KernelProfile, defaultKernelProfile)
+	}
+	// Whatever the wizard would install untouched, this flow installs too.
+	wizard, err := func() (*config.Config, error) {
+		m := newModel(oneDisk())
+		m.users = []userEntry{{Login: "ion", Password: "pw", Admin: true}}
+		return m.buildConfig()
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(cfg.KernelArguments.Add, " ")
+	if want := strings.Join(wizard.KernelArguments.Add, " "); got != want || got == "" {
+		t.Errorf("prompt flow kernel arguments = %q, wizard default = %q", got, want)
+	}
+}

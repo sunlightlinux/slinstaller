@@ -405,8 +405,8 @@ func newModel(disks []blockdev.Device) model {
 		netBar:     bar,
 		// Default the kernel command line to the Server profile so a plain
 		// install gets sensible server tuning without opening the section.
-		kernelProfile: "Server",
-		kernelArgs:    kernelProfileByName("Server").args,
+		kernelProfile: defaultKernelProfile,
+		kernelArgs:    kernelProfileByName(defaultKernelProfile).args,
 		logLevel:      -1,       // console log level unset: keep the kernel default
 		amdPstate:     "active", // AMD RT/telco default: hardware-managed P-states
 	}

@@ -12,6 +12,10 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- The plain prompt flow now installs the same default kernel command line as
+  the full-screen wizard (the Server profile, recorded as `kernel-profile`) and
+  shows it, with the kept console, in its summary. It used to install no kernel
+  tuning at all.
 - The plain prompt flow now keeps the live system's `console=` arguments for
   the installed system, as the full-screen wizard does. It is the flow that
   runs over a serial console, so an install made through it used to come up
