@@ -130,7 +130,14 @@ func (m model) buildConfig() (*config.Config, error) {
 	// The kernel command line: the chosen arguments, plus the live system's
 	// console= arguments so the installed system uses the same console
 	// (important for a serial-console install). Duplicates are dropped.
-	add := strings.Fields(m.kernelArgs)
+	// A predefined profile already carries the chosen governor (profileArgs);
+	// Custom arguments are the operator's own text, so the CPU Frequency
+	// Governor section is applied to them here.
+	args := m.kernelArgs
+	if m.kernelProfile == "Custom" && m.governor != "" {
+		args = setGovernor(args, m.governor)
+	}
+	add := strings.Fields(args)
 	for _, c := range m.consoles {
 		if !containsStr(add, c) {
 			add = append(add, c)
@@ -539,7 +546,7 @@ type model struct {
 	userCursor  int
 	userForm    userEntry
 	editUserIdx int
-	formErr     string // why the user form's last entry was refused
+	formErr     string // why a form's last entry was refused (user form, kdump)
 	pwConfirm   string // the password typed a second time
 
 	copyNetwork bool // the network test passed: copy the live network config
@@ -1087,7 +1094,9 @@ func (m model) updateMiniForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case secKdump:
 		if key.String() == "enter" {
-			v := strings.TrimSpace(m.input.Value())
+			// A space is never part of either value, and one inside
+			// crashkernel= would split it into two arguments at boot.
+			v := strings.Join(strings.Fields(m.input.Value()), "")
 			if m.formStep == 0 {
 				m.crashkernel = v // empty turns kdump off
 				m.formStep = 1
@@ -1101,7 +1110,11 @@ func (m model) updateMiniForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.input = ti
 				return m, textinput.Blink
 			}
-			m.panicSecs = strings.TrimSpace(m.input.Value())
+			if _, err := strconv.Atoi(v); v != "" && err != nil {
+				m.formErr = "panic= takes a whole number of seconds (or leave it empty)"
+				return m, nil
+			}
+			m.panicSecs, m.formErr = v, ""
 			m.view = viewHub
 			return m, nil
 		}
@@ -1309,6 +1322,9 @@ func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				p := kernelProfileByName(sel)
 				wasCustom := m.kernelProfile == "Custom"
 				m.kernelProfile = p.name
+				// Whether a P-State mode applies depends on the profile, so
+				// the set of governors can change with it.
+				staleGov := m.dropStaleGovernor()
 				if p.name == "Custom" {
 					// Open the manual Add/Remove form. Keep the fields when the
 					// user is re-editing their own Custom args; start blank when
@@ -1316,6 +1332,10 @@ func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 					// args, e.g. the Server default, are not the user's own).
 					if !wasCustom {
 						m.kernelArgs, m.kernelArgsRemove = "", ""
+					}
+					if staleGov != "" {
+						m.popup = popupMessage
+						m.popupMsg = append([]string{"Kernel Command Line", ""}, staleGovernorMsg(staleGov)...)
 					}
 					m.view = viewMiniForm
 					m.formStep = 0
@@ -1326,7 +1346,14 @@ func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, textinput.Blink
 				}
 				m.kernelArgs, m.kernelArgsRemove = m.profileArgs(p), ""
-				if warn := m.busyIdleWarning(m.kernelArgs); warn != nil {
+				warn := m.busyIdleWarning(m.kernelArgs)
+				if staleGov != "" {
+					if warn != nil {
+						warn = append(warn, "")
+					}
+					warn = append(warn, staleGovernorMsg(staleGov)...)
+				}
+				if warn != nil {
 					m.view = viewHub
 					m.popup = popupMessage
 					m.popupMsg = append([]string{"Kernel Command Line", ""}, warn...)
@@ -1870,6 +1897,7 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		// crashkernel field turns kdump off.
 		m.view = viewMiniForm
 		m.formStep = 0
+		m.formErr = ""
 		ck := m.crashkernel
 		if ck == "" {
 			ck = defaultCrashkernel
@@ -2083,15 +2111,63 @@ var governorOptions = []string{
 
 var governorValues = []string{"", "performance", "schedutil", "ondemand", "conservative", "powersave"}
 
-// governorChoices returns the governor labels and their values for this
-// machine. An EPP-capable CPU (active mode) only has performance and powersave
-// governors; a passive/legacy driver has the classic set.
+// activeMode reports whether the installed system's scaling driver will run in
+// active mode, where only the performance and powersave governors exist. A
+// P-State mode chosen for an isolation profile decides it (the P-State sections
+// apply only to those profiles); otherwise the installed system boots the way
+// the live one did, so the live EPP detection stands.
+func (m model) activeMode() bool {
+	if kernelProfileByName(m.kernelProfile).isolate {
+		switch m.cpuVendor {
+		case "amd":
+			if m.amdPstate != "" {
+				return m.amdPstate == "active" // passive, guided and disable use the classic governors
+			}
+		case "intel":
+			switch m.intelPstate {
+			case "active", "no_hwp", "force":
+				return true
+			case "passive", "disable":
+				return false
+			}
+		}
+	}
+	return m.epp
+}
+
+// governorChoices returns the governor labels and their values for the
+// installed system. In active mode only performance and powersave exist; a
+// passive/legacy driver has the classic set.
 func (m model) governorChoices() (opts, vals []string) {
-	if m.epp {
+	if m.activeMode() {
 		return []string{"Not set (profile default)", "performance", "powersave"},
 			[]string{"", "performance", "powersave"}
 	}
 	return governorOptions, governorValues
+}
+
+// dropStaleGovernor clears a chosen governor that no longer exists in the
+// installed system's driver mode (after the P-State mode or the profile
+// changed) and returns its name, or "" when nothing had to change.
+func (m *model) dropStaleGovernor() string {
+	if m.governor == "" {
+		return ""
+	}
+	if _, vals := m.governorChoices(); containsStr(vals, m.governor) {
+		return ""
+	}
+	old := m.governor
+	m.governor = ""
+	return old
+}
+
+// staleGovernorMsg is the popup body telling the operator a governor was reset.
+func staleGovernorMsg(old string) []string {
+	return []string{
+		"The " + old + " governor does not exist in the",
+		"driver mode now selected, so CPU Frequency",
+		"Governor was reset to the profile default.",
+	}
 }
 
 // setGovernor replaces any cpufreq.default_governor= in args with the chosen
@@ -2542,6 +2618,7 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.diskSet = true
 			m.view = viewPartList
 		} else {
+			staleGov := ""
 			switch m.editing {
 			case secAutoUpdate:
 				m.autoUpdate = m.edCursor + 1 // 1 Enabled, 2 Disabled
@@ -2549,13 +2626,16 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.logLevel = logLevelFromIndex(m.edCursor)
 			case secAmdPstate:
 				m.amdPstate = pstateFromIndex(m.edCursor)
-				// amd_pstate is part of an isolation profile's args, so keep a
-				// chosen predefined profile's args in sync with the new mode.
+				// The mode decides which governors exist, and amd_pstate is
+				// part of an isolation profile's args: drop a governor the new
+				// mode does not have, then re-sync the profile's args.
+				staleGov = m.dropStaleGovernor()
 				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
 					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
 				}
 			case secIntelPstate:
 				m.intelPstate = intelPstateFromIndex(m.edCursor)
+				staleGov = m.dropStaleGovernor()
 				if m.kernelProfile != "" && m.kernelProfile != "Custom" {
 					m.kernelArgs = m.profileArgs(kernelProfileByName(m.kernelProfile))
 				}
@@ -2571,6 +2651,10 @@ func (m model) updateSectionChoice(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.choices = nil
 			m.view = viewHub
+			if staleGov != "" {
+				m.popup = popupMessage
+				m.popupMsg = append([]string{sectionLabels[m.editing], ""}, staleGovernorMsg(staleGov)...)
+			}
 		}
 	}
 	return m, nil
@@ -3401,6 +3485,9 @@ func (m model) miniFormView() string {
 			itemLabel.Width(w).Render("  panic= (seconds to reboot after a panic, empty = none):"),
 			lineBG.Width(w).Render(""),
 			lineBG.Width(w).Render("  "+m.input.View()))
+		if m.formErr != "" {
+			body = append(body, lineBG.Width(w).Render(""), warnText.Width(w).Render("  "+m.formErr))
+		}
 		return m.screen(body, "type · [Enter] confirm · [Esc] cancel")
 	}
 	return m.screen(nil, "")

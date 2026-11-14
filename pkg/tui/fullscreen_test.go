@@ -1746,3 +1746,67 @@ func TestConfigRecordsKernelProfile(t *testing.T) {
 		t.Errorf("KernelProfile = %q, want Telco/RAN", cfg.KernelProfile)
 	}
 }
+
+func TestGovernorFollowsChosenPstateMode(t *testing.T) {
+	// EPP live host, AMD, Telco/RAN with amd_pstate=passive: classic governors.
+	m := newModel(oneDisk())
+	m.cpuVendor, m.epp, m.kernelProfile, m.amdPstate = "amd", true, "Telco/RAN", "passive"
+	if _, vals := m.governorChoices(); !containsStr(vals, "schedutil") {
+		t.Errorf("passive mode should offer the classic governors: %v", vals)
+	}
+	// Non-EPP live host but active chosen: only performance/powersave.
+	m.epp, m.amdPstate = false, "active"
+	if _, vals := m.governorChoices(); containsStr(vals, "schedutil") || len(vals) != 3 {
+		t.Errorf("active mode should restrict governors: %v", vals)
+	}
+	// A non-isolation profile ignores the P-State mode: live detection stands.
+	m.kernelProfile, m.epp, m.amdPstate = "Server", true, "passive"
+	if _, vals := m.governorChoices(); containsStr(vals, "schedutil") {
+		t.Errorf("Server should follow live EPP detection: %v", vals)
+	}
+}
+
+func TestStaleGovernorResetOnModeChange(t *testing.T) {
+	m := newModel(oneDisk())
+	m.cpuVendor, m.epp, m.kernelProfile, m.amdPstate = "amd", true, "Telco/RAN", "passive"
+	m.governor = "schedutil"
+	m.kernelArgs = m.profileArgs(kernelProfileByName("Telco/RAN"))
+	// Switch the P-State section to active (index 0): schedutil no longer exists.
+	m = openSectionInTab(m, 1, secAmdPstate)
+	m = send(m, up)
+	m = send(m, enter)
+	if m.amdPstate != "active" || m.governor != "" {
+		t.Fatalf("mode=%q governor=%q, want active and reset", m.amdPstate, m.governor)
+	}
+	if m.popup != popupMessage || strings.Contains(m.kernelArgs, "schedutil") {
+		t.Errorf("no reset notice, or stale governor left in args: popup=%v args=%s", m.popup, m.kernelArgs)
+	}
+}
+
+func TestCustomHonoursGovernor(t *testing.T) {
+	m := newModel(oneDisk())
+	m.users = []userEntry{{Login: "me", Password: "pw", Admin: true}}
+	m.kernelProfile, m.kernelArgs, m.governor = "Custom", "quiet cpufreq.default_governor=ondemand", "performance"
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := cfg.KernelArguments.Add
+	if !containsStr(add, "cpufreq.default_governor=performance") || containsStr(add, "cpufreq.default_governor=ondemand") {
+		t.Errorf("Custom did not take the chosen governor: %v", add)
+	}
+}
+
+func TestKdumpInputChecks(t *testing.T) {
+	m := openSectionInTab(newModel(oneDisk()), 1, secKdump)
+	m.input.SetValue("1G-4G:192M, 4G-:256M")
+	m = send(m, enter)
+	if m.crashkernel != "1G-4G:192M,4G-:256M" {
+		t.Errorf("whitespace not removed: %q", m.crashkernel)
+	}
+	m.input.SetValue("soon")
+	m = send(m, enter)
+	if m.view != viewMiniForm || m.formErr == "" || m.panicSecs != "" {
+		t.Errorf("non-numeric panic accepted: view=%v err=%q panic=%q", m.view, m.formErr, m.panicSecs)
+	}
+}

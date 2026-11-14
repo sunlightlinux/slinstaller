@@ -983,3 +983,19 @@ func TestKernelProfileRoundTrip(t *testing.T) {
 		t.Errorf("empty kernel-profile should be omitted:\n%s", out)
 	}
 }
+
+func TestValidateConsoleLogLevelRange(t *testing.T) {
+	c, err := Load("testdata/valid-minimal.yaml")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	bad, ok := 9, 3
+	c.ConsoleLogLevel = &bad
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "console-log-level") {
+		t.Errorf("log level 9 accepted: %v", err)
+	}
+	c.ConsoleLogLevel = &ok
+	if err := c.Validate(); err != nil {
+		t.Errorf("log level 3 rejected: %v", err)
+	}
+}

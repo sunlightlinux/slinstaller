@@ -515,6 +515,12 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// The console log level is written to sysctl.d and the kernel command
+	// line as given, so a value outside the kernel's 0-7 range is refused here.
+	if lv := c.ConsoleLogLevel; lv != nil && (*lv < 0 || *lv > 7) {
+		add("console-log-level: %d is not a kernel log level (0 emergency to 7 debug)", *lv)
+	}
+
 	// checkMin flags a fixed partition/volume size below a floor, unless size
 	// validation is turned off. A missing size, 0 or "rest" (fill) is not a
 	// fixed size and is left to the disk-fit check at install time.

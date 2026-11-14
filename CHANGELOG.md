@@ -10,6 +10,20 @@ for what will and will not be allowed to change once releases begin.
 
 ## [Unreleased]
 
+### Fixed
+
+- The CPU Frequency Governor list now follows the driver mode the installed
+  system will run in, not only how the live medium booted: a P-State mode chosen
+  for an isolation profile decides it (active offers performance/powersave;
+  passive, guided and disable offer the classic governors). A governor that the
+  newly chosen mode or profile does not have is reset, with a notice.
+- The Custom kernel profile now honours the CPU Frequency Governor section; it
+  was shown in the hub but never reached the command line.
+- `console-log-level` outside 0-7 is refused by validation instead of being
+  written to sysctl.d. In the kdump form, whitespace is removed from
+  `crashkernel=` (it would split the argument at boot) and a non-numeric
+  `panic=` is refused in place rather than silently dropped.
+
 ### Added
 
 - The saved configuration records the Kernel Command Line profile used in a new
