@@ -1,0 +1,55 @@
+# Formatting, vet, build and the unit suite (with -race), on every push and
+# pull request.
+#
+# Why this exists: until this workflow, nothing checked a change but the
+# maintainer running gofmt, go vet and go test by hand before committing. A
+# contributor had no way to know whether their change broke a test short of
+# running the suite themselves, and a forgotten run stayed forgotten.
+#
+# What is deliberately NOT here: an install. Partitioning, mkfs and the
+# bootloader are only honestly tested by installing into a VM under UEFI
+# firmware (see CLAUDE.md), which needs a live medium and a scratch disk;
+# the unit suite covers the logic that does not touch a real disk, through
+# recorded commands and stubbed sysfs.
+name: Slinstaller tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        # gofmt -l prints the files it would change and still exits 0, so
+        # the output is what has to be checked.
+        run: |
+          unformatted="$(gofmt -l cmd pkg)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would change:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: Unit tests with the race detector
+        # -timeout well under the job default: a hung test that burns the
+        # whole runner budget tells you much less than a stack dump.
+        run: go test -race -count=1 -timeout 10m ./...
