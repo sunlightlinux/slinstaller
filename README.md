@@ -137,8 +137,9 @@ Three things to know:
   Realtime and Telco/RAN profiles compute `isolcpus=`, `nohz_full=`,
   `rcu_nocbs=`, `irqaffinity=` and the 1 GiB hugepage count from that
   machine's CPUs, NUMA nodes and RAM. The saved config holds the result, so
-  **replaying it on different hardware applies the first machine's CPU
-  lists** — re-run the wizard there instead.
+  it is specific to that hardware. Replayed elsewhere, `--apply` refuses it
+  before touching the disk if a CPU list names CPUs the machine lacks or the
+  hugepages would leave it under 1 GiB — re-run the wizard there instead.
 - **The profiles run on the stock kernel.** They rely on dynamic preemption
   (`preempt=full`), `nohz_full` and RCU callback offloading, which the
   packaged `linux` kernel has. That is low-latency tuning, not a

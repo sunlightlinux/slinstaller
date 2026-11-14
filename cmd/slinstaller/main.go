@@ -434,6 +434,18 @@ restart:
 			return fmt.Errorf("offline install needs a local repository (--local-repo), but none is present")
 		}
 
+		// Isolation CPU lists and hugepage counts are computed for one
+		// machine and saved literally, so a config written elsewhere can
+		// name CPUs this machine lacks or reserve more memory than it has —
+		// which shows up only at the first boot, as a system that does not
+		// come up. The installer always runs on the target, so check here.
+		if !cfg.SkipValidationAll && cfg.KernelArguments != nil {
+			if probs := system.CheckKernelArgs(cfg.KernelArguments.Add); len(probs) > 0 {
+				return fmt.Errorf("kernel-arguments do not fit this machine (were they saved on another one?):\n  - %s\nfix them, re-run the wizard here, or set skipValidationAll to install anyway",
+					strings.Join(probs, "\n  - "))
+			}
+		}
+
 		required := append(plan.RequiredTools(), "xbps-install", "chroot")
 		if encrypted {
 			required = append(required, "cryptsetup")

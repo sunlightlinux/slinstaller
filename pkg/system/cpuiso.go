@@ -192,21 +192,7 @@ func threadSiblings(cpu int) []int {
 // DPDK/telco workload: about a quarter of RAM, always leaving at least 4 GiB
 // for the OS, and 0 on a small machine.
 func HugepagesGiB() int {
-	data, err := os.ReadFile(meminfoFile)
-	if err != nil {
-		return 0
-	}
-	ramKiB := 0
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "MemTotal:") {
-			f := strings.Fields(line)
-			if len(f) >= 2 {
-				ramKiB, _ = strconv.Atoi(f[1])
-			}
-			break
-		}
-	}
-	ramGiB := ramKiB / (1024 * 1024)
+	ramGiB := int(memTotalBytes() >> 30)
 	quarter := ramGiB / 4
 	leaveOS := ramGiB - 4
 	n := quarter

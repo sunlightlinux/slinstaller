@@ -26,6 +26,12 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Preflight now checks that the kernel arguments fit the machine being
+  installed: an `isolcpus=`/`nohz_full=`/`rcu_nocbs=`/`irqaffinity=` list
+  naming CPUs it does not have, `isolcpus=` covering every CPU, or a hugepage
+  reservation leaving under 1 GiB is refused before the disk is touched. These
+  values are saved literally, so this catches a config replayed from other
+  hardware. `skipValidationAll` turns it off.
 - A GitHub Actions workflow runs gofmt, `go vet`, `go build` and the unit
   suite with the race detector on every push and pull request; until now
   these were only run by hand.
