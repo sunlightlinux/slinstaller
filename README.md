@@ -34,12 +34,15 @@ pre-install hooks → partition → mount → bind /proc,/sys,/dev
 | **Swap** | a swap partition, or a swap file (`swapFileSize`) |
 | **Base system** | `xbps-install` from a repository, with the signing keys and a chrooted reconfigure |
 | **Bootloader** | GRUB for UEFI (`grub-install` + `grub-mkconfig`), kernel arguments from the config |
+| **Kernel settings** | command-line profiles, console log level, CPU governor and P-State mode, kdump reservation — see [Kernel settings](#kernel-settings) |
 | **First boot** | hostname, timezone, console keymap, locale, user accounts (with `wheel` sudo for admins and SSH keys) |
 | **Network** | `dhcpcd` (DHCP by default; static interfaces become `/etc/dhcpcd.conf` stanzas) |
 | **Hooks** | pre/post-install commands, chrooted or not, with `$chrootDir`/`$chrooted` |
 
-Not yet: a full-screen TUI (there is an interactive prompt flow), LVM and
-RAID. Deliberately out of scope: BIOS/MBR, systemd, Clear Linux specifics.
+With no config file it runs interactively: a full-screen wizard on a real
+terminal, or a plain prompt flow over a serial console or a pipe (`--text`
+forces the latter). Deliberately out of scope: BIOS/MBR, systemd, Clear Linux
+specifics.
 
 ## Using it
 
@@ -96,6 +99,54 @@ users:
 Mark a partition `type: crypt` to encrypt it. `Validate` reports every
 problem at once before any disk is touched. See [`demo/uefi-basic.yaml`](demo/uefi-basic.yaml)
 and [`doc/architecture.md`](doc/architecture.md).
+
+## Kernel settings
+
+The wizard's kernel sections all end up as ordinary config, so a saved
+config replays them:
+
+```yaml
+kernel-profile: Server            # which profile the arguments came from
+kernel-arguments:
+  add:
+  - mitigations=auto
+  - transparent_hugepage=madvise
+  - cpufreq.default_governor=schedutil
+  - console=ttyS0,115200          # mirrored from the live system
+console-log-level: 3              # 0 (emergency) to 7 (debug)
+```
+
+| Key / section | What it does |
+|---------------|--------------|
+| `kernel-arguments` | `add` goes on the GRUB command line; `remove` is left out of it |
+| `kernel-profile` | names the Kernel Command Line profile used (Server by default). Informational: `kernel-arguments` is what applies |
+| `console-log-level` | sets `loglevel=N` on the command line and `kernel.printk = N 4 1 7` in `/etc/sysctl.d/10-printk.conf`; overrides a `loglevel=` among the arguments |
+| Kernel Command Line | a profile picker (Server, Desktop, Realtime, Telco/RAN, virtualization, GPU, …) or Custom arguments; Details shows what a profile adds |
+| CPU Frequency Governor | `cpufreq.default_governor=`; only the governors the chosen driver mode has are offered |
+| AMD / Intel P-State Driver | `amd_pstate=` / `intel_pstate=` for the isolation profiles; shown only on the matching CPU |
+| Crash Dump (kdump) | `crashkernel=` and `panic=`. Reserves the memory only — see the limit below |
+
+`kernel-profile` and `console-log-level` are Sunlight extensions to
+clr-installer's format; both are optional and a clr-installer config without
+them is unaffected.
+
+Three things to know:
+
+- **Arguments are adapted to the machine the wizard runs on.** IOMMU and
+  nested-KVM arguments are written for the detected CPU vendor, and the
+  Realtime and Telco/RAN profiles compute `isolcpus=`, `nohz_full=`,
+  `rcu_nocbs=`, `irqaffinity=` and the 1 GiB hugepage count from that
+  machine's CPUs, NUMA nodes and RAM. The saved config holds the result, so
+  **replaying it on different hardware applies the first machine's CPU
+  lists** — re-run the wizard there instead.
+- **The profiles run on the stock kernel.** They rely on dynamic preemption
+  (`preempt=full`), `nohz_full` and RCU callback offloading, which the
+  packaged `linux` kernel has. That is low-latency tuning, not a
+  `PREEMPT_RT` kernel.
+- **kdump is not complete yet.** `crashkernel=` reserves the memory, but
+  nothing on the installed system loads a crash kernel into it or saves the
+  dump: that needs `kexec-tools`, `makedumpfile` and a boot service, which
+  the installer does not set up.
 
 ## Where this fits
 

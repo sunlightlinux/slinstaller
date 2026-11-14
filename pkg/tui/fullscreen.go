@@ -351,25 +351,52 @@ const (
 
 // sectionLabels are the hub rows (clr's menu titles); sectionTitles are the
 // titles shown at the top of each section's own dialog.
+// Both are keyed by section, so adding a section cannot shift another's text;
+// TestEverySectionIsLabelled catches one left without.
 var sectionLabels = [sectionCount]string{
-	"Choose Timezone", "Choose Language", "Configure the Keyboard",
-	"Configure Installation Media", "Manage User",
-	"Configure Network Interfaces", "Proxy", "Test Network Settings",
-	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
-	"Kernel Selection", "Swupd Mirror", "Automatic OS Updates",
-	"Save Configuration Settings", "Kernel Log Level", "AMD P-State Driver",
-	"Crash Dump (kdump)", "Intel P-State Driver", "CPU Frequency Governor",
+	secTimezone:    "Choose Timezone",
+	secLanguage:    "Choose Language",
+	secKeyboard:    "Configure the Keyboard",
+	secMedia:       "Configure Installation Media",
+	secUser:        "Manage User",
+	secNetwork:     "Configure Network Interfaces",
+	secProxy:       "Proxy",
+	secTestNet:     "Test Network Settings",
+	secBundles:     "Select Additional Bundles",
+	secHostname:    "Assign Hostname",
+	secKernelArgs:  "Kernel Command Line",
+	secKernel:      "Kernel Selection",
+	secMirror:      "Swupd Mirror",
+	secAutoUpdate:  "Automatic OS Updates",
+	secSaveConfig:  "Save Configuration Settings",
+	secLogLevel:    "Kernel Log Level",
+	secAmdPstate:   "AMD P-State Driver",
+	secKdump:       "Crash Dump (kdump)",
+	secIntelPstate: "Intel P-State Driver",
+	secGovernor:    "CPU Frequency Governor",
 }
 
 var sectionTitles = [sectionCount]string{
-	"Select System Timezone", "Select System Language", "Select Keyboard",
-	"Select Installation Media", "Manage User",
-	"Configure Network Interfaces", "Configure the Network Proxy", "Test Network Settings",
-	"Select Additional Bundles", "Assign Hostname", "Kernel Command Line",
-	"Select Desired Kernel", "Swupd Mirror", "Automatic OS Updates",
-	"Save Configuration Settings", "Select Console Log Level",
-	"Select AMD P-State Driver Mode", "Configure Crash Dump (kdump)",
-	"Select Intel P-State Driver Mode", "Select CPU Frequency Governor",
+	secTimezone:    "Select System Timezone",
+	secLanguage:    "Select System Language",
+	secKeyboard:    "Select Keyboard",
+	secMedia:       "Select Installation Media",
+	secUser:        "Manage User",
+	secNetwork:     "Configure Network Interfaces",
+	secProxy:       "Configure the Network Proxy",
+	secTestNet:     "Test Network Settings",
+	secBundles:     "Select Additional Bundles",
+	secHostname:    "Assign Hostname",
+	secKernelArgs:  "Kernel Command Line",
+	secKernel:      "Select Desired Kernel",
+	secMirror:      "Swupd Mirror",
+	secAutoUpdate:  "Automatic OS Updates",
+	secSaveConfig:  "Save Configuration Settings",
+	secLogLevel:    "Select Console Log Level",
+	secAmdPstate:   "Select AMD P-State Driver Mode",
+	secKdump:       "Configure Crash Dump (kdump)",
+	secIntelPstate: "Select Intel P-State Driver Mode",
+	secGovernor:    "Select CPU Frequency Governor",
 }
 
 type view int
@@ -2250,7 +2277,7 @@ var kernelProfileDesc = map[string]string{
 	"Desktop":                        "Quiet graphical boot for a desktop workstation.",
 	"Desktop LowLatency":             "Desktop with a low-latency preemptible kernel for responsiveness.",
 	"LowLatency":                     "Low-latency preemption and threaded IRQs, without the full real-time set.",
-	"Realtime":                       "Real-time tuning for deterministic latency; auto-isolates CPUs.",
+	"Realtime":                       "Low-latency tuning on the stock kernel (full preemption, not PREEMPT_RT); auto-isolates CPUs.",
 	"Audio/Video Workstation":        "Low-latency audio/video production (threaded IRQs, performance governor).",
 	"Telco/RAN":                      "Standard telco/RAN real-time profile: CPU isolation, DPDK IOMMU, hugepages.",
 	"Telco/RAN Max Perf":             "Telco/RAN pushed to maximum determinism; highest power draw, least secure.",
@@ -3470,6 +3497,8 @@ func (m model) miniFormView() string {
 		body := []string{
 			itemLabel.Width(w).Render("  Crash Dump (kdump)"),
 			footer.Width(w).Render("  Reserve memory for a crash kernel; leave empty to disable."),
+			footer.Width(w).Render("  This reserves the memory only: saving a dump also needs"),
+			footer.Width(w).Render("  kexec-tools, makedumpfile and a boot service to load it."),
 			rule(w),
 		}
 		if m.formStep == 0 {

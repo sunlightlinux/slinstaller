@@ -1810,3 +1810,11 @@ func TestKdumpInputChecks(t *testing.T) {
 		t.Errorf("non-numeric panic accepted: view=%v err=%q panic=%q", m.view, m.formErr, m.panicSecs)
 	}
 }
+
+func TestEverySectionIsLabelled(t *testing.T) {
+	for s := section(0); s < sectionCount; s++ {
+		if sectionLabels[s] == "" || sectionTitles[s] == "" {
+			t.Errorf("section %d has no label or title", s)
+		}
+	}
+}

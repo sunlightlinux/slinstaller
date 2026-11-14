@@ -26,6 +26,15 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- A GitHub Actions workflow runs gofmt, `go vet`, `go build` and the unit
+  suite with the race detector on every push and pull request; until now
+  these were only run by hand.
+- The README documents the kernel settings (profiles, `kernel-profile`,
+  `console-log-level`, governor, P-State, kdump) and their limits: computed
+  CPU lists are specific to the machine the wizard ran on, the profiles are
+  low-latency tuning on the stock kernel rather than `PREEMPT_RT`, and kdump
+  only reserves memory. The kdump form and the Realtime description say the
+  same in the wizard.
 - The saved configuration records the Kernel Command Line profile used in a new
   `kernel-profile` field (e.g. `kernel-profile: Server`), next to the expanded
   `kernel-arguments`. It is informational — the arguments are what apply — and a
