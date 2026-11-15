@@ -398,7 +398,37 @@ func (in *installer) baseInstall() error {
 	if err != nil {
 		return err
 	}
-	return storage.RunCommands(cmds, in.opts.Runner)
+	if err := storage.RunCommands(cmds, in.opts.Runner); err != nil {
+		return err
+	}
+	return in.writeTargetRepos()
+}
+
+// writeTargetRepos records the Sunlight mirror (ExtraRepos) in the target's
+// /etc/xbps.d so the installed system updates FROM Sunlight, not only Void.
+// xbps.Commands passes the mirror as -R for this install and seeds its key
+// into the target, but leaves no persistent repo config; a later
+// `xbps-install -Su` then saw only Void and pulled Void versions — which
+// skewed dbus against dbus-libs on the first installs. This closes that gap.
+// (It does not stop a package Void ships at a HIGHER version from winning;
+// keeping the Sunlight fork current is the separate half of that.)
+func (in *installer) writeTargetRepos() error {
+	if len(in.opts.ExtraRepos) == 0 {
+		return nil
+	}
+	dir := filepath.Join(in.opts.Root, "etc", "xbps.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	content := "# Written by slinstaller: the Sunlight mirror, searched ahead of Void.\n"
+	for _, r := range in.opts.ExtraRepos {
+		content += fmt.Sprintf("repository=%s\n", r)
+	}
+	path := filepath.Join(dir, "10-sunlight.conf")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 // fstab writes the target's /etc/fstab after the base system is in

@@ -202,6 +202,38 @@ func TestBaseInstallPassesRepoPackagesAndProxy(t *testing.T) {
 	}
 }
 
+func TestBaseInstallWritesTheSunlightMirrorRepo(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.Repo = "https://repo.example/current"
+	in.opts.ExtraRepos = []string{"http://repo-default.ionutnechita.ro/current"}
+	in.opts.Packages = []string{"sunlight-base"}
+
+	if err := in.baseInstall(); err != nil {
+		t.Fatalf("baseInstall: %v", err)
+	}
+	// The mirror is recorded in the target so a later `xbps-install -Su`
+	// reaches Sunlight, not only Void.
+	got := readTarget(t, in, "etc", "xbps.d", "10-sunlight.conf")
+	if !strings.Contains(got, "repository=http://repo-default.ionutnechita.ro/current") {
+		t.Errorf("target repo config missing the mirror\n%s", got)
+	}
+}
+
+func TestBaseInstallWithoutExtraReposWritesNoSunlightRepo(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.Repo = "https://repo.example/current"
+	in.opts.Packages = []string{"sunlight-base"}
+
+	if err := in.baseInstall(); err != nil {
+		t.Fatalf("baseInstall: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(in.opts.Root, "etc", "xbps.d", "10-sunlight.conf")); !os.IsNotExist(err) {
+		t.Errorf("wrote a sunlight repo config with no ExtraRepos (err=%v)", err)
+	}
+}
+
 func TestSaveConfigWritesAPrivateReplayableCopy(t *testing.T) {
 	cfg := twoPartConfig()
 	cfg.Hostname = "sunlight"
