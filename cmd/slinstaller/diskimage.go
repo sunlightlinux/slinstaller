@@ -22,17 +22,30 @@ func diskImageCommands(devs []blockdev.Device, image, disk string) [][]string {
 	if d := blockdev.FindByPath(devs, disk); d != nil {
 		cmds = append(cmds, blockdev.Teardown(*d)...)
 	}
-	reader := "cat"
+	// A local image is read by its decompressor, or by cat. From a URL it is
+	// written as it downloads; it never has to fit on the live system.
+	unpack := ""
 	switch strings.ToLower(filepath.Ext(image)) {
 	case ".zst":
-		reader = "zstd -dc"
+		unpack = "zstd -dc"
 	case ".xz":
-		reader = "xz -dc"
+		unpack = "xz -dc"
 	case ".gz":
-		reader = "gzip -dc"
+		unpack = "gzip -dc"
+	}
+	var reader string
+	switch {
+	case config.IsRemote(image) && unpack != "":
+		reader = `curl -fsSL "$1" | ` + unpack
+	case config.IsRemote(image):
+		reader = `curl -fsSL "$1"`
+	case unpack != "":
+		reader = unpack + ` "$1"`
+	default:
+		reader = `cat "$1"`
 	}
 	return append(cmds,
-		[]string{"sh", "-c", reader + ` "$1" | dd of="$2" bs=4M conv=fsync status=none`, "sh", image, disk},
+		[]string{"sh", "-c", reader + ` | dd of="$2" bs=4M conv=fsync status=none`, "sh", image, disk},
 		[]string{"partprobe", disk})
 }
 
@@ -45,7 +58,8 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply bool, stdin *buf
 		return err
 	}
 	image := cfg.DiskImage
-	if !filepath.IsAbs(image) {
+	remote := config.IsRemote(image)
+	if !remote && !filepath.IsAbs(image) {
 		dir := "."
 		if cfgPath != "" {
 			dir = filepath.Dir(cfgPath)
@@ -54,7 +68,7 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply bool, stdin *buf
 			image = abs
 		}
 	}
-	if fi, err := os.Stat(image); err != nil || fi.IsDir() {
+	if fi, err := os.Stat(image); !remote && (err != nil || fi.IsDir()) {
 		return fmt.Errorf("disk-image %s is not a file that can be read", image)
 	}
 	disk := "/dev/" + target.Name
@@ -89,11 +103,11 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply bool, stdin *buf
 	for _, c := range cmds {
 		tools = append(tools, c[0])
 	}
-	// The decompressor runs inside the shell command.
-	if f := strings.Fields(cmds[len(cmds)-2][2]); f[0] != "cat" {
-		tools = append(tools, f[0])
+	// What the shell command runs: the reader and any decompressor.
+	for _, part := range strings.Split(cmds[len(cmds)-2][2], "|") {
+		tools = append(tools, strings.Fields(part)[0])
 	}
-	if missing := storage.MissingTools(append(tools, "dd")); len(missing) > 0 {
+	if missing := storage.MissingTools(tools); len(missing) > 0 {
 		return fmt.Errorf("missing tools on the live system: %s", strings.Join(missing, ", "))
 	}
 	if !confirm(stdin, &storage.Plan{Disk: disk, Wipe: true}) {

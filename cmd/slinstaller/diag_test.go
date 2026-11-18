@@ -233,8 +233,16 @@ func TestSystemCheckForAnImageInstall(t *testing.T) {
 	wantRunErr(t, "a directory", err, "is not a file that can be read")
 	_, _, err = runWith(t, "", "--system-check", "--root", dir, path)
 	wantRunErr(t, "under the root", err, "is under the target root")
-	_, _, err = runWith(t, "", "--system-check", "--image", "https://example.org/base.tar", path)
-	wantRunErr(t, "a URL", err, "is a URL; fetch the image first")
+	// From a URL: https only unless plain http is allowed, never a squashfs
+	// (it cannot be unpacked as it arrives), and curl is then needed.
+	_, _, err = runWith(t, "", "--system-check", "--image", "http://example.org/base.tar", path)
+	wantRunErr(t, "plain http image", err, "is plain http")
+	_, _, err = runWith(t, "", "--system-check", "--image", "ftp://example.org/base.tar", path)
+	wantRunErr(t, "ftp image", err, "is not an https URL or a file")
+	_, _, err = runWith(t, "", "--system-check", "--image", "https://example.org/root.squashfs", path)
+	wantRunErr(t, "remote squashfs", err, "cannot be unpacked as it downloads")
+	_, _, err = runWith(t, "", "--system-check", "--image", "https://example.org/base.tar.zst", path)
+	wantRunErr(t, "remote image without curl", err, "missing tools on the live system: sh, curl, tar")
 }
 
 func TestPowerAfterWaitsTheDelay(t *testing.T) {

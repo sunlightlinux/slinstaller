@@ -487,7 +487,7 @@ restart:
 	// From an image nothing is fetched or installed as packages: the image
 	// is the base system. What the layout would have added has to be in it.
 	fromImage := cfg.Image != ""
-	if fromImage {
+	if fromImage && !config.IsRemote(cfg.Image) {
 		if !filepath.IsAbs(cfg.Image) {
 			dir := "."
 			if len(rest) == 1 {
@@ -503,6 +503,8 @@ restart:
 		if underRoot(cfg.Image, root) {
 			return fmt.Errorf("image %s is under the target root %s and would be hidden when the target is mounted there", cfg.Image, root)
 		}
+	}
+	if fromImage {
 		if need := append(layoutPackages(plan), cfg.Packages...); len(need) > 0 {
 			fmt.Fprintf(os.Stderr, "note: installing from an image, no packages are installed; the image has to hold: %s\n", strings.Join(need, ", "))
 		}
@@ -651,7 +653,7 @@ restart:
 
 		required := append(plan.RequiredTools(), "chroot")
 		if fromImage {
-			required = append(required, controller.ImageCommand(cfg.Image, root)[0])
+			required = append(required, controller.ImageTools(cfg.Image)...)
 		} else {
 			required = append(required, "xbps-install")
 		}

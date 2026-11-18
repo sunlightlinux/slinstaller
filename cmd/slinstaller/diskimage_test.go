@@ -33,11 +33,16 @@ func TestDiskImageCommands(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	for ext, reader := range map[string]string{".raw": "cat ", ".img": "cat ", ".xz": "xz -dc ", ".GZ": "gzip -dc "} {
+	for ext, reader := range map[string]string{".raw": `cat "$1" | dd`, ".img": `cat "$1" | dd`, ".xz": `xz -dc "$1" | dd`, ".GZ": `gzip -dc "$1" | dd`} {
 		cmds := diskImageCommands(nil, "/img/disk"+ext, "/dev/sdb")
 		if !strings.HasPrefix(cmds[0][2], reader) {
 			t.Errorf("%s: %s", ext, cmds[0][2])
 		}
+	}
+	// From a URL it is written as it downloads, the URL an argument too.
+	remote := diskImageCommands(nil, "https://img.example/disk.raw.zst", "/dev/sdb")[0]
+	if remote[2] != `curl -fsSL "$1" | zstd -dc | dd of="$2" bs=4M conv=fsync status=none` || remote[4] != "https://img.example/disk.raw.zst" {
+		t.Errorf("remote image: %v", remote)
 	}
 }
 
@@ -54,6 +59,11 @@ func TestDiskImageDryRunAndRefusals(t *testing.T) {
 	if !strings.Contains(out, "xz -dc") || !strings.Contains(out, image+" "+testDisk) || !strings.Contains(errOut, "Dry run. Re-run with --apply to write "+image+" over "+testDisk) {
 		t.Errorf("dry run:\n%s\n%s", out, errOut)
 	}
+	// An https image needs no file to be there for the plan to be shown.
+	out2, _, err := runWith(t, "", writeConfig(t, dir, imageConfig("https://img.example/disk.raw.xz")))
+	if err != nil || !strings.Contains(out2, "curl -fsSL") || !strings.Contains(out2, "https://img.example/disk.raw.xz "+testDisk) {
+		t.Errorf("remote dry run: %v\n%s", err, out2)
+	}
 	// Nothing of an install is planned: no partitioning, no filesystems.
 	if strings.Contains(out, "parted") || strings.Contains(out, "mkfs") {
 		t.Errorf("a disk image run planned an install:\n%s", out)
@@ -69,7 +79,8 @@ func TestDiskImageDryRunAndRefusals(t *testing.T) {
 		want string
 	}{
 		"absent image": {imageConfig(filepath.Join(dir, "absent.raw")), nil, "is not a file that can be read"},
-		"a URL":        {imageConfig("https://example.org/disk.raw"), nil, "is a URL; fetch the image first"},
+		"not https":    {imageConfig("ftp://example.org/disk.raw"), nil, "is not an https URL or a file"},
+		"plain http":   {imageConfig("http://example.org/disk.raw"), nil, "is plain http"},
 		"with a layout": {func() *config.Config {
 			c := plainConfig()
 			c.DiskImage = image
@@ -95,7 +106,7 @@ func TestDiskImageDryRunAndRefusals(t *testing.T) {
 
 // applyDiskImage runs from the namespace child (apply_ns_test.go).
 func applyDiskImage(t *testing.T, confirmed string) {
-	e := newApplyEnv(t, "sh", "dd")
+	e := newApplyEnv(t, "sh", "dd", "cat")
 	image := filepath.Join(e.base, "disk.raw")
 	os.WriteFile(image, []byte("image"), 0o644)
 	cfg := imageConfig(image)
@@ -121,20 +132,24 @@ func applyDiskImage(t *testing.T, confirmed string) {
 		t.Errorf("not reported:\n%s", errOut)
 	}
 	// The disk is checked as any target is: in use, absent, a missing tool.
-	e = newApplyEnv(t, "sh", "dd")
+	e = newApplyEnv(t, "sh", "dd", "cat")
 	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":1000,"type":"disk","mountpoint":"/data"}`)
 	_, err = run(confirmed)
 	e.refused("disk in use", err, "is in use")
-	e = newApplyEnv(t, "sh", "dd")
+	e = newApplyEnv(t, "sh", "dd", "cat")
 	setListing(t, e.bin, "")
 	_, err = run(confirmed)
 	e.refused("disk absent", err, "is not among the machine's block devices")
-	e = newApplyEnv(t, "sh")
+	e = newApplyEnv(t, "sh", "cat")
 	_, err = run(confirmed)
 	e.refused("no dd", err, "missing tools on the live system: dd")
-	e = newApplyEnv(t, "sh", "dd")
+	e = newApplyEnv(t, "sh", "dd", "cat")
 	cfg.DiskImage = image + ".zst"
 	os.WriteFile(cfg.DiskImage, nil, 0o644)
 	_, err = run(confirmed)
 	e.refused("no zstd", err, "missing tools on the live system: zstd")
+	e = newApplyEnv(t, "sh", "dd", "cat")
+	cfg.DiskImage = "https://img.example/disk.raw"
+	_, err = run(confirmed)
+	e.refused("no curl", err, "missing tools on the live system: curl")
 }

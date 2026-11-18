@@ -18,6 +18,12 @@ func TestImageCommand(t *testing.T) {
 		"/run/img/root.squashfs":   "unsquashfs -f -d /mnt /run/img/root.squashfs",
 		"/run/img/ROOT.SQFS":       "unsquashfs -f -d /mnt /run/img/ROOT.SQFS",
 		"/run/img/live-rootfs.sfs": "unsquashfs -f -d /mnt /run/img/live-rootfs.sfs",
+		// From a URL: unpacked as it downloads, tar told the compression.
+		"https://img.example/base.tar.zst": `sh -c curl -fsSL "$1" | tar -xpf - --zstd -C "$2" --numeric-owner sh https://img.example/base.tar.zst /mnt`,
+		"https://img.example/base.tgz":     `sh -c curl -fsSL "$1" | tar -xpf - -z -C "$2" --numeric-owner sh https://img.example/base.tgz /mnt`,
+		"https://img.example/base.txz":     `sh -c curl -fsSL "$1" | tar -xpf - -J -C "$2" --numeric-owner sh https://img.example/base.txz /mnt`,
+		"https://img.example/base.tar.bz2": `sh -c curl -fsSL "$1" | tar -xpf - -j -C "$2" --numeric-owner sh https://img.example/base.tar.bz2 /mnt`,
+		"https://img.example/base.tar":     `sh -c curl -fsSL "$1" | tar -xpf - -C "$2" --numeric-owner sh https://img.example/base.tar /mnt`,
 	} {
 		if got := strings.Join(ImageCommand(image, "/mnt"), " "); got != want {
 			t.Errorf("ImageCommand(%s) = %s, want %s", image, got, want)
@@ -89,5 +95,25 @@ func TestUnpackARealImage(t *testing.T) {
 	}
 	if st, err := os.Stat(filepath.Join(in.opts.Root, "etc", "shadow")); err != nil || st.Mode().Perm() != 0o600 {
 		t.Errorf("shadow: %v, mode %v", err, st.Mode().Perm())
+	}
+}
+
+func TestImageTools(t *testing.T) {
+	for image, want := range map[string]string{
+		"/img/base.tar.zst": "tar", "/img/root.squashfs": "unsquashfs", "https://img.example/base.tar": "sh curl tar",
+	} {
+		if got := strings.Join(ImageTools(image), " "); got != want {
+			t.Errorf("ImageTools(%s) = %s, want %s", image, got, want)
+		}
+	}
+	// A remote image is not looked for beside the config file.
+	cfg := twoPartConfig()
+	cfg.Image = "https://img.example/base.tar"
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	in.opts.ConfigDir = "/srv/configs"
+	_ = in.baseInstall()
+	if !strings.Contains(r.flat(), "sh https://img.example/base.tar "+in.opts.Root) || strings.Contains(r.flat(), "/srv/configs") {
+		t.Errorf("remote image command:\n%s", r.flat())
 	}
 }

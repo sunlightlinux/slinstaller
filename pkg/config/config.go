@@ -1130,8 +1130,13 @@ func (c *Config) Validate() error {
 	if c.ReportURL != "" && !strings.HasPrefix(c.ReportURL, "http://") && !strings.HasPrefix(c.ReportURL, "https://") {
 		add("report-url: %s is not an http or https URL", c.ReportURL)
 	}
-	if strings.Contains(c.Image, "://") {
-		add("image: %s is a URL; fetch the image first and give its path", c.Image)
+	if err := c.checkRemote("image", c.Image); err != nil {
+		add("%v", err)
+	} else if IsRemote(c.Image) {
+		switch strings.ToLower(filepath.Ext(c.Image)) {
+		case ".squashfs", ".sqfs", ".sfs":
+			add("image: a squashfs cannot be unpacked as it downloads; fetch %s first, or use a tar image", c.Image)
+		}
 	}
 	for _, m := range c.TargetMedia {
 		if m == nil {
@@ -2020,12 +2025,32 @@ func cryptMapName(ch *Media) string {
 // installDisks finds the disks to install to: the disk-type media that
 // carry a partition layout. One disk is the common case; several are a
 // RAID (or otherwise multi-disk) layout.
+// IsRemote reports whether an image is named by a URL rather than a path.
+func IsRemote(image string) bool { return strings.Contains(image, "://") }
+
+// checkRemote accepts an image given as an https URL — it is then unpacked
+// as it downloads, never stored — and refuses anything else with "://" in
+// it. Plain http needs allowInsecureHTTP, as a repository does: the image
+// is the whole system.
+func (c *Config) checkRemote(key, image string) error {
+	switch {
+	case !IsRemote(image), strings.HasPrefix(image, "https://"):
+		return nil
+	case strings.HasPrefix(image, "http://"):
+		if c.AllowInsecureHTTP {
+			return nil
+		}
+		return fmt.Errorf("%s: %s is plain http; use https, or set allowInsecureHTTP", key, image)
+	}
+	return fmt.Errorf("%s: %s is not an https URL or a file", key, image)
+}
+
 // DiskImageTarget is the one disk a disk-image is written to. A config that
 // also describes a layout, or names several disks, is refused: the image
 // replaces the whole disk, and which disk has to be beyond doubt.
 func (c *Config) DiskImageTarget() (*Media, error) {
-	if strings.Contains(c.DiskImage, "://") {
-		return nil, fmt.Errorf("config: disk-image: %s is a URL; fetch the image first and give its path", c.DiskImage)
+	if err := c.checkRemote("disk-image", c.DiskImage); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
 	}
 	var disks []*Media
 	for _, m := range c.TargetMedia {

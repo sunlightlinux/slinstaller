@@ -474,12 +474,41 @@ func (in *installer) baseInstall() error {
 // root: unsquashfs for a squashfs, tar for anything else (tar works out the
 // compression itself). Ownership is kept by number, as the image's users
 // are the installed system's, not the live one's.
+//
+// An image named by a URL is unpacked as it downloads, so it never has to
+// fit anywhere but the target. tar cannot tell a stream's compression for
+// itself, so it is told from the name. The URL and the root reach the shell
+// as arguments, never as part of its command line.
 func ImageCommand(image, root string) []string {
-	switch strings.ToLower(filepath.Ext(image)) {
+	ext := strings.ToLower(filepath.Ext(image))
+	if config.IsRemote(image) {
+		flag := ""
+		switch ext {
+		case ".zst":
+			flag = "--zstd "
+		case ".xz", ".txz":
+			flag = "-J "
+		case ".gz", ".tgz":
+			flag = "-z "
+		case ".bz2":
+			flag = "-j "
+		}
+		return []string{"sh", "-c", `curl -fsSL "$1" | tar -xpf - ` + flag + `-C "$2" --numeric-owner`, "sh", image, root}
+	}
+	switch ext {
 	case ".squashfs", ".sqfs", ".sfs":
 		return []string{"unsquashfs", "-f", "-d", root, image}
 	}
 	return []string{"tar", "-xpf", image, "-C", root, "--numeric-owner"}
+}
+
+// ImageTools are the programs ImageCommand's command needs on the live
+// system.
+func ImageTools(image string) []string {
+	if config.IsRemote(image) {
+		return []string{"sh", "curl", "tar"}
+	}
+	return []string{ImageCommand(image, "/")[0]}
 }
 
 // unpackImage installs the base system from the config's image. What was
@@ -488,7 +517,7 @@ func ImageCommand(image, root string) []string {
 // is still plain.
 func (in *installer) unpackImage() error {
 	image := in.cfg.Image
-	if !filepath.IsAbs(image) && in.opts.ConfigDir != "" {
+	if !config.IsRemote(image) && !filepath.IsAbs(image) && in.opts.ConfigDir != "" {
 		image = filepath.Join(in.opts.ConfigDir, image)
 	}
 	if err := storage.RunCommands([][]string{ImageCommand(image, in.opts.Root)}, in.opts.Runner); err != nil {
