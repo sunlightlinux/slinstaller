@@ -451,20 +451,43 @@ func (in *installer) baseInstall() error {
 	if in.cfg.Image != "" {
 		return in.unpackImage()
 	}
-	cmds, err := xbps.Options{
-		Root:       in.opts.Root,
-		Repo:       in.opts.Repo,
-		LocalRepos: in.opts.LocalRepos,
-		ExtraRepos: in.opts.ExtraRepos,
-		KeysDir:    in.opts.KeysDir,
-		Arch:       in.opts.Arch,
-		ProxyEnv:   in.cfg.ProxyEnv(),
-		Packages:   in.opts.Packages,
-	}.Commands()
-	if err != nil {
-		return err
+	install := func(packages []string) error {
+		cmds, err := xbps.Options{
+			Root:       in.opts.Root,
+			Repo:       in.opts.Repo,
+			LocalRepos: in.opts.LocalRepos,
+			ExtraRepos: in.opts.ExtraRepos,
+			KeysDir:    in.opts.KeysDir,
+			Arch:       in.opts.Arch,
+			ProxyEnv:   in.cfg.ProxyEnv(),
+			Packages:   packages,
+		}.Commands()
+		if err != nil {
+			return err
+		}
+		return storage.RunCommands(cmds, in.opts.Runner)
 	}
-	if err := storage.RunCommands(cmds, in.opts.Runner); err != nil {
+	err := install(in.opts.Packages)
+	// The configured kernel could not be installed and another was named:
+	// one more attempt, with that one in its place. (A failure that had
+	// nothing to do with the kernel fails again, and is what is reported.)
+	if kernel, fallback := in.cfg.KernelPackage(), in.cfg.KernelFallback; err != nil && fallback != "" && kernel != "" {
+		var packages []string
+		swapped := false
+		for _, p := range in.opts.Packages {
+			if p == kernel {
+				p, swapped = fallback, true
+			}
+			packages = append(packages, p)
+		}
+		if swapped {
+			if in.opts.Log != nil {
+				fmt.Fprintf(in.opts.Log, "warning: the base install failed with %s (%v); trying once more with %s\n", kernel, err, fallback)
+			}
+			err = install(packages)
+		}
+	}
+	if err != nil {
 		return err
 	}
 	return in.writeTargetRepos()

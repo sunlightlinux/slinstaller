@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,5 +117,55 @@ func TestImageTools(t *testing.T) {
 	_ = in.baseInstall()
 	if !strings.Contains(r.flat(), "sh https://img.example/base.tar "+in.opts.Root) || strings.Contains(r.flat(), "/srv/configs") {
 		t.Errorf("remote image command:\n%s", r.flat())
+	}
+}
+
+// With a fallback kernel named, a base install that fails is tried once
+// more with it in place of the configured one.
+func TestKernelFallback(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.Kernel, cfg.KernelFallback = "linux-mainline", "linux-lts"
+	kernel := cfg.KernelPackage()
+	if kernel == "" {
+		t.Fatal("the config names no kernel package")
+	}
+	var r recorder
+	var log bytes.Buffer
+	in := stagedInstaller(t, cfg, &r)
+	in.opts.Log = &log
+	in.opts.Repo, in.opts.Packages = "https://repo.example/current", []string{"sunlight-base", kernel}
+	// The first attempt, with the configured kernel, fails.
+	in.opts.Runner = func(args []string) error {
+		r.cmds = append(r.cmds, args)
+		line := strings.Join(args, " ")
+		if strings.Contains(line, "xbps-install") && strings.Contains(line, " "+kernel) {
+			return errors.New("package not found")
+		}
+		return nil
+	}
+	if err := in.baseInstall(); err != nil {
+		t.Fatalf("baseInstall with a fallback: %v", err)
+	}
+	flat := r.flat()
+	if strings.Count(flat, "xbps-install") != 2 || !strings.Contains(flat, " linux-lts") {
+		t.Errorf("attempts:\n%s", flat)
+	}
+	if !strings.Contains(log.String(), "trying once more with linux-lts") {
+		t.Errorf("the retry is not said: %q", log.String())
+	}
+	// A failure that is not the kernel's fails the second time too, and is
+	// reported; without a fallback there is no second attempt.
+	r = recorder{}
+	in.opts.Runner = r.failOn("xbps-install")
+	wantErr(t, in.baseInstall(), "boom")
+	if strings.Count(r.flat(), "xbps-install") != 2 {
+		t.Errorf("attempts:\n%s", r.flat())
+	}
+	cfg.KernelFallback = ""
+	r = recorder{}
+	in.opts.Runner = r.failOn("xbps-install")
+	wantErr(t, in.baseInstall(), "boom")
+	if strings.Count(r.flat(), "xbps-install") != 1 {
+		t.Errorf("a second attempt with no fallback:\n%s", r.flat())
 	}
 }

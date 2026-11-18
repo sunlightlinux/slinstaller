@@ -60,6 +60,19 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- More that a layout can pin down: `crypt-options`, `partition-type`,
+  `partition-uuid`, `partition-name`, a filesystem `uuid`, fstab `passno` and
+  `freq`, a RAID array's `metadata`.
+- `stage-hooks` runs commands after a named stage; `install-type` (server,
+  desktop) raises the smallest root; `kernel-fallback` names a kernel to try
+  when the configured one cannot be installed; `power-state-delay` waits
+  before the machine reboots or powers off.
+- `image` and `disk-image` may be `https://` URLs, unpacked or written as
+  they download.
+- `resize` shrinks btrfs; Safe Installation in the full-screen installer
+  offers to shrink a partition when the disk has no unallocated space.
+- `--log-level` (clr-installer's levels): at 2 or 1 the terminal shows only
+  the stages and the result.
 - Storage for servers: `esp: true` makes a vfat partition on a second disk
   a spare EFI System Partition, given a copy of the bootloader and a firmware
   entry; a `raid` entry may be `encrypted` and/or carry a `volumeGroup` with

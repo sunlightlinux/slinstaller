@@ -59,10 +59,21 @@ disk, whole-disk images (`disk-image`), `--resume`, `--unmount`,
 `--in-target`, a config from a URL, progress reports (`report-url`), and
 clr-installer's role names in the partition table read by `--discover`.
 
-Not done: resizing from the full-screen installer's Safe Installation (it
-still needs unallocated space to be there already), shrinking btrfs or xfs,
-fetching an image from a URL, and clr-installer's small leftovers
-(`--log-level`, `--json-yaml`, its server/desktop size modes).
+Later still: crypttab options, GPT entry and filesystem identifiers, fstab
+pass, RAID metadata, hooks after any stage, `install-type`, a fallback
+kernel, images from a URL, btrfs shrinking, the shrink offered from Safe
+Installation, and `--log-level`.
+
+Verified on real block devices by the `loop` CI job: a plain install's table
+and filesystems, `--discover`, shrinking ext4, ntfs and btrfs with the data
+intact, and btrfs subvolumes with their mount options. Everything past the
+partition and mount stages - the bootloader, a first boot, RAID with a disk
+removed, bonds and VLANs on the installed system - still wants a VM.
+
+Not done, deliberately: resuming from any stage (later stages rely on what
+earlier ones worked out in the same run, so only base-install is safe to
+resume at); clr-installer's `--json-yaml` and its installer message fetched
+from a server; shrinking xfs, which the filesystem does not allow.
 
 ## What's left
 

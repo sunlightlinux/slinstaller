@@ -147,7 +147,7 @@ layout needs to boot have to be in it.
 
 **Installing beside what is there.** `--discover /dev/sda` prints the disk's
 present layout as a config that keeps every partition; edit it to say where
-the new system goes. An existing ext2/3/4 or ntfs partition can give up room for it:
+the new system goes. An existing ext2/3/4, ntfs or btrfs partition can give up room for it:
 
 ```yaml
 reusePartitions: true
@@ -216,6 +216,26 @@ mounted and `--in-target "cmd"` runs a command inside it. A partition table
 whose partitions are named `CLR_BOOT`, `CLR_ROOT`, `CLR_SWAP`,
 `CLR_MNT_/path` (with `_F` to format) comes out of `--discover` already
 saying what goes where.
+
+**Finer points**, all optional:
+
+| key | on | what it does |
+|---|---|---|
+| `crypt-options: discard` | an encrypted volume | extra crypttab options (the kernel command line, for the root) |
+| `partition-type`, `partition-uuid`, `partition-name` | a partition | its entry in the GPT |
+| `uuid` | a filesystem | its UUID (a volume id for vfat) |
+| `passno`, `freq` | a filesystem | its fstab fsck pass and dump frequency |
+| `metadata: "1.0"` | a `raid` entry | the array's superblock format |
+| `stage-hooks: { partition: [...] }` | the config | commands after a named stage |
+| `install-type: server` / `desktop` | the config | a larger smallest root (4 GB / 20 GB) |
+| `kernel-fallback: linux-lts` | the config | the kernel to try when the configured one cannot be installed |
+| `power-state-delay: 30` | the config | seconds before the machine reboots or powers off |
+
+`image` and `disk-image` may be `https://` URLs: the image is unpacked or
+written as it downloads, so it only has to fit on the target. `resize` also
+works on btrfs, and Safe Installation in the full-screen installer offers to
+shrink a partition when the disk has no unallocated space. `--log-level 2`
+keeps the terminal to the stages and the result.
 
 On the command line, `--system-check config.yaml` runs every pre-install
 check and stops without changing anything. A failed install leaves a

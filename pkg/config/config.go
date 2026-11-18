@@ -162,6 +162,10 @@ type Config struct {
 	// mdadm). A relative path is taken from the config file's directory.
 	Image string `yaml:"image,omitempty"`
 
+	// KernelFallback is the kernel package to install when the configured
+	// one cannot be: the base install is tried once more with it.
+	KernelFallback string `yaml:"kernel-fallback,omitempty"`
+
 	// StageHooks are commands run after a named stage of the install
 	// (partition, mount, meta-fs, base-install, fstab, swapfile, bootloader,
 	// first-boot, network, save-config), in the shape of pre-install and
@@ -1156,6 +1160,9 @@ func (c *Config) Validate() error {
 		add("a swap size of \"auto\" has to be worked out from this machine's memory first (ResolveAutoSwap)")
 	}
 
+	if c.KernelFallback != "" && c.KernelPackage() == "" {
+		add("kernel-fallback: there is no kernel named for %s to fall back from", c.KernelFallback)
+	}
 	switch c.InstallType {
 	case "", "server", "desktop":
 	default:
