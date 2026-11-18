@@ -57,6 +57,13 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- `image` (or `--image`) installs the base system by unpacking a tar or
+  squashfs root filesystem image instead of installing packages.
+- `--discover <disk>` prints a config describing the layout already on a
+  disk, keeping every partition, as a starting point for an install into it.
+- `resize` shrinks an existing ext2/3/4 partition in a `reusePartitions`
+  install, keeping its data; a `create: true` partition with no `start` is
+  placed in the disk's largest free region.
 - Config extensions, all optional — a clr-installer config runs unchanged:
   - `match` on a disk names it by serial, WWN, model or a `/dev/disk/by-*`
     path instead of its kernel name; exactly one disk has to fit. A

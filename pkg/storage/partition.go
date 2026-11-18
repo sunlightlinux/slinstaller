@@ -21,7 +21,8 @@ func (pl *Plan) Commands() ([][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmds := append(pl.WipeCommands(), pl.TableCommands()...)
+	cmds := append(pl.WipeCommands(), pl.ResizeCommands()...)
+	cmds = append(cmds, pl.TableCommands()...)
 	cmds = append(cmds, mkfs...)
 	// Subvolumes are made inside the filesystem, mounted for the purpose;
 	// shown here by the device they are made on.
@@ -62,8 +63,11 @@ func (pl *Plan) diskTableCommands(disk string) [][]string {
 			if !p.Create {
 				continue
 			}
-			cmds = append(cmds, partedMkpart(disk, p,
-				fmt.Sprintf("%dMiB", p.StartMiB), fmt.Sprintf("%dMiB", p.EndMiB)))
+			start, end := fmt.Sprintf("%dMiB", p.StartMiB), fmt.Sprintf("%dMiB", p.EndMiB)
+			if p.CreateInFree { // not placed yet: this is the dry run's view
+				start, end = "<start of the largest free region>", "<its end>"
+			}
+			cmds = append(cmds, partedMkpart(disk, p, start, end))
 			if p.isESP() {
 				cmds = append(cmds, []string{"parted", "-s", disk, "set",
 					fmt.Sprintf("%d", p.Number), "esp", "on"})

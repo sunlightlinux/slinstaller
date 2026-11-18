@@ -54,6 +54,16 @@ type Partition struct {
 	Create           bool
 	StartMiB, EndMiB uint64
 
+	// CreateInFree marks a Create partition whose place is not known yet:
+	// it goes in the disk's largest unallocated region, found by
+	// PlaceInFree during the install. Until then EndMiB holds the largest
+	// size it may take, or 0 for the whole region.
+	CreateInFree bool
+
+	// ResizeMiB, when not 0, shrinks this existing partition and its
+	// ext2/3/4 filesystem to that many MiB, keeping its data.
+	ResizeMiB uint64
+
 	// Encrypted marks a LUKS partition. Its filesystem is made and
 	// mounted on the mapper device, not the raw partition; MapName is the
 	// mapper name (/dev/mapper/<MapName>).

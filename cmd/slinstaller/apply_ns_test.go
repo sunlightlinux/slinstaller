@@ -361,6 +361,45 @@ func applyChild(t *testing.T) {
 	_, err = e.run(confirmed, reuse)
 	e.refused("reuse, not a partition", err, "is a lvm, not a partition")
 
+	// Shrinking a partition: only an ext filesystem that is really there,
+	// and only to something smaller. Otherwise the operator sees what will
+	// be shrunk and created before confirming.
+	shrink := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{
+		{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Name: testName + "p2", Type: "part", FsType: "ext4", Preserve: true, Resize: "40G"},
+		{Name: testName + "p3", Type: "part", FsType: "ext4", Mountpoint: "/", Create: true},
+	}}}}
+	existing := func(fs string, size string) string {
+		return `{"name":"slitest0","path":"` + testDisk + `","size":128000000000,"type":"disk","children":[
+		{"name":"slitest0p1","path":"` + testDisk + `p1","size":536870912,"type":"part","fstype":"vfat"},
+		{"name":"slitest0p2","path":"` + testDisk + `p2","size":` + size + `,"type":"part","fstype":"` + fs + `"}]}`
+	}
+	shrinkTools := []string{"e2fsck", "resize2fs", "sh"}
+	e = newApplyEnv(t, shrinkTools...)
+	setListing(t, e.bin, existing("ntfs", "107374182400"))
+	_, err = e.run(confirmed, shrink)
+	e.refused("resize of another filesystem", err, "holds ntfs; only ext2, ext3 and ext4 can be resized")
+	e = newApplyEnv(t, shrinkTools...)
+	setListing(t, e.bin, existing("ext4", "21474836480"))
+	_, err = e.run(confirmed, shrink)
+	e.refused("resize that would grow", err, "would not shrink it")
+	e = newApplyEnv(t)
+	setListing(t, e.bin, existing("ext4", "107374182400"))
+	_, err = e.run(confirmed, shrink)
+	e.refused("no resize tools", err, "missing tools on the live system: e2fsck, resize2fs")
+	e = newApplyEnv(t, shrinkTools...)
+	setListing(t, e.bin, existing("ext4", "107374182400"))
+	errOut, err = e.run("no\n", shrink)
+	e.refused("shrink not confirmed", err, "aborted")
+	for _, want := range []string{
+		"SHRINK " + testDisk + "p2 to 40.0G", "KEEP   " + testDisk + "p1", "CREATE " + testDisk + "p3 as ext4 -> /",
+		"A SHRINK that is interrupted can lose what is on the partition",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("confirmation missing %q:\n%s", want, errOut)
+		}
+	}
+
 	// --- the LUKS passphrase ---
 
 	crypt := &config.Config{TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{

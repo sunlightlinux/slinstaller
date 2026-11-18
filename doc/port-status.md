@@ -47,9 +47,13 @@ swap sized from memory, RAID hot spares, whole-disk wipe modes. On the
 command line: `--system-check`, a diagnostics archive on failure, and an
 install lock.
 
-Not done, and would be next: resizing an existing partition for an install
-into free space, writing a config from the layout already on a disk, and
-installing from an image instead of packages.
+Also: installing the base system from a tar or squashfs image (`image`),
+describing a disk's present layout as a config (`--discover`), and shrinking
+an existing ext2/3/4 partition to make room (`resize`).
+
+Not done: resizing from the full-screen installer's Safe Installation (it
+still needs unallocated space to be there already), filesystems other than
+ext2/3/4, and fetching an image from a URL.
 
 ## What's left
 

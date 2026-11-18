@@ -140,6 +140,30 @@ write-files:
 - **`wipe`** other than `superblock` goes over the whole disk and takes as
   long as the disk is large.
 
+**Installing from an image.** `image: base.tar.zst` (or `--image`) unpacks a
+root filesystem image — a tar archive or a squashfs — instead of installing
+packages. The image is the whole base system: kernel, GRUB and whatever the
+layout needs to boot have to be in it.
+
+**Installing beside what is there.** `--discover /dev/sda` prints the disk's
+present layout as a config that keeps every partition; edit it to say where
+the new system goes. An existing ext2/3/4 partition can give up room for it:
+
+```yaml
+reusePartitions: true
+targetMedia:
+- name: sda
+  type: disk
+  children:
+  - { name: sda1, type: part, fstype: vfat, mountpoint: /boot/efi, preserve: true }
+  - { name: sda2, type: part, fstype: ext4, preserve: true, resize: 40G }   # shrunk, data kept
+  - { name: sda3, type: part, fstype: ext4, mountpoint: /, create: true }   # in the room that leaves
+```
+
+The filesystem is shrunk first and the partition after it, and a `create`
+partition with no `start` goes in the largest free region. Shrinking a
+filesystem is not something to do without a backup.
+
 On the command line, `--system-check config.yaml` runs every pre-install
 check and stops without changing anything. A failed install leaves a
 diagnostics archive in `/tmp` (`--diagnostics` names it): the error, the log,

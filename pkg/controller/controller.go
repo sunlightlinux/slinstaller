@@ -248,6 +248,17 @@ func (in *installer) partition() error {
 	if err := storage.RunCommands(in.plan.WipeCommands(), in.opts.Runner); err != nil {
 		return err
 	}
+	// An existing partition asked to give up space does so now, and a new
+	// partition waiting for that space is given its place.
+	if resize := in.plan.ResizeCommands(); len(resize) > 0 {
+		if err := storage.RunCommands(resize, in.opts.Runner); err != nil {
+			return err
+		}
+		in.settle()
+	}
+	if err := in.plan.PlaceInFree(); err != nil {
+		return err
+	}
 	// The partition table first; then, on an encrypted disk, LUKS on each
 	// crypt partition before any filesystem is made — mkfs targets the
 	// mapper, not the raw partition.

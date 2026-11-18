@@ -326,3 +326,49 @@ func TestPartitionWipesAndBuildsSpares(t *testing.T) {
 		t.Errorf("mdadm:\n%s", r.flat())
 	}
 }
+
+// A resize install: the old partition is shrunk — filesystem, then partition
+// — before the new one is cut in the room it leaves, and only the new one
+// gets a filesystem.
+func TestPartitionResizesThenCreates(t *testing.T) {
+	cfg := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: "sda", Type: "disk", Children: []*config.Media{
+		{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Name: "sda2", Type: "part", FsType: "ext4", Preserve: true, Resize: "40G"},
+		{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: "/", Create: true},
+	}}}}
+	// parted, asked what is free once the shrink is done.
+	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"
+echo "2:513MiB:41473MiB:40960MiB:ext4::;"; echo "1:41473MiB:102400MiB:60927MiB:free;"`})
+	var r recorder
+	if err := Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices}); err != nil {
+		t.Fatal(err)
+	}
+	flat := r.flat()
+	order := []string{"e2fsck -f -p /dev/sda2", "resize2fs /dev/sda2 40960M", "sfdisk --no-reread -N 2 /dev/sda", "41473MiB 102399MiB", "mkfs.ext4"}
+	last := -1
+	for _, step := range order {
+		i := strings.Index(flat, step)
+		if i < 0 || i < last {
+			t.Fatalf("step %q missing or out of order:\n%s", step, flat)
+		}
+		last = i
+	}
+	if strings.Contains(flat, "mklabel") || strings.Contains(flat, "mkfs.ext4 -v -F -b 4096 /dev/sda2") || strings.Contains(flat, "mkfs.vfat") {
+		t.Errorf("a kept partition was repartitioned or formatted:\n%s", flat)
+	}
+
+	// The filesystem refusing to shrink stops everything: the partition is
+	// not cut down and nothing new is made.
+	r = recorder{}
+	err := Install(cfg, Options{Through: "partition", Runner: r.failOn("resize2fs"), Devices: noDevices})
+	if err == nil || strings.Contains(r.flat(), "sfdisk") || strings.Contains(r.flat(), "mkpart") || strings.Contains(r.flat(), "mkfs") {
+		t.Errorf("a failed shrink went on: %v\n%s", err, r.flat())
+	}
+	// No room after all: reported, with nothing created.
+	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"`})
+	r = recorder{}
+	err = Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices})
+	if err == nil || !strings.Contains(err.Error(), "has no unallocated space") || strings.Contains(r.flat(), "mkfs") {
+		t.Errorf("no room: %v\n%s", err, r.flat())
+	}
+}

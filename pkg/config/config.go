@@ -241,6 +241,12 @@ type Media struct {
 	Create bool   `yaml:"create,omitempty"`
 	Start  string `yaml:"start,omitempty"`
 
+	// Resize, in a reusePartitions install, shrinks this existing ext2/3/4
+	// partition to the given size, filesystem first, keeping what is on it
+	// (it has to be preserve: true). The space it gives up can take a
+	// `create: true` partition.
+	Resize string `yaml:"resize,omitempty"`
+
 	// Spare makes a `type: raid` partition a hot spare of its array: it
 	// holds no data until a member fails, when the array rebuilds onto it.
 	Spare bool `yaml:"spare,omitempty"`
@@ -886,6 +892,36 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, d := range c.TargetMedia {
+		if d == nil {
+			continue
+		}
+		inFree := 0
+		for _, ch := range d.Children {
+			if ch == nil {
+				continue
+			}
+			if ch.Create && strings.TrimSpace(ch.Start) == "" {
+				if inFree++; inFree == 2 {
+					add("%s: only one partition per disk can be created without a start (in the largest free region); give the others a start", d.Name)
+				}
+			}
+			if ch.Resize == "" {
+				continue
+			}
+			switch {
+			case !c.ReusePartitions:
+				add("%s: resize is for a reusePartitions install; a normal install repartitions the disk", ch.Name)
+			case !ch.Preserve || ch.Create:
+				add("%s: resize keeps what is on the partition, so it has to be an existing one with preserve: true", ch.Name)
+			case ch.FsType != "ext2" && ch.FsType != "ext3" && ch.FsType != "ext4":
+				add("%s: only ext2, ext3 and ext4 can be resized, not %q", ch.Name, ch.FsType)
+			}
+			if mib, err := offsetMiB(ch.Resize); err != nil || mib == 0 {
+				add("%s: resize %q is not a size", ch.Name, ch.Resize)
+			}
+		}
+	}
 	if strings.Contains(c.Image, "://") {
 		add("image: %s is a URL; fetch the image first and give its path", c.Image)
 	}
@@ -1471,6 +1507,28 @@ func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 			p.MountOptions, p.Subvol, p.Subvolumes = mountExtras(ch.Mountpoint, ch.MountOptions, ch.Subvolumes)
 			// A Create child is cut fresh in unallocated space (Safe install):
 			// Start is the MiB offset, Size the length, so End = Start + Size.
+			if ch.Resize != "" {
+				mib, err := offsetMiB(ch.Resize)
+				if err != nil || mib == 0 {
+					return nil, fmt.Errorf("config: %s/%s resize: %q is not a size", disk.Name, ch.Name, ch.Resize)
+				}
+				p.ResizeMiB = mib
+			}
+			// A Create child with no start goes in the disk's largest free
+			// region, found when the install gets there — after any resize
+			// has made the room. Its size, if given, is an upper bound.
+			if ch.Create && strings.TrimSpace(ch.Start) == "" {
+				p.Create, p.CreateInFree = true, true
+				if sz := strings.TrimSpace(ch.Size); sz != "" && sz != "0" && !strings.EqualFold(sz, "rest") {
+					mib, err := offsetMiB(sz)
+					if err != nil {
+						return nil, fmt.Errorf("config: %s/%s size: %w", disk.Name, ch.Name, err)
+					}
+					p.EndMiB = mib // the bound, until the region is known
+				}
+				pl.Parts = append(pl.Parts, p)
+				continue
+			}
 			if ch.Create {
 				startMiB, err := offsetMiB(ch.Start)
 				if err != nil {

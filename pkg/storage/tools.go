@@ -25,7 +25,7 @@ func (pl *Plan) RequiredTools() []string {
 			tools = append(tools, mk)
 		}
 	}
-	for _, c := range pl.WipeCommands() {
+	for _, c := range append(pl.ResizeCommands(), pl.WipeCommands()...) {
 		if !seen[c[0]] {
 			seen[c[0]] = true
 			tools = append(tools, c[0])

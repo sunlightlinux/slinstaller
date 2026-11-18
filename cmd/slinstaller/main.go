@@ -682,6 +682,17 @@ restart:
 				if d.Type != "part" {
 					return fmt.Errorf("reusePartitions: %s is a %s, not a partition", p.Device, d.Type)
 				}
+				if p.ResizeMiB == 0 {
+					continue
+				}
+				// A resize only ever shrinks, and only what is there to be
+				// shrunk — whatever the config says the partition holds.
+				switch {
+				case d.FsType != "ext2" && d.FsType != "ext3" && d.FsType != "ext4":
+					return fmt.Errorf("resize: %s holds %s; only ext2, ext3 and ext4 can be resized", p.Device, orDash(d.FsType))
+				case p.ResizeMiB<<20 >= d.Size:
+					return fmt.Errorf("resize: %s is %s; resizing it to %s would not shrink it", p.Device, humanSize(d.Size), humanSize(p.ResizeMiB<<20))
+				}
 			}
 		}
 
@@ -1030,10 +1041,23 @@ func confirm(in *bufio.Reader, plan *storage.Plan) bool {
 			if p.LV || p.Raid {
 				continue
 			}
+			if p.ResizeMiB > 0 {
+				fmt.Fprintf(os.Stderr, "  SHRINK %s to %s (its data is kept)\n", p.Device, humanSize(p.ResizeMiB<<20))
+			}
+			if p.Create {
+				fmt.Fprintf(os.Stderr, "  CREATE %s as %s -> %s (in unallocated space)\n", p.Device, p.Filesystem, orDash(p.Mountpoint))
+				continue
+			}
 			if p.Preserve {
 				fmt.Fprintf(os.Stderr, "  KEEP   %s -> %s (not formatted)\n", p.Device, orDash(p.Mountpoint))
 			} else {
 				fmt.Fprintf(os.Stderr, "  FORMAT %s as %s -> %s\n", p.Device, p.Filesystem, orDash(p.Mountpoint))
+			}
+		}
+		for _, p := range plan.Parts {
+			if p.ResizeMiB > 0 {
+				fmt.Fprintln(os.Stderr, "A SHRINK that is interrupted can lose what is on the partition - have a backup.")
+				break
 			}
 		}
 		fmt.Fprintf(os.Stderr, "This ERASES the partitions marked FORMAT. Type the disk path (%s) to confirm: ", disks[0])
