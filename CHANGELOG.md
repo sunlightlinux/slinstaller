@@ -4,38 +4,204 @@ All notable changes to slinstaller are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-slinstaller is in early bootstrap: there are no releases yet, and
-nothing below is a stability promise. See [STABILITY.md](STABILITY.md)
-for what will and will not be allowed to change once releases begin.
+slinstaller is in early bootstrap: nothing below is a stability promise.
+See [STABILITY.md](STABILITY.md) for what will and will not be allowed to
+change.
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-11-18
+
+Everything since 2.0.0. The code is that of 2.1.0, which was tagged before
+this section was written; 2.1.1 adds the section and nothing else.
+
+Every new config key is optional, and a config that uses none of them is a
+plain clr-installer config that installs as it did.
+
+What is verified, and how far: the unit suite runs on every push, and the
+`loop` job runs the partition and mount stages on real block devices — a
+plain install, `--discover`, shrinking ext4, ntfs and btrfs with the data
+intact, btrfs subvolumes, and a partitioned RAID 1 with an ESP on each
+disk. Everything past the mount — the bootloader, a first boot, `kexec`,
+bonds and VLANs on the installed system, an install from an image, a
+resumed install — is unit-tested only and still wants a VM.
+
+### Added
+
+**Naming and preparing the disk**
+
+- `match` on a disk names it by serial, WWN, model or a `/dev/disk/by-*`
+  path instead of its kernel name, which can change between boots. Exactly
+  one disk has to fit; none, or several, stops the install. A
+  `block-devices` alias may point at such a path too.
+- `wipe` on a disk erases all of it before partitioning (`zero`, `random`,
+  `discard`) where removing old signatures, the default, is not enough.
+- `partition-type`, `partition-uuid` and `partition-name` set a partition's
+  entry in the GPT.
+
+**Filesystems and mounts**
+
+- `mount-options` sets a filesystem's (or swap's) fstab options, and the
+  filesystem's own options (`compress=zstd`, `discard`) already apply while
+  the install writes to it.
+- `subvolumes` splits a btrfs filesystem into subvolumes, each with its own
+  mountpoint.
+- `uuid` gives a filesystem its UUID; `passno` and `freq` are its fstab
+  fsck pass and dump frequency.
+- `size: auto` on a swap partition or volume, and `swapFileSize: auto`, size
+  swap from the machine's memory, between 1 and 8 GiB.
+
+**Encryption, LVM and RAID**
+
+- `crypt-options` (e.g. `discard`) on an encrypted volume: into crypttab for
+  one opened after boot, onto the kernel command line for the root.
+- A `raid` entry may be `encrypted` (LUKS on the array), carry a
+  `volumeGroup` with logical volumes (LVM on the array), both, or
+  `partitions` — a partition table on the array itself.
+- Several `lvm` partitions, on one disk or several, may share a volume
+  group.
+- `spare: true` makes a RAID member a hot spare; `metadata` chooses the
+  array's superblock format.
+- `esp: true` makes a vfat partition on a second disk a spare EFI System
+  Partition: it is given a copy of the bootloader, the loader at the
+  removable-media path and a firmware entry of its own, so a machine whose
+  root is on RAID still boots with the first disk gone. It needs the main
+  ESP at `/boot/efi`.
+
+**Installing beside what is there**
+
+- `--discover <disk>` prints the layout already on a disk as a config that
+  keeps every partition, with the disk named by its serial. A partition
+  table whose partitions are named for their roles in clr-installer's
+  convention (`CLR_BOOT`, `CLR_ROOT`, `CLR_SWAP`, `CLR_MNT_/path`, `_F` to
+  format) comes out already saying what goes where.
+- `resize` shrinks an existing ext2/3/4, ntfs or btrfs partition in a
+  `reusePartitions` install, keeping its data: the filesystem first, then
+  the partition. xfs cannot be shrunk and is refused.
+- A `create: true` partition with no `start` is placed in the disk's largest
+  free region, found once any shrink is done.
+- Safe Installation in the full-screen installer offers to shrink a
+  partition when the disk has no unallocated space, and records the layout
+  for the install to carry out after its own confirmation.
+- A partition kept in a `reusePartitions` install is checked to hold what
+  the config says it holds, and the confirmation says what each partition
+  to be formatted holds now, and what is shrunk, kept and created.
+
+**The base system**
+
+- The Sunlight package mirror is layered ahead of the main repository by
+  default (`--extra-repo`), its signing key built into the installer and
+  seeded into the target, and it is recorded in the installed system's
+  `/etc/xbps.d` so the system updates from it too.
+- `image` (or `--image`) installs the base system by unpacking a tar or
+  squashfs root filesystem image instead of installing packages. As an
+  `https://` URL a tar image is unpacked as it downloads.
+- `disk-image` writes a whole-disk image over the single disk in
+  `targetMedia`, in place of an install; it too may be an `https://` URL.
+- `system-upgrade` brings the installed system up to date from its
+  repositories before the bootloader is set up.
+- `kernel-fallback` names a kernel to try when the configured one cannot be
+  installed; `kernel-remove` removes kernel packages once the base system
+  is in place.
+
+**Bootloader**
+
+- `bootloader`: `terminal: serial` shows the boot menu on the kernel's
+  serial console too; `removable` also installs the loader at the
+  removable-media path; `update-nvram: false` leaves the firmware's entries
+  alone; `probe-other-os` lists other systems in the menu.
+
+**Network**
+
+- `bond`, `vlan` and `bridge` interfaces and static `routes`. The links are
+  created at each boot of the installed system by a service the installer
+  writes; dhcpcd then addresses them.
+- A static interface set in the full-screen installer is put in force on the
+  live system too, so an install on a network without DHCP can reach its
+  repository.
+- `httpProxy` and `noProxy` complete `httpsProxy`.
+
+**The installed system**
+
+- `write-files` writes files into the installed system, kept inside the
+  target whatever links a path crosses.
+- A slinit target is given a random seed for its first boot
+  (`/var/lib/seedrng/seed.no-credit`): the first boot had no previous one to
+  have saved a seed, and is when the SSH host keys are generated.
+
+**Running an install**
+
+- `--system-check` runs the pre-install checks against a config and exits,
+  changing nothing and needing no root.
+- `--apply` takes a lock, so two installs cannot run at once.
+- A failed install leaves a diagnostics archive — the error, the log, the
+  disks, the config without its password hashes; `--diagnostics` names it.
+- `--resume` continues an install that failed installing the base system
+  without partitioning again, and `--resume-from <stage>` does so from any
+  later stage. The stages are safe to run a second time.
+- `--unmount` takes down what a `--through` run left mounted, and
+  `--in-target` runs a command inside it.
+- `stage-hooks` runs commands after a named stage, where `pre-install` and
+  `post-install` only bracketed the whole install.
+- `power-state` reboots, powers off or halts when the install ends, or with
+  `kexec` starts the installed kernel directly; `power-state-delay` waits
+  first.
+- `report-url` is sent the install's progress as JSON, stage by stage, and
+  its result.
+- The config may be given as an `https://` URL.
+- `install-type` (`server`, `desktop`) raises the smallest root a config may
+  ask for to 4 GB or 20 GB.
+
+**From clr-installer's command line**
+
+- `--log-level`: at 2 or 1 the terminal shows only the stages and the
+  result; the log file always has everything.
+- `--json-yaml` converts the JSON descriptor of clr-installer's predecessor
+  into a config.
+- `message-url` shows installer messages fetched from a server before the
+  install is confirmed and after it succeeds.
+
+### Changed
+
+- A dry run lists everything the install does to the disk: a whole-disk
+  wipe, a shrink, an array's own partition table and btrfs subvolumes are
+  shown with the rest.
+- The confirmation of an install into existing partitions marks a partition
+  cut into free space as `CREATE`, apart from the ones it formats.
+- Continuous integration checks more than the unit suite: that the tests
+  which run as root in a user namespace really ran, a coverage floor, a dry
+  run of every shipped config, and the storage stages on loop devices
+  (`tests/loop/run.sh`).
+
 ### Fixed
 
-- A storage alias for a disk whose name ends in a digit but is not nvme,
-  loop or mmcblk (md0, for one) named its partitions without the `p` the
-  kernel gives them.
-- The pre-install check asked for `mkfs.<filesystem>` even for partitions
-  it keeps, refusing an install beside a filesystem the live medium cannot
-  make.
-- The config's proxy now applies to the reachability check made before
-  the install. It used only the environment, so on a proxied network a config
-  that set the proxy was refused for having no network.
+- Safe Installation from the full-screen installer named its new root
+  partition `/dev/sdX3` where the config wants `sdX3`, so the install cut
+  the partition and then failed making a filesystem on `/dev//dev/sdX3`.
 - A device given as a path where a name is expected (`name: /dev/sda`) is
   refused by validation; it was planned as `/dev//dev/sda`.
-- Safe Installation from the full-screen installer named its new root
-  partition `/dev/sdX3` where the config wants `sdX3`, so the install cut the
-  partition and then failed making a filesystem on `/dev//dev/sdX3`. The name
-  is now the bare one, as for the shared ESP.
-- A failed install's error on the final screen is wrapped by character, so a
-  message with a non-ASCII path is no longer cut inside a character.
-- A failing `cryptsetup` is now reported by the step that failed
-  (`luks: luksFormat: …`, `luksOpen`, `luksAddKey`); the message used to name a
-  flag (`luks: --batch-mode: exit status 1`).
+- The config's proxy now applies to the reachability check made before the
+  install. It used only the environment, so on a proxied network a config
+  that set the proxy was refused for having no network.
+- The pre-install check asked for `mkfs.<filesystem>` even for partitions it
+  keeps, refusing an install beside a filesystem the live medium cannot
+  make.
 - Storage aliases: with two aliases where one name starts with the other
-  (`disk` and `disk2`), an unbraced `$disk2` could expand as `$disk` followed
-  by `2` — the wrong device — depending on map iteration order. Longer names
-  are now expanded first.
+  (`disk` and `disk2`), an unbraced `$disk2` could expand as `$disk`
+  followed by `2` — the wrong device. And an alias for a disk whose name
+  ends in a digit but is not nvme, loop or mmcblk (md0, for one) named its
+  partitions without the `p` the kernel gives them.
+- A failing `cryptsetup` is reported by the step that failed
+  (`luks: luksFormat: …`); the message used to name a flag.
+- A failed install's error on the final screen is wrapped by character, so
+  a message with a non-ASCII path is no longer cut inside a character.
+
+## [2.0.0] and earlier
+
+What was recorded up to 2.0.0, before the changelog was kept by release.
+
+### Fixed
+
 - The prompt flow no longer spins forever when its input ends (a closed pipe,
   a serial line that dropped) at a password or passphrase prompt: an ended
   input read as an empty answer, which the prompt refused and asked for again,
@@ -63,80 +229,6 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
-- A slinit target is given a random seed for its first boot
-  (`/var/lib/seedrng/seed.no-credit`), which had no previous boot to have
-  saved one - and is when the SSH host keys are generated.
-- `power-state: kexec` starts the installed system's kernel directly when
-  the install ends; `system-upgrade` brings the installed system up to date
-  from its repositories before the bootloader is set up.
-- `--resume-from <stage>` resumes an install at any stage after
-  partitioning; the stages are now safe to run a second time.
-- A `raid` entry may carry `partitions`: a partition table on the array.
-- `kernel-remove` removes kernel packages once the base system is in place.
-- `--json-yaml` converts the JSON descriptor of clr-installer's predecessor
-  into a config, and `message-url` shows installer messages fetched from a
-  server, both as clr-installer has them.
-- More that a layout can pin down: `crypt-options`, `partition-type`,
-  `partition-uuid`, `partition-name`, a filesystem `uuid`, fstab `passno` and
-  `freq`, a RAID array's `metadata`.
-- `stage-hooks` runs commands after a named stage; `install-type` (server,
-  desktop) raises the smallest root; `kernel-fallback` names a kernel to try
-  when the configured one cannot be installed; `power-state-delay` waits
-  before the machine reboots or powers off.
-- `image` and `disk-image` may be `https://` URLs, unpacked or written as
-  they download.
-- `resize` shrinks btrfs; Safe Installation in the full-screen installer
-  offers to shrink a partition when the disk has no unallocated space.
-- `--log-level` (clr-installer's levels): at 2 or 1 the terminal shows only
-  the stages and the result.
-- Storage for servers: `esp: true` makes a vfat partition on a second disk
-  a spare EFI System Partition, given a copy of the bootloader and a firmware
-  entry; a `raid` entry may be `encrypted` and/or carry a `volumeGroup` with
-  logical volumes; several `lvm` partitions may share a volume group.
-- Network: `bond`, `vlan` and `bridge` interfaces and static `routes`,
-  created at each boot of the installed system by a service of their own.
-- A static interface set in the full-screen installer is applied to the live
-  system too, so an install on a network without DHCP can reach its
-  repository.
-- `resize` also shrinks ntfs. A partition kept in a `reusePartitions`
-  install is checked to hold what the config says, and the confirmation says
-  what each partition to be formatted holds now.
-- `disk-image` writes a whole-disk image over the target disk in place of an
-  install.
-- `--resume` continues an install that failed installing the base system;
-  `--unmount` and `--in-target` work on what a `--through` run left mounted;
-  the config may be an `https://` URL; `report-url` is sent the install's
-  progress as JSON.
-- `--discover` reads the roles partitions are named for in the partition
-  table (`CLR_ROOT`, `CLR_BOOT`, `CLR_SWAP`, `CLR_MNT_/path`, `_F`).
-- `image` (or `--image`) installs the base system by unpacking a tar or
-  squashfs root filesystem image instead of installing packages.
-- `--discover <disk>` prints a config describing the layout already on a
-  disk, keeping every partition, as a starting point for an install into it.
-- `resize` shrinks an existing ext2/3/4 partition in a `reusePartitions`
-  install, keeping its data; a `create: true` partition with no `start` is
-  placed in the disk's largest free region.
-- Config extensions, all optional — a clr-installer config runs unchanged:
-  - `match` on a disk names it by serial, WWN, model or a `/dev/disk/by-*`
-    path instead of its kernel name; exactly one disk has to fit. A
-    `block-devices` alias may point at such a path too.
-  - `mount-options` sets a filesystem's (or swap's) fstab options, and
-    `subvolumes` splits a btrfs filesystem into subvolumes with their own
-    mountpoints.
-  - `bootloader`: `terminal: serial` (boot menu on the kernel's serial
-    console), `removable` (also install at the removable-media path),
-    `update-nvram: false`, `probe-other-os`.
-  - `write-files` writes files into the installed system; `power-state`
-    reboots, powers off or halts when the install ends; `httpProxy` and
-    `noProxy` complete `httpsProxy`.
-  - `size: auto` for swap (and `swapFileSize: auto`) sizes it from the
-    machine's memory; `spare: true` makes a RAID member a hot spare; `wipe`
-    on a disk erases all of it (`zero`, `random`, `discard`).
-- `--system-check` runs the pre-install checks against a config and exits,
-  changing nothing and needing no root.
-- A failed install leaves a diagnostics archive (error, log, disks, config
-  without password hashes); `--diagnostics` names the file.
-- `--apply` takes a lock, so two installs cannot run at once.
 - A saved config is now portable between Intel and AMD as well. When
   `kernel-profile` names any wizard profile, `--apply` rewrites the
   vendor-specific arguments for the CPU it runs on — `intel_iommu`↔`amd_iommu`,
