@@ -60,6 +60,62 @@ func MachineID(root string) error {
 	return nil
 }
 
+// Where slinit-seedrng keeps the random seed between boots, the name of a
+// seed whose entropy is mixed in but not counted, and how many bytes one
+// holds (what slinit-seedrng itself writes for the kernel's 256-bit pool).
+const (
+	seedDir  = "/var/lib/seedrng"
+	seedName = "seed.no-credit"
+	seedLen  = 32
+)
+
+// SeedRNG gives a slinit target a random seed for its first boot.
+//
+// slinit-seedrng carries entropy from one boot to the next: at shutdown it
+// saves a seed, at boot it feeds the saved one to the kernel and removes
+// it. The first boot has no previous one, so nothing is there — and the
+// first boot is when the machine generates its SSH host keys. The seed
+// written here comes from the live system's generator, which has been
+// running for the whole install.
+//
+// It is written as a seed that is not credited: its bytes are mixed into
+// the kernel's pool, which can only help, but are not counted as entropy.
+// An installed disk is sometimes copied before it is first booted — a VM
+// template, a batch of identical machines — and every copy would then
+// start from the same "random" seed; crediting it would have the kernel
+// believe otherwise.
+//
+// A seed already in the target (an image that brought one, an install being
+// resumed) is left alone. A target that does not boot slinit gets nothing.
+func SeedRNG(root string) error {
+	if !IsSlinitSystem(root) {
+		return nil
+	}
+	dir := filepath.Join(root, seedDir)
+	for _, name := range []string{"seed.credit", seedName} {
+		if st, err := os.Stat(filepath.Join(dir, name)); err == nil && st.Mode().IsRegular() && st.Size() > 0 {
+			return nil
+		}
+	}
+	seed := make([]byte, seedLen)
+	if _, err := rand.Read(seed); err != nil {
+		return fmt.Errorf("system: random seed: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("system: %w", err)
+	}
+	// MkdirAll leaves an existing directory's mode as it was.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("system: %w", err)
+	}
+	path := filepath.Join(dir, seedName)
+	_ = os.Remove(path) // an empty one, read-only
+	if err := os.WriteFile(path, seed, 0o400); err != nil {
+		return fmt.Errorf("system: write random seed: %w", err)
+	}
+	return nil
+}
+
 // Timezone points /etc/localtime at the zoneinfo file for tz, the way
 // every glibc system expects. An empty tz is a no-op. The link target is
 // an absolute path inside the installed system, so it resolves once the

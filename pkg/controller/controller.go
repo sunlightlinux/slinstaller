@@ -1189,6 +1189,11 @@ func (in *installer) firstBoot() error {
 	if err := system.MachineID(root); err != nil {
 		return err
 	}
+	// And a random seed for the first boot, which has no previous boot to
+	// have saved one.
+	if err := system.SeedRNG(root); err != nil {
+		return err
+	}
 	if err := system.Timezone(root, in.cfg.Timezone); err != nil {
 		return err
 	}

@@ -189,3 +189,21 @@ func TestSystemUpgrade(t *testing.T) {
 		t.Errorf("without system-upgrade: %v\n%s", err, r.flat())
 	}
 }
+
+// The first-boot stage leaves a random seed for the first boot.
+func TestFirstBootSeedsTheRNG(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	dir := mkTarget(t, in, "usr", "lib", "slinit.d")
+	os.WriteFile(filepath.Join(dir, "boot"), nil, 0o644)
+	if err := in.firstBoot(); err != nil {
+		t.Fatal(err)
+	}
+	if seed, err := os.ReadFile(filepath.Join(in.opts.Root, "var", "lib", "seedrng", "seed.no-credit")); err != nil || len(seed) != 32 {
+		t.Errorf("seed after first-boot: %v, %d bytes", err, len(seed))
+	}
+	in = stagedInstaller(t, twoPartConfig(), &r)
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "lib", "slinit.d"), "boot"), nil, 0o644)
+	blockDir(t, in, "var", "lib")
+	wantErr(t, in.firstBoot(), "system:")
+}

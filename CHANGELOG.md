@@ -63,6 +63,9 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- A slinit target is given a random seed for its first boot
+  (`/var/lib/seedrng/seed.no-credit`), which had no previous boot to have
+  saved one - and is when the SSH host keys are generated.
 - `power-state: kexec` starts the installed system's kernel directly when
   the install ends; `system-upgrade` brings the installed system up to date
   from its repositories before the bootloader is set up.
