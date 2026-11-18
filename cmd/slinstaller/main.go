@@ -242,6 +242,29 @@ restart:
 		return err
 	}
 
+	// Disks named by serial, WWN, model or a stable path become the kernel
+	// names they have on this machine, before anything is checked or shown.
+	if cfg.NeedsDisks() {
+		devs, err := blockdev.List()
+		if err != nil {
+			return fmt.Errorf("cannot list the disks to resolve the config's disk matches: %w", err)
+		}
+		var disks []config.DiskInfo
+		for _, d := range devs {
+			if d.Type == "disk" || d.Type == "loop" {
+				disks = append(disks, config.DiskInfo{Name: d.Name, Path: d.Path, Serial: d.Serial, WWN: d.WWN, Model: d.Model})
+			}
+		}
+		if err := cfg.ResolveDisks(disks); err != nil {
+			return err
+		}
+		for _, m := range cfg.TargetMedia {
+			if m != nil && m.Match != nil {
+				fmt.Fprintf(os.Stderr, "disk with %s is /dev/%s\n", m.Match, m.Name)
+			}
+		}
+	}
+
 	// --offline is the CLI equivalent of the config's offline: install only
 	// from the local repository, never the network.
 	if offline {

@@ -410,3 +410,34 @@ func TestFullScreenOnlyOnATerminalWithASize(t *testing.T) {
 		}
 	}
 }
+
+// A config that names its disk by serial is planned for whatever that disk
+// is called on this machine, and refused when the disk is not here.
+func TestDryRunResolvesADiskBySerial(t *testing.T) {
+	dir := t.TempDir()
+	bin := onlyTools(t, dir)
+	setListing(t, bin, `{"name":"sda","path":"/dev/sda","size":64000000000,"type":"disk","serial":"OTHER"},
+		{"name":"nvme0n1","path":"/dev/nvme0n1","size":64000000000,"type":"disk","serial":"NV42","wwn":"eui.0025"}`)
+	cfg := plainConfig()
+	cfg.TargetMedia[0].Match = &config.DiskMatch{Serial: "NV42"}
+	path := writeConfig(t, dir, cfg)
+
+	out, errOut, err := runWith(t, "", path)
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if !strings.Contains(errOut, "disk with serial NV42 is /dev/nvme0n1") {
+		t.Errorf("the resolved disk is not shown:\n%s", errOut)
+	}
+	if !strings.Contains(out, "/dev/nvme0n1 mklabel gpt") || !strings.Contains(out, "/dev/nvme0n1p3") || strings.Contains(out, testDisk) {
+		t.Errorf("the plan is not for the matched disk:\n%s", out)
+	}
+
+	cfg.TargetMedia[0].Match.Serial = "NOT-HERE"
+	_, _, err = runWith(t, "", writeConfig(t, dir, cfg))
+	wantRunErr(t, "absent serial", err, "no disk on this machine matches serial NOT-HERE")
+
+	os.Remove(filepath.Join(bin, "lsblk.json"))
+	_, _, err = runWith(t, "", path)
+	wantRunErr(t, "no listing", err, "cannot list the disks")
+}

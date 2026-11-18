@@ -23,6 +23,8 @@ type Device struct {
 	Path     string // /dev/sda
 	Type     string // disk, part, loop, rom, ...
 	Model    string
+	Serial   string
+	WWN      string
 	Size     uint64 // bytes
 	Children []Device
 
@@ -36,7 +38,7 @@ type Device struct {
 // List runs lsblk and returns the top-level block devices, each with its
 // partitions as children.
 func List() ([]Device, error) {
-	out, err := exec.Command("lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,TYPE,MODEL,MOUNTPOINT,FSTYPE,LABEL").Output()
+	out, err := exec.Command("lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,TYPE,MODEL,SERIAL,WWN,MOUNTPOINT,FSTYPE,LABEL").Output()
 	if err != nil {
 		return nil, fmt.Errorf("blockdev: lsblk: %w", err)
 	}
@@ -88,6 +90,8 @@ func convert(in []jsonDev) []Device {
 			Path:     j.Path,
 			Type:     j.Type,
 			Model:    j.Model,
+			Serial:   j.Serial,
+			WWN:      j.WWN,
 			Size:     uint64(j.Size),
 			Children: convert(j.Children),
 
@@ -104,6 +108,8 @@ type jsonDev struct {
 	Path     string    `json:"path"`
 	Type     string    `json:"type"`
 	Model    string    `json:"model"`
+	Serial   string    `json:"serial"`
+	WWN      string    `json:"wwn"`
 	Size     flexUint  `json:"size"`
 	Children []jsonDev `json:"children"`
 

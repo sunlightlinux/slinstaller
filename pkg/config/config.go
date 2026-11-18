@@ -215,6 +215,111 @@ type Media struct {
 	// ones. Start is the MiB offset of the free region; Size is its length.
 	Create bool   `yaml:"create,omitempty"`
 	Start  string `yaml:"start,omitempty"`
+
+	// Match, on a disk, names it by what does not change between boots —
+	// its serial number, WWN, model or a /dev/disk/by-* path — instead of
+	// by its kernel name, which can. ResolveDisks turns it into the name.
+	Match *DiskMatch `yaml:"match,omitempty"`
+}
+
+// DiskMatch identifies a disk by its hardware. Every field given has to
+// agree, and exactly one disk has to fit.
+type DiskMatch struct {
+	Serial string `yaml:"serial,omitempty"`
+	WWN    string `yaml:"wwn,omitempty"`
+	Model  string `yaml:"model,omitempty"`
+	// Path is a device path, usually a /dev/disk/by-id or by-path link.
+	Path string `yaml:"path,omitempty"`
+}
+
+func (m *DiskMatch) String() string {
+	var parts []string
+	for _, f := range [][2]string{{"serial", m.Serial}, {"wwn", m.WWN}, {"model", m.Model}, {"path", m.Path}} {
+		if f[1] != "" {
+			parts = append(parts, f[0]+" "+f[1])
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// DiskInfo is what ResolveDisks needs to know about a disk on this machine.
+type DiskInfo struct {
+	Name, Path, Serial, WWN, Model string
+}
+
+// NeedsDisks reports whether any disk is named by a match, so the machine's
+// disks have to be listed before the config can be planned.
+func (c *Config) NeedsDisks() bool {
+	for _, m := range c.TargetMedia {
+		if m != nil && m.Match != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveDisks gives every disk that carries a match the kernel name of the
+// one disk that fits it. A match that fits no disk, or more than one, is an
+// error: the install must not guess which disk to erase. The disk's
+// partitions follow it — a child named after the disk's old name keeps its
+// number (sda2 becomes nvme0n1p2), any other is named by its position.
+func (c *Config) ResolveDisks(disks []DiskInfo) error {
+	taken := map[string]string{}
+	for _, m := range c.TargetMedia {
+		if m == nil || m.Match == nil {
+			continue
+		}
+		mt := m.Match
+		if mt.String() == "" {
+			return fmt.Errorf("config: disk %q has an empty match", m.Name)
+		}
+		path := ""
+		if mt.Path != "" {
+			p, err := filepath.EvalSymlinks(mt.Path)
+			if err != nil {
+				return fmt.Errorf("config: disk match path: %w", err)
+			}
+			path = p
+		}
+		var found []DiskInfo
+		for _, d := range disks {
+			if (mt.Serial == "" || strings.TrimSpace(d.Serial) == mt.Serial) &&
+				(mt.WWN == "" || strings.EqualFold(strings.TrimSpace(d.WWN), mt.WWN)) &&
+				(mt.Model == "" || strings.TrimSpace(d.Model) == mt.Model) &&
+				(path == "" || d.Path == path) {
+				found = append(found, d)
+			}
+		}
+		switch len(found) {
+		case 0:
+			return fmt.Errorf("config: no disk on this machine matches %s", mt)
+		case 1:
+		default:
+			var names []string
+			for _, d := range found {
+				names = append(names, d.Path)
+			}
+			return fmt.Errorf("config: %s matches several disks (%s); add a serial or a path to name one", mt, strings.Join(names, ", "))
+		}
+		name := found[0].Name
+		if other, dup := taken[name]; dup {
+			return fmt.Errorf("config: %s and %s both match /dev/%s", other, mt, name)
+		}
+		taken[name] = mt.String()
+		old := m.Name
+		m.Name = name
+		for i, ch := range m.Children {
+			if ch == nil {
+				continue
+			}
+			n := i + 1
+			if old != "" && strings.HasPrefix(ch.Name, old) {
+				n = partNumber(strings.TrimPrefix(ch.Name, old), n)
+			}
+			ch.Name = strings.TrimPrefix(storage.PartitionName("/dev/"+name, n), "/dev/")
+		}
+	}
+	return nil
 }
 
 // RaidArray is one software RAID array: a name (its device is /dev/md/<name>,
@@ -394,9 +499,14 @@ func (c *Config) expandAliases() {
 		if a == nil || a.Name == "" || a.File == "" {
 			continue
 		}
-		base := filepath.Base(a.File)
+		// A /dev/disk/by-id or by-path link names the disk it points at.
+		file := a.File
+		if real, err := filepath.EvalSymlinks(file); err == nil {
+			file = real
+		}
+		base := filepath.Base(file)
 		diskVars[a.Name] = base
-		partVars[a.Name] = base + aliasPartSuffix(a.File)
+		partVars[a.Name] = base + aliasPartSuffix(file)
 	}
 	if len(diskVars) == 0 {
 		return
@@ -530,6 +640,29 @@ func (c *Config) Validate() error {
 	for _, al := range c.BlockDevices {
 		if al != nil && al.File != "" && !strings.HasPrefix(al.File, "/dev/") {
 			add("block-devices: %s points at %s, an image file; installing into an image is not supported (name a device such as /dev/sda)", al.Name, al.File)
+		}
+	}
+
+	// Disks and partitions go by their bare kernel name (sda, nvme0n1p2); a
+	// path here would be planned as /dev//dev/sda. A disk named by a match
+	// has to have been resolved (ResolveDisks) before it can be checked.
+	for _, m := range c.TargetMedia {
+		if m == nil {
+			continue
+		}
+		if m.Match != nil && m.Type != "" && m.Type != "disk" {
+			add("%s: match names a disk, not a %s", m.Name, m.Type)
+		}
+		for _, x := range append([]*Media{m}, m.Children...) {
+			if x == nil {
+				continue
+			}
+			if strings.Contains(x.Name, "/") {
+				add("%s: give the device's name (e.g. sda), not a path; to name a disk by path use match: {path: ...}", x.Name)
+			}
+			if x != m && x.Match != nil {
+				add("%s: match is for a disk; a partition follows its disk", x.Name)
+			}
 		}
 	}
 
