@@ -235,6 +235,20 @@ func applyChild(t *testing.T) {
 
 	applyDiskImage(t, confirmed)
 
+	// --log-level 2: the terminal keeps the stages; the commands and what
+	// they print go to the log file alone, which still has everything.
+	e = newApplyEnv(t)
+	errOut, err = e.run(confirmed, plainConfig(), "--through", "partition", "--log-level", "2")
+	if err != nil {
+		t.Errorf("quiet install: %v", err)
+	}
+	if !strings.Contains(errOut, "==> partition") || strings.Contains(errOut, "mklabel") {
+		t.Errorf("quiet terminal output:\n%s", errOut)
+	}
+	if log, _ := os.ReadFile(filepath.Join(e.base, "install.log")); !strings.Contains(string(log), "mklabel gpt") || !strings.Contains(string(log), "==> partition") {
+		t.Errorf("the log file of a quiet install:\n%s", log)
+	}
+
 	// --resume: no confirmation is asked (nothing is erased), nothing is
 	// partitioned or formatted, and the install goes straight to the mount.
 	e = newApplyEnv(t)

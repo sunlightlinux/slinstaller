@@ -152,6 +152,10 @@ func run(args []string) error {
 	fs.BoolVar(&allowInsecure, "allow-insecure-http", false, "allow a plain http:// repository (the config's allowInsecureHTTP)")
 	var swapFileSize string
 	fs.StringVar(&swapFileSize, "swap-file-size", "", "create a swap file of this size, e.g. 2G (the config's swapFileSize)")
+	var logLevel int
+	fs.IntVar(&logLevel, "log-level", 3,
+		"how much of the install is shown on the terminal: 4 (debug) and 3 (info) show every command and its output, 2 (warning) and 1 (error) only the stages and the result; the log file always has everything (clr-installer's levels)")
+	fs.IntVar(&logLevel, "l", 3, "short for --log-level")
 	var resume bool
 	fs.BoolVar(&resume, "resume", false,
 		"with --apply, continue an install that failed while installing the base system: nothing is partitioned or formatted again (same boot of the live system only)")
@@ -534,12 +538,20 @@ restart:
 	if logPath == "" && !fullscreen && !systemCheck {
 		logPath = tui.InstallLogPath()
 	}
+	var quiet io.Writer // set when the commands' output goes to the file alone
 	if logPath != "" {
 		lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 		switch {
 		case err == nil:
 			defer lf.Close()
 			logOut = io.MultiWriter(os.Stderr, tui.LogWriter(lf))
+			if logLevel <= 2 {
+				// Quiet: the commands and their output go to the file
+				// alone; the terminal keeps the stage headers.
+				quiet = tui.LogWriter(lf)
+				runner = storage.StreamRunner(quiet)
+				break
+			}
 			runner = storage.StreamRunner(logOut)
 		case logFile != "":
 			return fmt.Errorf("--log: %w", err)
@@ -581,6 +593,9 @@ restart:
 		if abs, err := filepath.Abs(rest[0]); err == nil {
 			opts.ConfigDir = filepath.Dir(abs)
 		}
+	}
+	if quiet != nil {
+		opts.Output = quiet
 	}
 	report := newReporter(cfg.ReportURL, cfg.Hostname)
 	if report != nil {
