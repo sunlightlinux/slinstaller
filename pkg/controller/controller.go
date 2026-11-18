@@ -73,6 +73,15 @@ type Options struct {
 	// whole install; a stage name stops after it, for a staged VM run.
 	Through string
 
+	// Resume continues an install that failed while installing the base
+	// system — a mirror that went away, a network that dropped — without
+	// partitioning again: the pre-install hooks and the partition stage are
+	// skipped, what was made is mounted once more, and the install carries
+	// on from base-install. It is for the same boot of the live system, in
+	// which the encrypted volumes, arrays and volume groups made the first
+	// time are still open.
+	Resume bool
+
 	// Log, if set, receives a line announcing each stage as it starts, so
 	// an operator can see progress. nil is silent.
 	Log io.Writer
@@ -149,6 +158,14 @@ type stage struct {
 
 // stages is the whole install, in order.
 func (in *installer) stages() []stage {
+	all := in.allStages()
+	if in.opts.Resume {
+		return all[2:] // from mount: nothing is partitioned or formatted again
+	}
+	return all
+}
+
+func (in *installer) allStages() []stage {
 	return []stage{
 		{"pre-install", in.preHooks},
 		{"partition", in.partition},
@@ -376,8 +393,11 @@ func (in *installer) settle() {
 }
 
 func (in *installer) mount() error {
-	if err := storage.CreateSubvolumes(in.plan, in.opts.Runner); err != nil {
-		return err
+	// Resuming, the subvolumes are there from the first attempt.
+	if !in.opts.Resume {
+		if err := storage.CreateSubvolumes(in.plan, in.opts.Runner); err != nil {
+			return err
+		}
 	}
 	return in.mnt.MountAll(in.plan)
 }

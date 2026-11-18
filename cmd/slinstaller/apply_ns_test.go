@@ -233,6 +233,23 @@ func applyChild(t *testing.T) {
 		t.Errorf("an aborted install was reported: %s", got)
 	}
 
+	// --resume: no confirmation is asked (nothing is erased), nothing is
+	// partitioned or formatted, and the install goes straight to the mount.
+	e = newApplyEnv(t)
+	errOut, err = e.run("", plainConfig(), "--resume")
+	wantRunErr(t, "resume", err, "controller: mount")
+	if !strings.Contains(errOut, "Resuming on "+testDisk+": nothing is partitioned or formatted") {
+		t.Errorf("resume is not announced:\n%s", errOut)
+	}
+	for _, tool := range []string{"parted", "wipefs", "mkfs.ext4", "mkfs.vfat", "mkswap"} {
+		if got := e.ran(tool); got != "" {
+			t.Errorf("a resumed install ran %s:\n%s", tool, got)
+		}
+	}
+	e = newApplyEnv(t)
+	_, err = e.run("", plainConfig(), "--resume", "--through", "partition")
+	e.refused("resume with --through", err, "--resume continues a full install")
+
 	// --in-target wants a target that is really mounted.
 	e = newApplyEnv(t)
 	_, _, err = runWith(t, "", "--in-target", "true", "--root", filepath.Join(e.base, "empty"))

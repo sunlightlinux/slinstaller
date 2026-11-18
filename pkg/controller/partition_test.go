@@ -372,3 +372,38 @@ echo "2:513MiB:41473MiB:40960MiB:ext4::;"; echo "1:41473MiB:102400MiB:60927MiB:f
 		t.Errorf("no room: %v\n%s", err, r.flat())
 	}
 }
+
+// Resuming never partitions, formats or runs the pre-install hooks again: it
+// starts at the mount.
+func TestResumeSkipsPartitioning(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.PreInstall = []*config.Hook{{Cmd: "echo should-not-run"}}
+	var r recorder
+	var seen []string
+	err := Install(cfg, Options{Resume: true, Through: "mount", Runner: r.run, Devices: noDevices, Root: t.TempDir(),
+		Progress: func(done, total int, stage string) { seen = append(seen, stage) }})
+	// The mount itself fails here (there is no such disk); what matters is
+	// what did not run before it.
+	if err == nil || !strings.Contains(err.Error(), "controller: mount") {
+		t.Fatalf("resume: %v", err)
+	}
+	if len(r.cmds) != 0 {
+		t.Errorf("a resumed install ran commands before mounting:\n%s", r.flat())
+	}
+	if strings.Join(seen, ",") != "mount" {
+		t.Errorf("stages = %v", seen)
+	}
+	// The stages it would go on to are the rest of the install, in order.
+	in := &installer{opts: Options{Resume: true}}
+	var names []string
+	for _, s := range in.stages() {
+		names = append(names, s.name)
+	}
+	if got := strings.Join(names, ","); !strings.HasPrefix(got, "mount,meta-fs,base-install,fstab") || strings.Contains(got, "partition") {
+		t.Errorf("resumed stages = %s", got)
+	}
+	// The stage names a front-end shows are still the whole install's.
+	if all := StageNames(); all[0] != "pre-install" || all[1] != "partition" {
+		t.Errorf("StageNames = %v", all)
+	}
+}

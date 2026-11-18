@@ -152,6 +152,9 @@ func run(args []string) error {
 	fs.BoolVar(&allowInsecure, "allow-insecure-http", false, "allow a plain http:// repository (the config's allowInsecureHTTP)")
 	var swapFileSize string
 	fs.StringVar(&swapFileSize, "swap-file-size", "", "create a swap file of this size, e.g. 2G (the config's swapFileSize)")
+	var resume bool
+	fs.BoolVar(&resume, "resume", false,
+		"with --apply, continue an install that failed while installing the base system: nothing is partitioned or formatted again (same boot of the live system only)")
 	var unmount bool
 	fs.BoolVar(&unmount, "unmount", false,
 		"unmount everything under --root - what a staged install (--through) leaves mounted - and exit")
@@ -245,6 +248,9 @@ func run(args []string) error {
 		}
 		defer os.RemoveAll(filepath.Dir(path))
 		rest[0] = path
+	}
+	if resume && (!apply || len(rest) == 0 || through != "") {
+		return fmt.Errorf("--resume continues a full install from a config file: use it with --apply and the config, without --through")
 	}
 	if systemCheck && len(rest) == 0 {
 		return fmt.Errorf("--system-check needs the config to check the machine against")
@@ -553,6 +559,7 @@ restart:
 		Runner: runner,
 		Log:    logOut,
 		Output: logOut,
+		Resume: resume,
 
 		LogFile: logPath,
 	}
@@ -837,7 +844,12 @@ restart:
 		return nil
 	}
 
-	if !confirm(stdin, plan) {
+	// A resumed install erases nothing: it mounts what the first attempt
+	// made and carries on, so there is nothing to confirm by retyping.
+	if resume {
+		fmt.Fprintf(os.Stderr, "\nResuming on %s: nothing is partitioned or formatted; the base system is installed again.\n",
+			strings.Join(plan.DiskList(), ", "))
+	} else if !confirm(stdin, plan) {
 		return fmt.Errorf("aborted")
 	}
 	err = controller.Install(cfg, opts)
