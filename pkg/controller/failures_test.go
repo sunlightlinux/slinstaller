@@ -181,7 +181,7 @@ func TestKeyfileAndCrypttabFailures(t *testing.T) {
 	wantErr(t, in.crypttab(), "mkdir")
 
 	in, _ = cryptInstaller(t, cryptConfig("/boot", home), &r)
-	blockFile(t, in, keyfilePath)
+	blockWithDir(t, in, keyfilePath) // a stale file or link at the name is replaced
 	wantErr(t, in.crypttab(), "write keyfile")
 
 	in, _ = cryptInstaller(t, cryptConfig("/boot", home), &r)

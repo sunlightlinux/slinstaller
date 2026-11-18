@@ -246,11 +246,15 @@ func Keymap(root, code string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("system: %w", err)
 	}
+	line := fmt.Sprintf("\n# console keymap set by slinstaller\nKEYMAP=%q\n", code)
+	if has(path, line) { // written by an earlier attempt at this stage
+		return nil
+	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("system: open rc.conf: %w", err)
 	}
-	_, werr := fmt.Fprintf(f, "\n# console keymap set by slinstaller\nKEYMAP=%q\n", code)
+	_, werr := f.WriteString(line)
 	cerr := f.Close()
 	if werr != nil {
 		return fmt.Errorf("system: write rc.conf: %w", werr)
@@ -315,6 +319,9 @@ func WheelSudo(root string) error {
 		return fmt.Errorf("system: %w", err)
 	}
 	path := filepath.Join(dir, "wheel")
+	// Read-only once written: taken away first, so the stage can be run
+	// again without depending on who runs it.
+	_ = os.Remove(path)
 	if err := os.WriteFile(path, []byte("%wheel ALL=(ALL:ALL) ALL\n"), 0o440); err != nil {
 		return fmt.Errorf("system: write sudoers wheel: %w", err)
 	}
@@ -403,6 +410,9 @@ func NetLinks(root, script string) error {
 	}
 	if !IsSlinitSystem(root) {
 		rc := filepath.Join(root, "etc", "rc.local")
+		if has(rc, netLinksScript+"\n") {
+			return nil
+		}
 		f, err := os.OpenFile(rc, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o755)
 		if err != nil {
 			return fmt.Errorf("system: %w", err)
@@ -553,4 +563,15 @@ func (u User) WriteSSHKeys(root string) ([]string, error) {
 		return nil, fmt.Errorf("system: write authorized_keys: %w", err)
 	}
 	return []string{"chroot", root, "chown", "-R", u.Login + ":" + u.Login, "/home/" + u.Login + "/.ssh"}, nil
+}
+
+// has reports whether the file at path already contains text.
+func has(path, text string) bool {
+	// Only an ordinary file is read: a path that leads to a device has no
+	// end to read to.
+	if fi, err := os.Stat(path); err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	return err == nil && strings.Contains(string(data), text)
 }

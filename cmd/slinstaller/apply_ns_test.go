@@ -272,7 +272,7 @@ func applyChild(t *testing.T) {
 	e = newApplyEnv(t)
 	errOut, err = e.run("", plainConfig(), "--resume")
 	wantRunErr(t, "resume", err, "controller: mount")
-	if !strings.Contains(errOut, "Resuming on "+testDisk+": nothing is partitioned or formatted") {
+	if !strings.Contains(errOut, "Resuming on "+testDisk+" from base-install: nothing is partitioned or formatted") {
 		t.Errorf("resume is not announced:\n%s", errOut)
 	}
 	for _, tool := range []string{"parted", "wipefs", "mkfs.ext4", "mkfs.vfat", "mkswap"} {
@@ -280,6 +280,16 @@ func applyChild(t *testing.T) {
 			t.Errorf("a resumed install ran %s:\n%s", tool, got)
 		}
 	}
+	// From a later stage, and not from one that cannot be resumed at.
+	e = newApplyEnv(t)
+	errOut, err = e.run("", plainConfig(), "--resume-from", "bootloader")
+	wantRunErr(t, "resume from bootloader", err, "controller: mount")
+	if !strings.Contains(errOut, "from bootloader") || e.ran("parted") != "" {
+		t.Errorf("resume from bootloader:\n%s", errOut)
+	}
+	e = newApplyEnv(t)
+	_, err = e.run("", plainConfig(), "--resume-from", "partition")
+	e.refused("resume from partition", err, "cannot be resumed at \"partition\"")
 	e = newApplyEnv(t)
 	_, err = e.run("", plainConfig(), "--resume", "--through", "partition")
 	e.refused("resume with --through", err, "--resume continues a full install")

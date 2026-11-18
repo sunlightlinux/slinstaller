@@ -87,7 +87,8 @@ func TestFirstBootWritersReportFailure(t *testing.T) {
 			func(r string) error { _, err := Locale(r, "en_US.UTF-8"); return err }, "read libc-locales"},
 		{"sudoers: dir", func(t *testing.T, r string) { blockDir(t, r, "etc", "sudoers.d") },
 			func(r string) error { return WheelSudo(r) }, "system:"},
-		{"sudoers: file", func(t *testing.T, r string) { blockFile(t, r, "etc", "sudoers.d", "wheel") },
+		// (An occupied directory: a stale file or link at the name is replaced.)
+		{"sudoers: file", func(t *testing.T, r string) { blockLink(t, r, "etc", "sudoers.d", "wheel") },
 			func(r string) error { return WheelSudo(r) }, "write sudoers wheel"},
 		{"autoupdate: dir", func(t *testing.T, r string) { blockDir(t, r, "etc", "slinit.d") },
 			func(r string) error { return AutoUpdate(r, true) }, "system:"},

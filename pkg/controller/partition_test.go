@@ -380,7 +380,7 @@ func TestResumeSkipsPartitioning(t *testing.T) {
 	cfg.PreInstall = []*config.Hook{{Cmd: "echo should-not-run"}}
 	var r recorder
 	var seen []string
-	err := Install(cfg, Options{Resume: true, Through: "mount", Runner: r.run, Devices: noDevices, Root: t.TempDir(),
+	err := Install(cfg, Options{ResumeFrom: "base-install", Through: "mount", Runner: r.run, Devices: noDevices, Root: t.TempDir(),
 		Progress: func(done, total int, stage string) { seen = append(seen, stage) }})
 	// The mount itself fails here (there is no such disk); what matters is
 	// what did not run before it.
@@ -394,7 +394,7 @@ func TestResumeSkipsPartitioning(t *testing.T) {
 		t.Errorf("stages = %v", seen)
 	}
 	// The stages it would go on to are the rest of the install, in order.
-	in := &installer{opts: Options{Resume: true}}
+	in := &installer{opts: Options{ResumeFrom: "base-install"}}
 	var names []string
 	for _, s := range in.stages() {
 		names = append(names, s.name)

@@ -73,14 +73,14 @@ type Options struct {
 	// whole install; a stage name stops after it, for a staged VM run.
 	Through string
 
-	// Resume continues an install that failed while installing the base
-	// system — a mirror that went away, a network that dropped — without
-	// partitioning again: the pre-install hooks and the partition stage are
-	// skipped, what was made is mounted once more, and the install carries
-	// on from base-install. It is for the same boot of the live system, in
-	// which the encrypted volumes, arrays and volume groups made the first
-	// time are still open.
-	Resume bool
+	// ResumeFrom continues an install that failed, without partitioning
+	// again: the pre-install hooks and the partition stage are skipped, what
+	// was made is mounted once more, and the install carries on from the
+	// named stage (base-install or any later one), which is run again from
+	// its start. It is for the same boot of the live system, in which the
+	// encrypted volumes, arrays and volume groups made the first time are
+	// still open. Empty means a normal install.
+	ResumeFrom string
 
 	// Log, if set, receives a line announcing each stage as it starts, so
 	// an operator can see progress. nil is silent.
@@ -126,6 +126,17 @@ func Install(cfg *config.Config, opts Options) error {
 		opts.Runner = storage.DefaultRunner
 	}
 
+	if opts.ResumeFrom != "" {
+		ok := false
+		for _, s := range ResumableStages() {
+			ok = ok || s == opts.ResumeFrom
+		}
+		if !ok {
+			return fmt.Errorf("controller: an install cannot be resumed at %q; it can at: %s",
+				opts.ResumeFrom, strings.Join(ResumableStages(), ", "))
+		}
+	}
+
 	plan, err := cfg.Plan()
 	if err != nil {
 		return err
@@ -159,11 +170,25 @@ type stage struct {
 // stages is the whole install, in order.
 func (in *installer) stages() []stage {
 	all := in.allStages()
-	if in.opts.Resume {
-		return all[2:] // from mount: nothing is partitioned or formatted again
+	if in.opts.ResumeFrom == "" {
+		return all
 	}
-	return all
+	// Nothing is partitioned or formatted again: the target is mounted as it
+	// was left, and the install goes on from the stage asked for.
+	for i := resumeFirst; i < len(all); i++ {
+		if all[i].name == in.opts.ResumeFrom {
+			return append(all[2:resumeFirst:resumeFirst], all[i:]...)
+		}
+	}
+	return all[2:] // a name Install refused; kept safe all the same
 }
+
+// resumeFirst is the index of the first stage an install can be resumed
+// at: base-install. The two before it (mount, meta-fs) are always run again.
+const resumeFirst = 4
+
+// ResumableStages are the stages --resume-from accepts, in order.
+func ResumableStages() []string { return StageNames()[resumeFirst:] }
 
 func (in *installer) allStages() []stage {
 	return []stage{
@@ -187,7 +212,7 @@ func (in *installer) allStages() []stage {
 func StageNames() []string {
 	var in installer
 	var names []string
-	for _, s := range in.stages() {
+	for _, s := range in.allStages() {
 		names = append(names, s.name)
 	}
 	return names
@@ -399,12 +424,51 @@ func (in *installer) settle() {
 
 func (in *installer) mount() error {
 	// Resuming, the subvolumes are there from the first attempt.
-	if !in.opts.Resume {
+	if in.opts.ResumeFrom == "" {
 		if err := storage.CreateSubvolumes(in.plan, in.opts.Runner); err != nil {
 			return err
 		}
 	}
-	return in.mnt.MountAll(in.plan)
+	if err := in.mnt.MountAll(in.plan); err != nil {
+		return err
+	}
+	// Resuming past the stage that made it, the keyfile the first attempt
+	// put in the target is the one the bootloader stage has to point at.
+	if in.opts.ResumeFrom != "" && exists(filepath.Join(in.opts.Root, keyfilePath)) {
+		in.keyfile = keyfilePath
+	}
+	return nil
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// hasAccount reports whether the target's passwd already has login.
+func hasAccount(root, login string) bool {
+	data, err := os.ReadFile(filepath.Join(root, "etc", "passwd"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, login+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// holds reports whether the file at path already contains text — what a
+// stage run a second time, on resuming, has already written there.
+func holds(path, text string) bool {
+	// Only an ordinary file is read: a path that leads to a device has no
+	// end to read to.
+	if fi, err := os.Stat(path); err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	return err == nil && text != "" && strings.Contains(string(data), text)
 }
 
 func (in *installer) mountMeta() error {
@@ -692,21 +756,25 @@ const keyfilePath = "/etc/cryptkeys/slinstaller.key"
 // GRUB-locked storage; on an unencrypted /boot it must not ride in the
 // initramfs, so it stays on the root for the post-boot runit service alone.
 func (in *installer) setupKeyfile(enc []storage.Partition) error {
-	key := make([]byte, 2048)
-	if _, err := rand.Read(key); err != nil {
-		return fmt.Errorf("generate keyfile: %w", err)
-	}
 	full := filepath.Join(in.opts.Root, keyfilePath)
-	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(full), err)
-	}
-	if err := os.WriteFile(full, key, 0o400); err != nil {
-		return fmt.Errorf("write keyfile: %w", err)
-	}
-
-	for _, p := range enc {
-		if err := luks.AddKey(p.Device, full, in.opts.Passphrase, in.output()); err != nil {
-			return err
+	// Resuming, the first attempt's keyfile is already in the target and in
+	// the volumes' key slots: a second one would only use up another slot.
+	if in.opts.ResumeFrom == "" || !exists(full) {
+		key := make([]byte, 2048)
+		if _, err := rand.Read(key); err != nil {
+			return fmt.Errorf("generate keyfile: %w", err)
+		}
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			return fmt.Errorf("mkdir %s: %w", filepath.Dir(full), err)
+		}
+		_ = os.Remove(full) // read-only once written
+		if err := os.WriteFile(full, key, 0o400); err != nil {
+			return fmt.Errorf("write keyfile: %w", err)
+		}
+		for _, p := range enc {
+			if err := luks.AddKey(p.Device, full, in.opts.Passphrase, in.output()); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -740,6 +808,9 @@ func (in *installer) swapfile() error {
 	}
 
 	path := filepath.Join(in.opts.Root, "etc", "fstab")
+	if holds(path, storage.SwapFileFstab) {
+		return nil
+	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
@@ -886,8 +957,7 @@ func (in *installer) bootloader() error {
 	if in.bootOnEncrypted() {
 		grubDefault.WriteString("\n# /boot is encrypted — let GRUB unlock it\nGRUB_ENABLE_CRYPTODISK=y\n")
 	}
-	if grubDefault.Len() > 0 {
-		path := filepath.Join(in.opts.Root, "etc", "default", "grub")
+	if path := filepath.Join(in.opts.Root, "etc", "default", "grub"); grubDefault.Len() > 0 && !holds(path, grubDefault.String()) {
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", path, err)
@@ -1100,8 +1170,11 @@ func (in *installer) firstBoot() error {
 			Admin:        cu.Admin,
 			SSHKeys:      cu.SSHKeys,
 		}
-		if err := storage.RunCommands([][]string{u.AddCommand(root)}, in.opts.Runner); err != nil {
-			return err
+		// An account the first attempt already made is not made again.
+		if !hasAccount(root, cu.Login) {
+			if err := storage.RunCommands([][]string{u.AddCommand(root)}, in.opts.Runner); err != nil {
+				return err
+			}
 		}
 		chown, err := u.WriteSSHKeys(root)
 		if err != nil {
@@ -1202,8 +1275,7 @@ func (in *installer) network() error {
 	if err := system.NetLinks(in.opts.Root, network.LinkScript(ifaces)); err != nil {
 		return err
 	}
-	if conf != "" {
-		path := filepath.Join(in.opts.Root, "etc", "dhcpcd.conf")
+	if path := filepath.Join(in.opts.Root, "etc", "dhcpcd.conf"); conf != "" && !holds(path, conf) {
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", path, err)

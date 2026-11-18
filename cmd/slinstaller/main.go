@@ -159,6 +159,9 @@ func run(args []string) error {
 	var resume bool
 	fs.BoolVar(&resume, "resume", false,
 		"with --apply, continue an install that failed while installing the base system: nothing is partitioned or formatted again (same boot of the live system only)")
+	var resumeFrom string
+	fs.StringVar(&resumeFrom, "resume-from", "",
+		"as --resume, but from the named stage: "+strings.Join(controller.ResumableStages(), ", ")+" (the stage is run again from its start)")
 	var jsonYAML string
 	fs.StringVar(&jsonYAML, "json-yaml", "",
 		"convert this old JSON install descriptor (.json) into a config written beside it (.yaml), and exit (clr-installer's option)")
@@ -265,6 +268,11 @@ func run(args []string) error {
 		}
 		defer os.RemoveAll(filepath.Dir(path))
 		rest[0] = path
+	}
+	if resumeFrom != "" {
+		resume = true
+	} else if resume {
+		resumeFrom = "base-install"
 	}
 	if resume && (!apply || len(rest) == 0 || through != "") {
 		return fmt.Errorf("--resume continues a full install from a config file: use it with --apply and the config, without --through")
@@ -598,10 +606,10 @@ restart:
 		Packages:   packages,
 		// Stream progress and command output so the operator sees the
 		// install work rather than a silent pause.
-		Runner: runner,
-		Log:    logOut,
-		Output: logOut,
-		Resume: resume,
+		Runner:     runner,
+		Log:        logOut,
+		Output:     logOut,
+		ResumeFrom: resumeFrom,
 
 		LogFile: logPath,
 	}
@@ -893,8 +901,8 @@ restart:
 	// made and carries on, so there is nothing to confirm by retyping.
 	showMessage(cfg.MessageURL, preInstallMessage)
 	if resume {
-		fmt.Fprintf(os.Stderr, "\nResuming on %s: nothing is partitioned or formatted; the base system is installed again.\n",
-			strings.Join(plan.DiskList(), ", "))
+		fmt.Fprintf(os.Stderr, "\nResuming on %s from %s: nothing is partitioned or formatted.\n",
+			strings.Join(plan.DiskList(), ", "), resumeFrom)
 	} else if !confirm(stdin, plan) {
 		return fmt.Errorf("aborted")
 	}
