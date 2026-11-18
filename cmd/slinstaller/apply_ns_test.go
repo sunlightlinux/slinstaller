@@ -115,6 +115,9 @@ func applyChild(t *testing.T) {
 		t.Fatalf("not in the test namespace (uid %d)", os.Geteuid())
 	}
 	confirmed := testDisk + "\n"
+	base := os.Getenv(applyBaseEnv)
+	lockPath = filepath.Join(base, "install.lock")
+	diagnosticsDir = base
 
 	if !system.IsUEFI() {
 		// Not booted under UEFI: a full install is refused, whatever else
@@ -142,9 +145,74 @@ func applyChild(t *testing.T) {
 		t.Errorf("the --log file does not carry the install:\n%s", log)
 	}
 
+	// That failure leaves a diagnostics archive behind: the error, the log,
+	// the disks, and the config without its password hashes.
+	e = newApplyEnv(t)
+	withUser := plainConfig()
+	withUser.Users = []*config.User{{Login: "ion", Password: "$6$salt$the-hash", Admin: true}}
+	archive := filepath.Join(e.base, "diag.tar.gz")
+	errOut, err := e.run(confirmed, withUser, "--diagnostics", archive)
+	wantRunErr(t, "full run with a user", err, "controller: mount")
+	if !strings.Contains(errOut, "Diagnostics for this failure are in "+archive) {
+		t.Errorf("the archive is not announced:\n%s", errOut)
+	}
+	files := readArchive(t, archive)
+	for _, want := range []string{"error.txt", "config.yaml", "install.log", "lsblk.txt"} {
+		if _, ok := files[want]; !ok {
+			t.Errorf("diagnostics lack %s (have %v)", want, keys(files))
+		}
+	}
+	if !strings.Contains(files["error.txt"], "controller: mount") || !strings.Contains(files["install.log"], "==> partition") {
+		t.Errorf("error.txt %q", files["error.txt"])
+	}
+	if strings.Contains(files["config.yaml"], "the-hash") || !strings.Contains(files["config.yaml"], "login: ion") {
+		t.Errorf("config in the diagnostics:\n%s", files["config.yaml"])
+	}
+	// Without --diagnostics it is a dated file in the default place.
+	e = newApplyEnv(t)
+	diagnosticsDir = e.base
+	errOut, _ = e.run(confirmed, plainConfig())
+	if m, _ := filepath.Glob(filepath.Join(e.base, "slinstaller-diagnostics-*.tar.gz")); len(m) != 1 || !strings.Contains(errOut, m[0]) {
+		t.Errorf("default diagnostics file: %v\n%s", m, errOut)
+	}
+	// An operator who declined has nothing to diagnose.
+	e = newApplyEnv(t)
+	diagnosticsDir = e.base
+	_, _ = e.run("no\n", plainConfig())
+	if m, _ := filepath.Glob(filepath.Join(e.base, "slinstaller-diagnostics-*")); len(m) != 0 {
+		t.Errorf("an aborted install wrote diagnostics: %v", m)
+	}
+
+	// Only one install at a time: while another holds the lock, this one is
+	// refused before it does anything.
+	held, lerr := lockInstall()
+	if lerr != nil {
+		t.Fatalf("taking the lock: %v", lerr)
+	}
+	e = newApplyEnv(t)
+	_, err = e.run(confirmed, plainConfig())
+	e.refused("another install running", err, "another slinstaller install is running")
+	held.Close()
+
+	// --system-check runs every check and stops: no confirmation asked,
+	// nothing written, and a problem is reported as it would be.
+	e = newApplyEnv(t)
+	errOut, err = e.run("", plainConfig(), "--system-check")
+	if err != nil || !strings.Contains(errOut, "System check passed") {
+		t.Errorf("--system-check: %v\n%s", err, errOut)
+	}
+	e.refused("--system-check", errors.New("x"), "x")
+	e = newApplyEnv(t)
+	os.Remove(filepath.Join(e.bin, "mkfs.vfat"))
+	_, err = e.run("", plainConfig(), "--system-check")
+	e.refused("--system-check with a missing tool", err, "missing tools on the live system: mkfs.vfat")
+	e = newApplyEnv(t)
+	_, err = e.run("", plainConfig(), "--system-check", "--through", "partition")
+	e.refused("--system-check with --through", err, "drop --through")
+
 	// A staged run stops where asked and says the target is left mounted.
 	e = newApplyEnv(t)
-	errOut, err := e.run(confirmed, plainConfig(), "--through", "partition")
+	errOut, err = e.run(confirmed, plainConfig(), "--through", "partition")
 	if err != nil || !strings.Contains(errOut, `(stopped after stage "partition"; target left mounted at `) {
 		t.Errorf("--through partition: %v\n%s", err, errOut)
 	}

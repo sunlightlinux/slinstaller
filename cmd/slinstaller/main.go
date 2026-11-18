@@ -152,6 +152,12 @@ func run(args []string) error {
 	fs.BoolVar(&allowInsecure, "allow-insecure-http", false, "allow a plain http:// repository (the config's allowInsecureHTTP)")
 	var swapFileSize string
 	fs.StringVar(&swapFileSize, "swap-file-size", "", "create a swap file of this size, e.g. 2G (the config's swapFileSize)")
+	var systemCheck bool
+	fs.BoolVar(&systemCheck, "system-check", false,
+		"check that this machine can install the config - tools, disks, repository - and exit without touching anything")
+	var diagnostics string
+	fs.StringVar(&diagnostics, "diagnostics", "",
+		"where a failed install saves its diagnostics archive (default: a dated .tar.gz in /tmp)")
 	var template string
 	fs.StringVar(&template, "template", "", "write a template config to this .yaml file, and exit")
 	fs.Usage = func() {
@@ -204,6 +210,9 @@ func run(args []string) error {
 		}
 		rest = []string{configPath}
 	}
+	if systemCheck && len(rest) == 0 {
+		return fmt.Errorf("--system-check needs the config to check the machine against")
+	}
 	// repoFlag preserves the original --repo so the full-screen "Back to
 	// installer" loop below can re-resolve it from a re-run wizard each time.
 	repoFlag := repo
@@ -211,6 +220,13 @@ func run(args []string) error {
 	var interactivePass string
 	var fullscreen bool
 	var err error
+	// Held from the first step that may touch a disk until the install ends.
+	var lock *os.File
+	defer func() {
+		if lock != nil {
+			lock.Close()
+		}
+	}()
 restart:
 	repo = repoFlag
 	switch len(rest) {
@@ -325,7 +341,7 @@ restart:
 		printRelease(plan)
 	}
 
-	if !apply {
+	if !apply && !systemCheck {
 		if plan.Wipe {
 			fmt.Fprintf(os.Stderr,
 				"\nDry run. Re-run with --apply to partition %s - this destroys its contents.\n",
@@ -410,7 +426,7 @@ restart:
 	logOut := io.Writer(os.Stderr)
 	runner := storage.VerboseRunner
 	logPath := logFile
-	if logPath == "" && !fullscreen {
+	if logPath == "" && !fullscreen && !systemCheck {
 		logPath = tui.InstallLogPath()
 	}
 	if logPath != "" {
@@ -461,8 +477,15 @@ restart:
 		}
 	}
 
-	if os.Geteuid() != 0 {
-		return fmt.Errorf("--apply must run as root")
+	if !systemCheck {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("--apply must run as root")
+		}
+		if lock == nil {
+			if lock, err = lockInstall(); err != nil {
+				return err
+			}
+		}
 	}
 
 	// A profile's vendor-specific arguments, CPU lists and hugepages belong
@@ -638,6 +661,14 @@ restart:
 		}
 	}
 
+	if systemCheck {
+		if through != "" {
+			return fmt.Errorf("--system-check checks a full install; drop --through")
+		}
+		fmt.Fprintln(os.Stderr, "\nSystem check passed: this machine can install this config. Nothing was changed.")
+		return nil
+	}
+
 	// LUKS passphrase, when the layout is encrypted. The interactive
 	// front-end already collected it; otherwise take it from --crypt-file
 	// or the environment for an unattended install, or prompt.
@@ -678,6 +709,9 @@ restart:
 	if fullscreen {
 		back, rerr := tui.RunInstall(cfg, opts, plan)
 		if rerr != nil {
+			if rerr.Error() != "aborted" {
+				reportFailure(diagnostics, cfg, tui.InstallLogPath(), rerr)
+			}
 			return rerr
 		}
 		if back {
@@ -694,6 +728,7 @@ restart:
 		return fmt.Errorf("aborted")
 	}
 	if err := controller.Install(cfg, opts); err != nil {
+		reportFailure(diagnostics, cfg, logPath, err)
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "\nInstall complete.")
