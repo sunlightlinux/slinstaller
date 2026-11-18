@@ -147,6 +147,13 @@ type Config struct {
 	HTTPProxy string `yaml:"httpProxy,omitempty"`
 	NoProxy   string `yaml:"noProxy,omitempty"`
 
+	// Image installs the base system by unpacking a root filesystem image
+	// — a tar archive (compressed or not) or a squashfs — instead of
+	// installing packages. The image has to hold a complete system: its
+	// kernel, GRUB, and whatever the layout needs to boot (cryptsetup, lvm2,
+	// mdadm). A relative path is taken from the config file's directory.
+	Image string `yaml:"image,omitempty"`
+
 	// WriteFiles are files written into the installed system once it is
 	// configured, before the post-install hooks run.
 	WriteFiles []*WriteFile `yaml:"write-files,omitempty"`
@@ -879,6 +886,9 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if strings.Contains(c.Image, "://") {
+		add("image: %s is a URL; fetch the image first and give its path", c.Image)
+	}
 	for _, m := range c.TargetMedia {
 		if m == nil {
 			continue

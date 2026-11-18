@@ -183,3 +183,55 @@ func TestPowerCommand(t *testing.T) {
 		t.Errorf("missing halt: %v", err)
 	}
 }
+
+// From an image nothing is fetched: the checks ask for the tool that
+// unpacks it and for the image itself, not for xbps or a repository.
+func TestSystemCheckForAnImageInstall(t *testing.T) {
+	if !system.IsUEFI() {
+		t.Skip("the system check stops at the firmware on this machine")
+	}
+	dir := t.TempDir()
+	tools := append([]string{"tar"}, baseTools...)
+	for i, tool := range tools {
+		if tool == "xbps-install" {
+			tools = append(tools[:i], tools[i+1:]...)
+			break
+		}
+	}
+	bin := onlyTools(t, dir, tools...)
+	image := filepath.Join(dir, "base.tar.zst")
+	os.WriteFile(image, []byte("not really an image"), 0o644)
+	cfg := plainConfig()
+	cfg.Image = "base.tar.zst" // beside the config
+	cfg.Packages = []string{"vim"}
+	path := writeConfig(t, dir, cfg)
+
+	_, errOut, err := runWith(t, "", "--system-check", "--offline", "--local-repo", filepath.Join(dir, "none"), path)
+	if err != nil || !strings.Contains(errOut, "System check passed") {
+		t.Fatalf("image install check: %v\n%s", err, errOut)
+	}
+	// Packages are not installed from an image, and the operator is told.
+	if !strings.Contains(errOut, "the image has to hold: vim") {
+		t.Errorf("no note about the packages:\n%s", errOut)
+	}
+	// --image names it too, and a squashfs needs its own tool.
+	sq := filepath.Join(dir, "root.squashfs")
+	os.WriteFile(sq, nil, 0o644)
+	_, _, err = runWith(t, "", "--system-check", "--image", sq, writeConfig(t, dir, plainConfig()))
+	wantRunErr(t, "squashfs without unsquashfs", err, "missing tools on the live system: unsquashfs")
+
+	os.Remove(filepath.Join(bin, "tar"))
+	_, _, err = runWith(t, "", "--system-check", path)
+	wantRunErr(t, "no tar", err, "missing tools on the live system: tar")
+
+	// An image that is not there, is a directory, or would be hidden under
+	// the target, and one given as a URL.
+	_, _, err = runWith(t, "", "--system-check", "--image", filepath.Join(dir, "absent.tar"), path)
+	wantRunErr(t, "absent image", err, "is not a file that can be read")
+	_, _, err = runWith(t, "", "--system-check", "--image", dir, path)
+	wantRunErr(t, "a directory", err, "is not a file that can be read")
+	_, _, err = runWith(t, "", "--system-check", "--root", dir, path)
+	wantRunErr(t, "under the root", err, "is under the target root")
+	_, _, err = runWith(t, "", "--system-check", "--image", "https://example.org/base.tar", path)
+	wantRunErr(t, "a URL", err, "is a URL; fetch the image first")
+}

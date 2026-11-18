@@ -152,6 +152,9 @@ func run(args []string) error {
 	fs.BoolVar(&allowInsecure, "allow-insecure-http", false, "allow a plain http:// repository (the config's allowInsecureHTTP)")
 	var swapFileSize string
 	fs.StringVar(&swapFileSize, "swap-file-size", "", "create a swap file of this size, e.g. 2G (the config's swapFileSize)")
+	var image string
+	fs.StringVar(&image, "image", "",
+		"install the base system by unpacking this root filesystem image (tar or squashfs) instead of installing packages (the config's image)")
 	var discover string
 	fs.StringVar(&discover, "discover", "",
 		"print a config describing the layout already on this disk (e.g. /dev/sda), as a starting point for an install into its partitions, and exit")
@@ -315,6 +318,9 @@ restart:
 	if swapFileSize != "" {
 		cfg.SwapFileSize = swapFileSize
 	}
+	if image != "" {
+		cfg.Image = image
+	}
 
 	// The config's proxy is for everything this run fetches, the
 	// reachability check before the install included.
@@ -423,6 +429,31 @@ restart:
 		addPkg(p)
 	}
 	localRepos := presentRepos(strings.Split(localRepo, ","))
+
+	// From an image nothing is fetched or installed as packages: the image
+	// is the base system. What the layout would have added has to be in it.
+	fromImage := cfg.Image != ""
+	if fromImage {
+		if !filepath.IsAbs(cfg.Image) {
+			dir := "."
+			if len(rest) == 1 {
+				dir = filepath.Dir(rest[0])
+			}
+			if abs, err := filepath.Abs(filepath.Join(dir, cfg.Image)); err == nil {
+				cfg.Image = abs
+			}
+		}
+		if fi, err := os.Stat(cfg.Image); err != nil || fi.IsDir() {
+			return fmt.Errorf("image %s is not a file that can be read", cfg.Image)
+		}
+		if underRoot(cfg.Image, root) {
+			return fmt.Errorf("image %s is under the target root %s and would be hidden when the target is mounted there", cfg.Image, root)
+		}
+		if need := append(layoutPackages(plan), cfg.Packages...); len(need) > 0 {
+			fmt.Fprintf(os.Stderr, "note: installing from an image, no packages are installed; the image has to hold: %s\n", strings.Join(need, ", "))
+		}
+		repo, extraRepos, packages = "", nil, nil
+	}
 
 	// A local repository under the target root would be shadowed the moment
 	// the target filesystem is mounted there: xbps would then read an empty
@@ -543,7 +574,7 @@ restart:
 		// An offline install has no remote repo, so the base must come from a
 		// local repository on the live medium. Fail here, before wiping, if
 		// there is none.
-		if cfg.Offline && len(localRepos) == 0 {
+		if cfg.Offline && len(localRepos) == 0 && !fromImage {
 			return fmt.Errorf("offline install needs a local repository (--local-repo), but none is present")
 		}
 
@@ -559,7 +590,12 @@ restart:
 			}
 		}
 
-		required := append(plan.RequiredTools(), "xbps-install", "chroot")
+		required := append(plan.RequiredTools(), "chroot")
+		if fromImage {
+			required = append(required, controller.ImageCommand(cfg.Image, root)[0])
+		} else {
+			required = append(required, "xbps-install")
+		}
 		if encrypted {
 			required = append(required, "cryptsetup")
 		}

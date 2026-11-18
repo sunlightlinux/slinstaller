@@ -400,6 +400,9 @@ func (in *installer) saveConfig() error {
 }
 
 func (in *installer) baseInstall() error {
+	if in.cfg.Image != "" {
+		return in.unpackImage()
+	}
 	cmds, err := xbps.Options{
 		Root:       in.opts.Root,
 		Repo:       in.opts.Repo,
@@ -417,6 +420,38 @@ func (in *installer) baseInstall() error {
 		return err
 	}
 	return in.writeTargetRepos()
+}
+
+// ImageCommand is the command that unpacks a root filesystem image into
+// root: unsquashfs for a squashfs, tar for anything else (tar works out the
+// compression itself). Ownership is kept by number, as the image's users
+// are the installed system's, not the live one's.
+func ImageCommand(image, root string) []string {
+	switch strings.ToLower(filepath.Ext(image)) {
+	case ".squashfs", ".sqfs", ".sfs":
+		return []string{"unsquashfs", "-f", "-d", root, image}
+	}
+	return []string{"tar", "-xpf", image, "-C", root, "--numeric-owner"}
+}
+
+// unpackImage installs the base system from the config's image. What was
+// unpacked has to be able to boot: without GRUB in it the install would go
+// on to fail at the bootloader, so that is checked here, where the reason
+// is still plain.
+func (in *installer) unpackImage() error {
+	image := in.cfg.Image
+	if !filepath.IsAbs(image) && in.opts.ConfigDir != "" {
+		image = filepath.Join(in.opts.ConfigDir, image)
+	}
+	if err := storage.RunCommands([][]string{ImageCommand(image, in.opts.Root)}, in.opts.Runner); err != nil {
+		return err
+	}
+	for _, dir := range []string{"usr/bin", "usr/sbin", "bin", "sbin"} {
+		if _, err := os.Stat(filepath.Join(in.opts.Root, dir, "grub-install")); err == nil {
+			return in.writeTargetRepos()
+		}
+	}
+	return fmt.Errorf("image %s holds no grub-install: it is not a system this installer can make bootable", image)
 }
 
 // writeTargetRepos records the Sunlight mirror (ExtraRepos) in the target's
