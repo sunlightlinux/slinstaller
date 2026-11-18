@@ -12,6 +12,10 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- Storage aliases: with two aliases where one name starts with the other
+  (`disk` and `disk2`), an unbraced `$disk2` could expand as `$disk` followed
+  by `2` — the wrong device — depending on map iteration order. Longer names
+  are now expanded first.
 - The prompt flow no longer spins forever when its input ends (a closed pipe,
   a serial line that dropped) at a password or passphrase prompt: an ended
   input read as an empty answer, which the prompt refused and asked for again,

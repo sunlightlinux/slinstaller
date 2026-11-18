@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -357,9 +358,22 @@ func aliasPartSuffix(file string) string {
 // expandVars replaces $name and ${name} in s using vars, like
 // clr-installer's utils.ExpandVariables.
 func expandVars(vars map[string]string, s string) string {
-	for k, v := range vars {
-		s = strings.ReplaceAll(s, "${"+k+"}", v)
-		s = strings.ReplaceAll(s, "$"+k, v)
+	// Longest name first: with aliases "disk" and "disk2", an unbraced
+	// $disk2 must not be read as $disk followed by a 2 — which, in map
+	// order, it sometimes was.
+	names := make([]string, 0, len(vars))
+	for k := range vars {
+		names = append(names, k)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if len(names[i]) != len(names[j]) {
+			return len(names[i]) > len(names[j])
+		}
+		return names[i] < names[j]
+	})
+	for _, k := range names {
+		s = strings.ReplaceAll(s, "${"+k+"}", vars[k])
+		s = strings.ReplaceAll(s, "$"+k, vars[k])
 	}
 	return s
 }
