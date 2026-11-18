@@ -73,9 +73,21 @@ func run(args []string, passphrase string, out io.Writer) error {
 	c.Stdout = out
 	c.Stderr = out
 	if err := c.Run(); err != nil {
-		return fmt.Errorf("luks: %s: %w", args[1], err)
+		return fmt.Errorf("luks: %s: %w", subcommand(args), err)
 	}
 	return nil
+}
+
+// subcommand is the cryptsetup action in a command line — the first argument
+// that is not an option — so a failure names what failed (luksFormat,
+// luksOpen, luksAddKey) rather than a flag.
+func subcommand(args []string) string {
+	for _, a := range args[1:] {
+		if !strings.HasPrefix(a, "-") {
+			return a
+		}
+	}
+	return args[0]
 }
 
 // UUID reads the LUKS UUID of a volume — the partition's UUID, which is

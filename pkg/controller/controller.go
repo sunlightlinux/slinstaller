@@ -215,20 +215,26 @@ func (in *installer) run() error {
 	// A full run unmounts the finished target; a staged run leaves it
 	// mounted so the result can be inspected.
 	if in.opts.Through == "" {
-		// The live system's resolv.conf must not outlive the install. Left
-		// in place it pins the installed system to the live medium's DNS:
-		// dhcpcd hands DNS to resolvconf, and resolvconf will not replace a
-		// resolv.conf it did not write ("signature mismatch"). Removed, it
-		// is written fresh at first boot.
-		if err := removeIfPresent(in.resolvCopy); err != nil {
-			return err
-		}
-		if err := in.archiveLog(); err != nil && in.opts.Log != nil {
-			fmt.Fprintf(in.opts.Log, "warning: the install log was not saved on the target: %v\n", err)
-		}
-		return in.mnt.UnmountAll()
+		return in.finish()
 	}
 	return nil
+}
+
+// finish ends a full run: it takes the install-time resolv.conf back out of
+// the target, saves the install log there, and unmounts everything.
+func (in *installer) finish() error {
+	// The live system's resolv.conf must not outlive the install. Left
+	// in place it pins the installed system to the live medium's DNS:
+	// dhcpcd hands DNS to resolvconf, and resolvconf will not replace a
+	// resolv.conf it did not write ("signature mismatch"). Removed, it
+	// is written fresh at first boot.
+	if err := removeIfPresent(in.resolvCopy); err != nil {
+		return err
+	}
+	if err := in.archiveLog(); err != nil && in.opts.Log != nil {
+		fmt.Fprintf(in.opts.Log, "warning: the install log was not saved on the target: %v\n", err)
+	}
+	return in.mnt.UnmountAll()
 }
 
 func (in *installer) partition() error {

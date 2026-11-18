@@ -84,9 +84,18 @@ func TestFailureIsReportedWithTheSubcommand(t *testing.T) {
 	fakeCryptsetup(t)
 	t.Setenv("FAKE_CRYPTSETUP_FAIL", "1")
 	var out bytes.Buffer
-	err := Open("/dev/sda3", "cryptroot", "pw", &out)
-	if err == nil || !strings.Contains(err.Error(), "luks:") {
-		t.Errorf("Open error = %v, want a luks: error", err)
+	// The error names the step that failed, not one of its flags.
+	for step, run := range map[string]func() error{
+		"luksFormat": func() error { return Format("/dev/sda3", "pw", &out, true) },
+		"luksOpen":   func() error { return Open("/dev/sda3", "cryptroot", "pw", &out) },
+		"luksAddKey": func() error { return AddKey("/dev/sda3", "/k", "pw", &out) },
+	} {
+		if err := run(); err == nil || !strings.Contains(err.Error(), "luks: "+step+":") {
+			t.Errorf("%s failing: %v", step, err)
+		}
+	}
+	if got := subcommand([]string{"cryptsetup", "--version"}); got != "cryptsetup" {
+		t.Errorf("subcommand with only options = %q", got)
 	}
 }
 
