@@ -162,6 +162,11 @@ type Config struct {
 	// mdadm). A relative path is taken from the config file's directory.
 	Image string `yaml:"image,omitempty"`
 
+	// KernelRemove lists kernel packages to remove once the base system is
+	// in place — the kernel an image came with, when the config installs or
+	// keeps another.
+	KernelRemove []string `yaml:"kernel-remove,omitempty"`
+
 	// KernelFallback is the kernel package to install when the configured
 	// one cannot be: the base install is tried once more with it.
 	KernelFallback string `yaml:"kernel-fallback,omitempty"`
@@ -691,6 +696,11 @@ type RaidArray struct {
 	// 1.0 or 0.90.
 	Metadata string `yaml:"metadata,omitempty"`
 
+	// Partitions gives the array a partition table of its own, in place of
+	// one filesystem: each entry is a partition cut on the array (its
+	// devices are /dev/md0p1, /dev/md0p2, … or /dev/md/name1, …).
+	Partitions []*Media `yaml:"partitions,omitempty"`
+
 	// VolumeGroup makes the array an LVM physical volume of that group, in
 	// place of a filesystem; Children are then the group's logical volumes
 	// (which may also be declared on another physical volume of the group).
@@ -1171,6 +1181,14 @@ func (c *Config) Validate() error {
 		add("a swap size of \"auto\" has to be worked out from this machine's memory first (ResolveAutoSwap)")
 	}
 
+	for _, k := range c.KernelRemove {
+		if k == "" || strings.ContainsAny(k, " \t/") || strings.HasPrefix(k, "-") {
+			add("kernel-remove: %q is not a package name", k)
+		}
+		if k != "" && k == c.KernelPackage() {
+			add("kernel-remove: %s is the kernel the config installs", k)
+		}
+	}
 	if c.KernelFallback != "" && c.KernelPackage() == "" {
 		add("kernel-fallback: there is no kernel named for %s to fall back from", c.KernelFallback)
 	}
@@ -1497,6 +1515,31 @@ func (c *Config) Validate() error {
 		if raidSpares[a.Name] > 0 && strings.TrimPrefix(a.Level, "raid") == "0" {
 			add("raid %s: level 0 has no redundancy to rebuild onto a spare", where)
 		}
+		if len(a.Partitions) > 0 {
+			if a.FsType != "" || a.Mountpoint != "" || a.VolumeGroup != "" || a.Encrypted {
+				add("raid %s: an array with partitions carries nothing else itself: the filesystems go on the partitions", where)
+			}
+			for j, ch := range a.Partitions {
+				if ch == nil {
+					continue
+				}
+				pw := fmt.Sprintf("raid %s partition %d", where, j+1)
+				if ch.Type != "" && ch.Type != "part" || ch.Encrypted || len(ch.Children) > 0 {
+					add("%s: a partition on an array is a plain one (no crypt, lvm or raid)", pw)
+				}
+				if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
+					add("%s: the EFI System Partition cannot be on RAID", pw)
+					continue
+				}
+				checkFS(pw, ch.FsType, ch.Mountpoint)
+				checkMount(pw, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, false)
+				checkMin(pw, ch.Size, storage.MinPartitionSize, "1 MiB", "size")
+				if ch.Mountpoint == "/" {
+					checkMin(pw, ch.Size, rootMin, rootMinLabel, "root size")
+				}
+			}
+			continue
+		}
 		if a.VolumeGroup != "" {
 			if a.FsType != "" || a.Mountpoint != "" {
 				add("raid %s: an array that is a physical volume (volumeGroup) carries no filesystem of its own; put it on a logical volume", where)
@@ -1799,6 +1842,34 @@ func (c *Config) Plan() (*storage.Plan, error) {
 			// opened, and everything above it is on the mapper.
 			rp.Encrypted, rp.Device, rp.MapName = true, storage.RaidDevice(a.Name), "crypt"+a.Name
 		}
+		if len(a.Partitions) > 0 {
+			// A partitioned array: it is a disk in its own right, cut after
+			// it is assembled, and its partitions carry the filesystems.
+			dev := storage.RaidDevice(a.Name)
+			rp.Mountpoint, rp.Filesystem = "", ""
+			pl.Parts = append(pl.Parts, rp)
+			pl.RaidDisks = append(pl.RaidDisks, dev)
+			n := 0
+			for _, ch := range a.Partitions {
+				if ch == nil {
+					continue
+				}
+				n++
+				size, err := physSize(ch.Size)
+				if err != nil {
+					return nil, fmt.Errorf("config: raid %s partition %d: %w", a.Name, n, err)
+				}
+				p := storage.Partition{
+					Number: n, Device: storage.PartitionName(dev, n), Disk: dev,
+					Mountpoint: ch.Mountpoint, Filesystem: ch.FsType, Label: ch.Label,
+					Options: strings.Fields(ch.Options), Size: size,
+				}
+				p.MountOptions, p.Subvol, p.Subvolumes = mountExtras(ch.Mountpoint, ch.MountOptions, ch.Subvolumes)
+				details(&p, ch)
+				pl.Parts = append(pl.Parts, p)
+			}
+			continue
+		}
 		if a.VolumeGroup != "" {
 			// LVM on the array: it is a physical volume and carries no
 			// filesystem of its own.
@@ -1828,7 +1899,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 	// A fill physical partition must be the last physical one on its disk;
 	// logical volumes and RAID arrays (which are not cut by parted) are
 	// exempt.
-	for _, disk := range pl.Disks {
+	for _, disk := range append(append([]string{}, pl.Disks...), pl.RaidDisks...) {
 		lastPhys := -1
 		for i, p := range pl.Parts {
 			if !p.LV && !p.Raid && planDiskOf(p, pl.Disk) == disk {

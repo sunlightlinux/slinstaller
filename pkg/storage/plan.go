@@ -164,6 +164,11 @@ type Plan struct {
 	Wipe  bool
 	Parts []Partition
 
+	// RaidDisks are the arrays that carry a partition table of their own:
+	// cut like disks, but only once assembled (ArrayTableCommands), and
+	// never among the disks the install is confirmed against.
+	RaidDisks []string
+
 	// DiskWipe is how a disk is erased before it is partitioned, when that
 	// is more than removing old signatures: "zero", "random" or "discard".
 	DiskWipe map[string]string

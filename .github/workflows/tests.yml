@@ -166,7 +166,7 @@ jobs:
       - name: Install the storage tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y parted dosfstools e2fsprogs btrfs-progs util-linux ntfs-3g
+          sudo apt-get install -y parted dosfstools e2fsprogs btrfs-progs util-linux ntfs-3g mdadm
 
       - name: Build
         run: go build -o slinstaller ./cmd/slinstaller

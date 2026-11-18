@@ -211,7 +211,9 @@ already is the partitioned, configured system.
 
 More on the command line: the config may be an `https://` URL; `--resume`
 continues an install that failed installing the base system without
-partitioning again; `--unmount` takes down what a `--through` run left
+partitioning again, and `--resume-from <stage>` does so from any later
+stage; `--json-yaml old.json` converts the JSON descriptor of
+clr-installer's predecessor into a config; `--unmount` takes down what a `--through` run left
 mounted and `--in-target "cmd"` runs a command inside it. A partition table
 whose partitions are named `CLR_BOOT`, `CLR_ROOT`, `CLR_SWAP`,
 `CLR_MNT_/path` (with `_F` to format) comes out of `--discover` already
@@ -230,6 +232,9 @@ saying what goes where.
 | `install-type: server` / `desktop` | the config | a larger smallest root (4 GB / 20 GB) |
 | `kernel-fallback: linux-lts` | the config | the kernel to try when the configured one cannot be installed |
 | `power-state-delay: 30` | the config | seconds before the machine reboots or powers off |
+| `kernel-remove: [linux6.18]` | the config | kernel packages removed once the base system is in |
+| `partitions: [...]` | a `raid` entry | a partition table on the array itself (`/dev/md0p1`, …) |
+| `message-url` | the config | where installer messages are looked for and shown |
 
 `image` and `disk-image` may be `https://` URLs: the image is unpacked or
 written as it downloads, so it only has to fit on the target. `resize` also

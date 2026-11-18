@@ -28,8 +28,10 @@ func ProbeUUID(device string) (string, error) {
 func ProbeUUIDs(pl *Plan) (map[string]string, error) {
 	uuids := make(map[string]string, len(pl.Parts))
 	for _, p := range pl.Parts {
-		if p.IsPV || p.IsRaidMember {
-			continue // these carry no mountable filesystem
+		// These carry no mountable filesystem: a physical volume, a RAID
+		// member, an array that holds a partition table instead.
+		if p.IsPV || p.IsRaidMember || (p.Raid && p.Filesystem == "") {
+			continue
 		}
 		id, err := ProbeUUID(p.EffectiveDevice())
 		if err != nil {

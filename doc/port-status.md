@@ -70,10 +70,15 @@ intact, and btrfs subvolumes with their mount options. Everything past the
 partition and mount stages - the bootloader, a first boot, RAID with a disk
 removed, bonds and VLANs on the installed system - still wants a VM.
 
-Not done, deliberately: resuming from any stage (later stages rely on what
-earlier ones worked out in the same run, so only base-install is safe to
-resume at); clr-installer's `--json-yaml` and its installer message fetched
-from a server; shrinking xfs, which the filesystem does not allow.
+And the last of both lists: `--resume-from` any stage, partitioned RAID
+arrays, `kernel-remove`, `--json-yaml` and installer messages
+(`message-url`).
+
+Not done, because it cannot be: shrinking xfs, which the filesystem does not
+allow. Everything else left out is another distribution's own (its package
+manager, its boot manager, its telemetry, its image builder) or hardware and
+storage this installer does not target (zfs, bcache, iSCSI, multipath,
+NVMe over TCP, s390, BIOS/MBR).
 
 ## What's left
 

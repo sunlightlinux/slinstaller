@@ -238,3 +238,68 @@ func TestCryptOptions(t *testing.T) {
 		}
 	}
 }
+
+// A partitioned array is cut after it is assembled, and a root on one of
+// its partitions has the array assembled by the initramfs.
+func TestPartitionedArrayInTheInstall(t *testing.T) {
+	fakeBin(t, map[string]string{"mdadm": fakeMdadm})
+	cfg := serverConfig(&config.RaidArray{Name: "md0", Level: "1", Partitions: []*config.Media{
+		{FsType: "ext4", Mountpoint: "/", Size: "20G"}, {FsType: "ext4", Mountpoint: "/srv"}}})
+	cfg.TargetMedia[1].Children = cfg.TargetMedia[1].Children[1:] // no spare ESP: it needs a real mount
+	var r recorder
+	if err := Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices}); err != nil {
+		t.Fatal(err)
+	}
+	flat := r.flat()
+	last := -1
+	for _, step := range []string{"mdadm --create /dev/md0", "parted -s /dev/md0 mklabel gpt", "mkpart /srv", "partprobe /dev/md0", "/dev/md0p1", "/dev/md0p2"} {
+		i := strings.Index(flat, step)
+		if i < 0 || i < last {
+			t.Fatalf("step %q missing or out of order:\n%s", step, flat)
+		}
+		last = i
+	}
+	r = recorder{}
+	if err := Install(cfg, Options{Through: "partition", Runner: r.failOn("/dev/md0 mklabel"), Devices: noDevices}); err == nil || strings.Contains(r.flat(), "mkfs") {
+		t.Errorf("a failed array table went on to mkfs: %v", err)
+	}
+
+	in := stagedInstaller(t, cfg, &r)
+	mkTarget(t, in, "etc", "default")
+	if err := in.bootloader(); err != nil {
+		t.Fatal(err)
+	}
+	if args := cmdlineArgs(t, in); !contains(args, "rd.md.uuid=aaaa:bbbb:cccc:dddd") {
+		t.Errorf("kernel arguments: %v", args)
+	}
+	if in.rootDisk() != "/dev/md0" {
+		t.Errorf("rootDisk = %q", in.rootDisk())
+	}
+}
+
+func TestKernelRemove(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.KernelRemove = []string{"linux6.18", "linux-mainline"}
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	in.opts.Repo, in.opts.Packages = "https://repo.example/current", []string{"sunlight-base"}
+	if err := in.baseInstall(); err != nil {
+		t.Fatal(err)
+	}
+	flat := r.flat()
+	// After the base system is in, inside it.
+	if i, j := strings.Index(flat, "xbps-install"), strings.Index(flat, "chroot "+in.opts.Root+" xbps-remove -Ry linux6.18 linux-mainline"); i < 0 || j < i {
+		t.Errorf("commands:\n%s", flat)
+	}
+	in.opts.Runner = r.failOn("xbps-remove")
+	wantErr(t, in.baseInstall(), "boom")
+	// From an image too: it is the image's kernel that is usually in the way.
+	cfg.Image = "/img/base.tar"
+	r = recorder{}
+	in = stagedInstaller(t, cfg, &r)
+	bin := mkTarget(t, in, "usr", "bin")
+	os.WriteFile(filepath.Join(bin, "grub-install"), nil, 0o755)
+	if err := in.baseInstall(); err != nil || !strings.Contains(r.flat(), "xbps-remove -Ry linux6.18") {
+		t.Errorf("image install: %v\n%s", err, r.flat())
+	}
+}

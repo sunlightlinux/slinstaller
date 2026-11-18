@@ -358,6 +358,13 @@ func (in *installer) partition() error {
 	if err := encrypt(true); err != nil {
 		return err
 	}
+	// An array with a partition table of its own is cut now that it exists.
+	if cmds := in.plan.ArrayTableCommands(); len(cmds) > 0 {
+		if err := storage.RunCommands(cmds, in.opts.Runner); err != nil {
+			return err
+		}
+		in.settle()
+	}
 
 	// LVM, on top of the (possibly encrypted) physical volumes, before
 	// the filesystems are made on the logical volumes.
@@ -443,6 +450,17 @@ func (in *installer) mount() error {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// rootDisk is the disk (or partitioned array) the root partition is cut on,
+// or "" when the root is not a plain partition.
+func (in *installer) rootDisk() string {
+	for _, p := range in.plan.Parts {
+		if p.Mountpoint == "/" && !p.LV && !p.Raid {
+			return p.Disk
+		}
+	}
+	return ""
 }
 
 // hasAccount reports whether the target's passwd already has login.
@@ -627,6 +645,14 @@ func (in *installer) unpackImage() error {
 // (It does not stop a package Void ships at a HIGHER version from winning;
 // keeping the Sunlight fork current is the separate half of that.)
 func (in *installer) writeTargetRepos() error {
+	// The base system is in place: the kernels the config asked to be rid
+	// of go now, before the bootloader lists what is there.
+	if len(in.cfg.KernelRemove) > 0 {
+		remove := append([]string{"chroot", in.opts.Root, "xbps-remove", "-Ry"}, in.cfg.KernelRemove...)
+		if err := storage.RunCommands([][]string{remove}, in.opts.Runner); err != nil {
+			return err
+		}
+	}
 	if len(in.opts.ExtraRepos) == 0 {
 		return nil
 	}
@@ -923,7 +949,8 @@ func (in *installer) bootloader() error {
 	for _, p := range in.plan.Parts {
 		// … whether the root is on it directly, or on a volume group or a
 		// LUKS container that is.
-		if p.Raid && (p.Mountpoint == "/" || in.isRootCrypt(p) || (p.IsPV && p.VGName != "" && p.VGName == in.rootVGName())) {
+		if p.Raid && (p.Mountpoint == "/" || in.isRootCrypt(p) || (p.IsPV && p.VGName != "" && p.VGName == in.rootVGName()) ||
+			in.rootDisk() == storage.RaidDevice(p.RaidName)) {
 			uuid, err := mdadm.UUID(storage.RaidDevice(p.RaidName))
 			if err != nil {
 				return err

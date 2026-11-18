@@ -23,7 +23,9 @@ BIN="$(readlink -f "$BIN")"
 
 WORK="$(mktemp -d)"
 LOOPS=()
+RAID_UP=0
 cleanup() {
+	[ "$RAID_UP" = 1 ] && mdadm --stop /dev/md0 >/dev/null 2>&1 || true
 	# Unmount whatever a staged run left mounted, then release the disks.
 	for m in $(findmnt -rn -o TARGET | grep "^$WORK" | sort -r); do umount "$m" || true; done
 	for l in "${LOOPS[@]}"; do losetup -d "$l" 2>/dev/null || true; done
@@ -253,5 +255,50 @@ mkdir -p "$WORK/top"; mount -o subvolid=5 "${disk}p2" "$WORK/top"
 [ -e "$WORK/top/@/marker" ] && [ -d "$WORK/top/@home" ] || fail "btrfs: the subvolumes are not where the mounts say"
 umount "$WORK/top"
 pass "btrfs: @ at /, @home at /home, compress=zstd, on a discarded disk"
+
+# --- 5. RAID 1 over two disks, the array partitioned ------------------------
+if command -v mdadm >/dev/null && [ ! -e /dev/md0 ]; then
+	disk="$(new_disk 1024)"; name="$(basename "$disk")"
+	disk2="$(new_disk 1024)"; name2="$(basename "$disk2")"
+	cat > "$WORK/raid.yaml" <<YAML
+targetMedia:
+- name: $name
+  type: disk
+  children:
+  - { name: ${name}p1, type: part, fstype: vfat, mountpoint: /boot/efi, size: 128M }
+  - { name: ${name}p2, type: raid, raid: md0 }
+- name: $name2
+  type: disk
+  children:
+  - { name: ${name2}p1, type: part, fstype: vfat, size: 128M, esp: true }
+  - { name: ${name2}p2, type: raid, raid: md0 }
+raid:
+- name: md0
+  level: 1
+  partitions:
+  - { fstype: ext4, mountpoint: /, size: 400M }
+  - { fstype: ext4, mountpoint: /srv }
+skipValidationSize: true
+YAML
+	# Both disks are confirmed by the first one's path.
+	echo "$disk" | "$BIN" --apply --through partition --root "$WORK/target" \
+		--log "$WORK/install.log" "$WORK/raid.yaml" || { cat "$WORK/install.log" >&2; fail "install through partition (raid)"; }
+	udevadm settle 2>/dev/null || true
+	RAID_UP=1
+	[ "$(cat /sys/block/md0/md/level)" = raid1 ] || fail "raid: md0 is not a RAID 1 array"
+	[ "$(cat /sys/block/md0/md/raid_disks)" = 2 ] || fail "raid: md0 does not have two members"
+	[ "$(fstype /dev/md0p1)" = ext4 ] && [ "$(fstype /dev/md0p2)" = ext4 ] || fail "raid: the array's partitions were not made (p1 '$(fstype /dev/md0p1)', p2 '$(fstype /dev/md0p2)')"
+	[ "$(size_mib /dev/md0p1)" -ge 390 ] && [ "$(size_mib /dev/md0p1)" -le 400 ] || fail "raid: p1 is $(size_mib /dev/md0p1) MiB, want about 400"
+	# Each disk has an ESP: the mounted one and the spare.
+	for d in "$disk" "$disk2"; do
+		parted -m -s "$d" print | grep -q '^1:.*esp' || fail "raid: $d has no ESP-flagged partition"
+		[ "$(fstype "${d}p1")" = vfat ] || fail "raid: ${d}p1 is not vfat"
+	done
+	mdadm --stop /dev/md0 >/dev/null 2>&1 || true
+	RAID_UP=0
+	pass "raid 1: array assembled from two disks and partitioned, an ESP on each disk"
+else
+	echo "skip: no mdadm, or /dev/md0 is taken, for the RAID case"
+fi
 
 echo "all loop-device cases passed"

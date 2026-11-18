@@ -209,3 +209,98 @@ func TestRaidAsPhysicalVolumeValidation(t *testing.T) {
 		}
 	}
 }
+
+// An array may carry a partition table of its own: it is then cut like a
+// disk, once it exists, and its partitions carry the filesystems.
+func TestPartitionedRAID(t *testing.T) {
+	c := serverConfig(&RaidArray{Name: "md0", Level: "1", Partitions: []*Media{
+		nil,
+		{FsType: "ext4", Mountpoint: "/", Size: "20G", UUID: "99999999-8888-7777-6666-555555555555"},
+		{FsType: "xfs", Mountpoint: "/srv", MountOptions: "noatime"},
+	}})
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	plan, err := c.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(plan.RaidDisks, ",") != "/dev/md0" || strings.Join(plan.Disks, ",") != "/dev/sda,/dev/sdb" {
+		t.Errorf("array disks %v, disks %v", plan.RaidDisks, plan.Disks)
+	}
+	// The disks' own tables know nothing of the array's partitions …
+	if table := flatCmds(plan.TableCommands()); strings.Contains(table, "/dev/md0") {
+		t.Errorf("the array is partitioned with the disks:\n%s", table)
+	}
+	// … which are cut on the array, the last one filling it.
+	want := "parted -s /dev/md0 mklabel gpt\n" +
+		"parted -a optimal --script /dev/md0 mkpart / 0% 20480MiB\n" +
+		"parted -a optimal --script /dev/md0 mkpart /srv 20480MiB 100%\n" +
+		"partprobe /dev/md0\n"
+	if got := flatCmds(plan.ArrayTableCommands()); got != want {
+		t.Errorf("array table:\n%s\nwant:\n%s", got, want)
+	}
+	mkfs, _ := plan.MkfsCommands()
+	flat := flatCmds(mkfs)
+	if !strings.Contains(flat, "mkfs.ext4 -U 99999999-8888-7777-6666-555555555555 -v -F -b 4096 /dev/md0p1") || !strings.Contains(flat, "mkfs.xfs -f /dev/md0p2") {
+		t.Errorf("mkfs:\n%s", flat)
+	}
+	if fstab := plan.Fstab(nil); !strings.Contains(fstab, "/dev/md0p2\t/srv\txfs\tnoatime") {
+		t.Errorf("fstab:\n%s", fstab)
+	}
+	// A dry run shows the array's table after the disks' and before mkfs.
+	all, _ := plan.Commands()
+	shown := flatCmds(all)
+	if i, j, k := strings.Index(shown, "/dev/sdb mklabel"), strings.Index(shown, "/dev/md0 mklabel"), strings.Index(shown, "mkfs."); i < 0 || j < i || k < j {
+		t.Errorf("dry run order:\n%s", shown)
+	}
+	// A named array's partitions are named as udev names them.
+	c = serverConfig(&RaidArray{Name: "data", Level: "1", Partitions: []*Media{{FsType: "ext4", Mountpoint: "/"}}})
+	plan, _ = c.Plan()
+	if got := plan.Parts[len(plan.Parts)-1].Device; got != "/dev/md/data1" {
+		t.Errorf("partition of a named array = %s", got)
+	}
+
+	for name, tc := range map[string]struct {
+		array *RaidArray
+		want  string
+	}{
+		"and a filesystem": {&RaidArray{Name: "md0", Level: "1", FsType: "ext4", Partitions: []*Media{{FsType: "ext4", Mountpoint: "/"}}}, "carries nothing else itself"},
+		"encrypted":        {&RaidArray{Name: "md0", Level: "1", Encrypted: true, Partitions: []*Media{{FsType: "ext4", Mountpoint: "/"}}}, "carries nothing else itself"},
+		"ESP":              {&RaidArray{Name: "md0", Level: "1", Partitions: []*Media{{FsType: "vfat", Mountpoint: "/boot"}, {FsType: "ext4", Mountpoint: "/"}}}, "the EFI System Partition cannot be on RAID"},
+		"crypt partition":  {&RaidArray{Name: "md0", Level: "1", Partitions: []*Media{{Type: "crypt", FsType: "ext4", Mountpoint: "/"}}}, "is a plain one"},
+		"fill not last":    {&RaidArray{Name: "md0", Level: "1", Partitions: []*Media{{FsType: "ext4", Mountpoint: "/"}, {FsType: "ext4", Mountpoint: "/srv", Size: "1G"}}}, ""},
+		"bad size":         {&RaidArray{Name: "md0", Level: "1", Partitions: []*Media{{FsType: "ext4", Mountpoint: "/", Size: "big"}}}, ""},
+	} {
+		c := serverConfig(tc.array)
+		err := c.Validate()
+		if tc.want != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("%s: error %v, want %q", name, err, tc.want)
+			}
+			continue
+		}
+		// Caught when planned, if not before.
+		if _, perr := c.Plan(); err == nil && perr == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestKernelRemoveValidation(t *testing.T) {
+	c := btrfsConfig()
+	c.Kernel, c.KernelRemove = "linux-lts", []string{"linux6.18", "linux-mainline"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	for _, bad := range []string{"", "linux 6", "-f", "../x"} {
+		c.KernelRemove = []string{bad}
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "is not a package name") {
+			t.Errorf("kernel-remove %q: %v", bad, err)
+		}
+	}
+	c.KernelRemove = []string{c.KernelPackage()}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "is the kernel the config installs") {
+		t.Errorf("removing the installed kernel: %v", err)
+	}
+}

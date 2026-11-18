@@ -12,6 +12,9 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- A storage alias for a disk whose name ends in a digit but is not nvme,
+  loop or mmcblk (md0, for one) named its partitions without the `p` the
+  kernel gives them.
 - The pre-install check asked for `mkfs.<filesystem>` even for partitions
   it keeps, refusing an install beside a filesystem the live medium cannot
   make.
@@ -60,6 +63,13 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- `--resume-from <stage>` resumes an install at any stage after
+  partitioning; the stages are now safe to run a second time.
+- A `raid` entry may carry `partitions`: a partition table on the array.
+- `kernel-remove` removes kernel packages once the base system is in place.
+- `--json-yaml` converts the JSON descriptor of clr-installer's predecessor
+  into a config, and `message-url` shows installer messages fetched from a
+  server, both as clr-installer has them.
 - More that a layout can pin down: `crypt-options`, `partition-type`,
   `partition-uuid`, `partition-name`, a filesystem `uuid`, fstab `passno` and
   `freq`, a RAID array's `metadata`.

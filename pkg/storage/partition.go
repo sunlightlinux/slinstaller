@@ -23,6 +23,7 @@ func (pl *Plan) Commands() ([][]string, error) {
 	}
 	cmds := append(pl.WipeCommands(), pl.ResizeCommands()...)
 	cmds = append(cmds, pl.TableCommands()...)
+	cmds = append(cmds, pl.ArrayTableCommands()...)
 	cmds = append(cmds, mkfs...)
 	// Subvolumes are made inside the filesystem, mounted for the purpose;
 	// shown here by the device they are made on.
@@ -45,6 +46,16 @@ func (pl *Plan) Commands() ([][]string, error) {
 func (pl *Plan) TableCommands() [][]string {
 	var cmds [][]string
 	for _, disk := range pl.DiskList() {
+		cmds = append(cmds, pl.diskTableCommands(disk)...)
+	}
+	return cmds
+}
+
+// ArrayTableCommands returns the commands that partition the arrays which
+// carry a table of their own. They can only run once the arrays exist.
+func (pl *Plan) ArrayTableCommands() [][]string {
+	var cmds [][]string
+	for _, disk := range pl.RaidDisks {
 		cmds = append(cmds, pl.diskTableCommands(disk)...)
 	}
 	return cmds
@@ -160,7 +171,9 @@ func (pl *Plan) physOn(disk string) []Partition {
 func (pl *Plan) MkfsCommands() ([][]string, error) {
 	var cmds [][]string
 	for _, p := range pl.Parts {
-		if p.IsPV || p.IsRaidMember {
+		// Nothing is made on a physical volume, a RAID member, or an array
+		// that carries a partition table rather than a filesystem.
+		if p.IsPV || p.IsRaidMember || (p.Raid && p.Filesystem == "") {
 			continue
 		}
 		// A preserved partition keeps its existing filesystem and data — no
