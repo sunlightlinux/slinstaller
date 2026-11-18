@@ -580,12 +580,6 @@ func (m model) openTextEditor(s section) model {
 		ti.SetValue(m.hostname)
 	case secProxy:
 		ti.SetValue(m.proxy)
-	case secMirror:
-		ti.SetValue(m.mirror)
-	case secKernelArgs:
-		ti.SetValue(m.kernelArgs)
-	case secBundles:
-		ti.SetValue(m.packages)
 	}
 	m.input = ti
 	m.formStep = 0
@@ -866,12 +860,6 @@ func (m model) updateSectionText(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case secProxy:
 			m.proxy = v
-		case secMirror:
-			m.mirror = v
-		case secKernelArgs:
-			m.kernelArgs = v
-		case secBundles:
-			m.packages = v
 		}
 		m.view = viewHub
 		return m, nil
