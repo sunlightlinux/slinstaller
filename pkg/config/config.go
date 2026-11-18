@@ -620,6 +620,39 @@ type Interface struct {
 	Gateway string     `yaml:"gateway,omitempty"`
 	DNS     string     `yaml:"dns,omitempty"`
 	Domain  string     `yaml:"domain,omitempty"`
+
+	// Bond, VLAN and Bridge make this a virtual interface created at boot
+	// on top of others (at most one of the three), and Routes are static
+	// routes out of it. These are slinstaller's own.
+	Bond   *Bond    `yaml:"bond,omitempty"`
+	VLAN   *VLAN    `yaml:"vlan,omitempty"`
+	Bridge *Bridge  `yaml:"bridge,omitempty"`
+	Routes []*Route `yaml:"routes,omitempty"`
+}
+
+// Bond joins several interfaces into one.
+type Bond struct {
+	Members []string `yaml:"members"`
+	// Mode is the bonding mode: active-backup (the default), 802.3ad,
+	// balance-rr, balance-xor, broadcast, balance-tlb or balance-alb.
+	Mode string `yaml:"mode,omitempty"`
+}
+
+// VLAN is a tagged network on another interface.
+type VLAN struct {
+	ID   int    `yaml:"id"`
+	Link string `yaml:"link"`
+}
+
+// Bridge joins interfaces at layer 2.
+type Bridge struct {
+	Members []string `yaml:"members,omitempty"`
+}
+
+// Route is a static route: a destination in CIDR form and its gateway.
+type Route struct {
+	To  string `yaml:"to"`
+	Via string `yaml:"via"`
 }
 
 // Address is one IP on an interface. version is 0 for IPv4, 1 for IPv6,
@@ -1348,6 +1381,7 @@ func (c *Config) Validate() error {
 	// Network interfaces: a statically configured one must carry usable
 	// addresses (and a valid gateway, if any), checked here so a typo fails
 	// before any disk is touched rather than partway through the install.
+	memberOf := map[string]string{}
 	for i, ni := range c.NetworkInterfaces {
 		if ni == nil {
 			continue
@@ -1356,6 +1390,61 @@ func (c *Config) Validate() error {
 		if who == "" {
 			who = fmt.Sprintf("networkInterfaces[%d]", i)
 			add("%s: no name", who)
+		}
+		kinds := 0
+		taken := func(members []string, what string) {
+			if len(members) == 0 && what == "bond" {
+				add("%s: a bond needs at least one member", who)
+			}
+			for _, m := range members {
+				if !network.ValidIfName(m) {
+					add("%s: %s member %q is not an interface name", who, what, m)
+				}
+				if memberOf[m] != "" {
+					add("%s: %s is already a member of %s", who, m, memberOf[m])
+				}
+				memberOf[m] = ni.Name
+			}
+		}
+		if ni.Bond != nil {
+			kinds++
+			taken(ni.Bond.Members, "bond")
+			if !network.ValidBondMode(ni.Bond.Mode) {
+				add("%s: bond mode %q is not one of %s", who, ni.Bond.Mode, strings.Join(network.BondModes, ", "))
+			}
+		}
+		if ni.Bridge != nil {
+			kinds++
+			taken(ni.Bridge.Members, "bridge")
+		}
+		if ni.VLAN != nil {
+			kinds++
+			if ni.VLAN.ID < 1 || ni.VLAN.ID > 4094 {
+				add("%s: VLAN id %d is not between 1 and 4094", who, ni.VLAN.ID)
+			}
+			if !network.ValidIfName(ni.VLAN.Link) {
+				add("%s: a VLAN needs the interface it is on (link)", who)
+			}
+		}
+		if kinds > 1 {
+			add("%s: an interface is a bond, a VLAN or a bridge, not several", who)
+		}
+		if kinds > 0 && !network.ValidIfName(ni.Name) {
+			add("%s: not a name an interface can be created with (1 to 15 characters, no spaces)", who)
+		}
+		for _, r := range ni.Routes {
+			if r == nil {
+				continue
+			}
+			if _, _, err := net.ParseCIDR(r.To); err != nil {
+				add("%s: route to %q is not in CIDR form (e.g. 10.1.0.0/16)", who, r.To)
+			}
+			if net.ParseIP(r.Via) == nil {
+				add("%s: route via %q is not a valid IP", who, r.Via)
+			}
+		}
+		if len(ni.Routes) > 0 && !ni.Static() {
+			add("%s: static routes need a static address on the interface", who)
 		}
 		if !ni.Static() {
 			continue
@@ -1370,6 +1459,13 @@ func (c *Config) Validate() error {
 		}
 		if ni.Gateway != "" && net.ParseIP(ni.Gateway) == nil {
 			add("%s: gateway %q is not a valid IP", who, ni.Gateway)
+		}
+	}
+
+	// A member of a bond or bridge carries no address of its own.
+	for _, ni := range c.NetworkInterfaces {
+		if ni != nil && memberOf[ni.Name] != "" && len(ni.Addrs) > 0 {
+			add("%s: is a member of %s, so the addresses belong on %s", ni.Name, memberOf[ni.Name], memberOf[ni.Name])
 		}
 	}
 

@@ -1110,8 +1110,14 @@ func (in *installer) network() error {
 		}
 	}
 
-	conf, err := network.DhcpcdConf(interfacesFromConfig(in.cfg.NetworkInterfaces))
+	ifaces := interfacesFromConfig(in.cfg.NetworkInterfaces)
+	conf, err := network.DhcpcdConf(ifaces)
 	if err != nil {
+		return err
+	}
+	// Bonds, VLANs and bridges are made at each boot by a service of their
+	// own; dhcpcd then finds the new interfaces and addresses them.
+	if err := system.NetLinks(in.opts.Root, network.LinkScript(ifaces)); err != nil {
 		return err
 	}
 	if conf != "" {
@@ -1169,6 +1175,20 @@ func interfacesFromConfig(cfgIfaces []*config.Interface) []network.Interface {
 				continue
 			}
 			iface.Addrs = append(iface.Addrs, network.Addr{IP: a.IP, Netmask: a.Netmask, V6: a.Version == 1})
+		}
+		if ni.Bond != nil {
+			iface.Bond = &network.Bond{Members: ni.Bond.Members, Mode: ni.Bond.Mode}
+		}
+		if ni.VLAN != nil {
+			iface.VLAN = &network.VLAN{ID: ni.VLAN.ID, Link: ni.VLAN.Link}
+		}
+		if ni.Bridge != nil {
+			iface.Bridge = &network.Bridge{Members: ni.Bridge.Members}
+		}
+		for _, r := range ni.Routes {
+			if r != nil {
+				iface.Routes = append(iface.Routes, network.Route{To: r.To, Via: r.Via})
+			}
 		}
 		ifaces = append(ifaces, iface)
 	}

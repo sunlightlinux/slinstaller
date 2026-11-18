@@ -724,3 +724,71 @@ func TestWriteFiles(t *testing.T) {
 	in = stagedInstaller(t, one("/etc/motd", "rwx"), &r)
 	wantErr(t, in.writeFiles(), "not an octal mode")
 }
+
+func TestNetworkLinksAreMadeAtBoot(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.NetworkInterfaces = []*config.Interface{
+		{Name: "bond0", Bond: &config.Bond{Members: []string{"eth0", "eth1"}, Mode: "802.3ad"}},
+		{Name: "bond0.100", VLAN: &config.VLAN{ID: 100, Link: "bond0"},
+			Addrs:  []*config.Address{{IP: "10.0.100.2", Netmask: "24"}},
+			Routes: []*config.Route{nil, {To: "10.1.0.0/16", Via: "10.0.100.254"}}},
+		{Name: "br0", Bridge: &config.Bridge{Members: []string{"eth2"}}},
+	}
+	// On a slinit system: a service of its own, enabled, running the script.
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	dir := mkTarget(t, in, "usr", "lib", "slinit.d")
+	os.WriteFile(filepath.Join(dir, "boot"), nil, 0o644)
+	os.WriteFile(filepath.Join(dir, "sshd"), nil, 0o644)
+	if err := in.network(); err != nil {
+		t.Fatal(err)
+	}
+	script := readTarget(t, in, "etc", "slinit.d", "sunlight-netlinks.sh")
+	if !strings.Contains(script, "type bond mode 802.3ad") || !strings.Contains(script, "type vlan id 100") || !strings.Contains(script, "type bridge") {
+		t.Errorf("link script:\n%s", script)
+	}
+	if st, _ := os.Stat(filepath.Join(in.opts.Root, "etc", "slinit.d", "sunlight-netlinks.sh")); st.Mode().Perm() != 0o755 {
+		t.Errorf("link script mode %v, want it executable", st.Mode().Perm())
+	}
+	if svc := readTarget(t, in, "etc", "slinit.d", "sunlight-netlinks"); !strings.Contains(svc, "command = /etc/slinit.d/sunlight-netlinks.sh") {
+		t.Errorf("service:\n%s", svc)
+	}
+	if target, err := os.Readlink(filepath.Join(in.opts.Root, "etc", "slinit.d", "boot.d", "sunlight-netlinks")); err != nil || target != "/etc/slinit.d/sunlight-netlinks" {
+		t.Errorf("the service is not enabled: %q, %v", target, err)
+	}
+	conf := readTarget(t, in, "etc", "dhcpcd.conf")
+	if !strings.Contains(conf, "denyinterfaces eth0 eth1 eth2") || !strings.Contains(conf, "static routes=10.1.0.0/16 10.0.100.254") {
+		t.Errorf("dhcpcd.conf:\n%s", conf)
+	}
+
+	// On a runit system the script is run from rc.local.
+	in = stagedInstaller(t, cfg, &r)
+	if err := in.network(); err != nil {
+		t.Fatal(err)
+	}
+	if rc := readTarget(t, in, "etc", "rc.local"); !strings.Contains(rc, "/etc/slinit.d/sunlight-netlinks.sh") {
+		t.Errorf("rc.local:\n%s", rc)
+	}
+	// With no such interfaces nothing of the kind is written.
+	in = stagedInstaller(t, twoPartConfig(), &r)
+	_ = in.network()
+	if _, err := os.Stat(filepath.Join(in.opts.Root, "etc", "slinit.d", "sunlight-netlinks.sh")); err == nil {
+		t.Error("a link script was written with no links configured")
+	}
+
+	// What cannot be written fails the stage.
+	in = stagedInstaller(t, cfg, &r)
+	blockDir(t, in, "etc", "slinit.d")
+	wantErr(t, in.network(), "system:")
+	in = stagedInstaller(t, cfg, &r)
+	blockFile(t, in, "etc", "slinit.d", "sunlight-netlinks.sh")
+	wantErr(t, in.network(), "sunlight-netlinks.sh")
+	in = stagedInstaller(t, cfg, &r)
+	blockWithDir(t, in, "etc", "rc.local")
+	wantErr(t, in.network(), "system:")
+	in = stagedInstaller(t, cfg, &r)
+	sd := mkTarget(t, in, "usr", "lib", "slinit.d")
+	os.WriteFile(filepath.Join(sd, "boot"), nil, 0o644)
+	blockFile(t, in, "etc", "slinit.d", "sunlight-netlinks")
+	wantErr(t, in.network(), "write sunlight-netlinks")
+}

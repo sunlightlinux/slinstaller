@@ -79,6 +79,13 @@ type Interface struct {
 	Gateway string
 	DNS     string // one or more servers, space-separated
 	Domain  string // search domain (clr-installer's interface "domain")
+
+	// A virtual interface made on top of others (see links.go), and the
+	// static routes out of this one.
+	Bond   *Bond
+	VLAN   *VLAN
+	Bridge *Bridge
+	Routes []Route
 }
 
 // ValidAddr reports whether ip and netmask form a usable static address
@@ -127,11 +134,24 @@ func DhcpcdConf(ifaces []Interface) (string, error) {
 		if iface.Domain != "" {
 			fmt.Fprintf(&b, "static domain_search=%s\n", iface.Domain)
 		}
+		if len(iface.Routes) > 0 {
+			var routes []string
+			for _, r := range iface.Routes {
+				routes = append(routes, r.To+" "+r.Via)
+			}
+			fmt.Fprintf(&b, "static routes=%s\n", strings.Join(routes, " "))
+		}
+	}
+	head := ""
+	// The members of a bond or bridge carry no address of their own: left
+	// alone, dhcpcd would ask for a lease on each of them.
+	if m := members(ifaces); len(m) > 0 {
+		head = "\n# members of a bond or bridge, configured by slinstaller\ndenyinterfaces " + strings.Join(m, " ") + "\n"
 	}
 	if b.Len() == 0 {
-		return "", nil
+		return head, nil
 	}
-	return "\n# static interfaces configured by slinstaller\n" + b.String(), nil
+	return head + "\n# static interfaces configured by slinstaller\n" + b.String(), nil
 }
 
 // maskToCIDR turns a netmask into a prefix length. It accepts a dotted

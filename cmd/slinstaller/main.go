@@ -451,6 +451,13 @@ restart:
 	if cfg.Bootloader != nil && cfg.Bootloader.ProbeOtherOS {
 		addPkg("os-prober")
 	}
+	// Bonds, VLANs and bridges are made at boot with ip(8).
+	for _, ni := range cfg.NetworkInterfaces {
+		if ni != nil && (ni.Bond != nil || ni.VLAN != nil || ni.Bridge != nil) {
+			addPkg("iproute2")
+			break
+		}
+	}
 	// The configured kernel (clr's kernel-native/kernel-lts → linux/linux-lts)
 	// and any extra packages the config asks for.
 	addPkg(cfg.KernelPackage())

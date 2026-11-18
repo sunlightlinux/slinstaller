@@ -370,6 +370,59 @@ func AutoUpdate(root string, on bool) error {
 	return EnableSlinitService(root, AutoUpdateServiceName)
 }
 
+// NetLinksServiceName is the slinit service that creates the bonds, VLANs
+// and bridges configured at install time.
+const NetLinksServiceName = "sunlight-netlinks"
+
+// netLinksScript is where that service's script lives in the target.
+const netLinksScript = "/etc/slinit.d/sunlight-netlinks.sh"
+
+const netLinksService = `# sunlight-netlinks -- creates the bonds, VLANs and bridges configured at
+# install time, before the network service addresses them. Written by
+# slinstaller; the links themselves are in ` + netLinksScript + `.
+type = scripted
+command = ` + netLinksScript + `
+depends-on: filesystems
+restart = false
+`
+
+// NetLinks installs script — the commands that create the configured bonds,
+// VLANs and bridges — to run at each boot of the target. On a slinit system
+// it is a service of its own, enabled; on a runit one it is run from
+// /etc/rc.local. An empty script installs nothing.
+func NetLinks(root, script string) error {
+	if script == "" {
+		return nil
+	}
+	path := filepath.Join(root, netLinksScript)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("system: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		return fmt.Errorf("system: write %s: %w", netLinksScript, err)
+	}
+	if !IsSlinitSystem(root) {
+		rc := filepath.Join(root, "etc", "rc.local")
+		f, err := os.OpenFile(rc, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o755)
+		if err != nil {
+			return fmt.Errorf("system: %w", err)
+		}
+		_, werr := f.WriteString("\n# bonds, VLANs and bridges configured by slinstaller\n" + netLinksScript + "\n")
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			return fmt.Errorf("system: write rc.local: %w", werr)
+		}
+		return nil
+	}
+	svc := filepath.Join(root, "etc", "slinit.d", NetLinksServiceName)
+	if err := os.WriteFile(svc, []byte(netLinksService), 0o644); err != nil {
+		return fmt.Errorf("system: write %s: %w", NetLinksServiceName, err)
+	}
+	return EnableSlinitService(root, NetLinksServiceName)
+}
+
 // LockRootCommands returns the chrooted commands that lock the target's
 // root password and stamp it as changed today, as clr-installer does once
 // an administrator account exists: root is then reached through sudo, and
