@@ -147,7 +147,7 @@ layout needs to boot have to be in it.
 
 **Installing beside what is there.** `--discover /dev/sda` prints the disk's
 present layout as a config that keeps every partition; edit it to say where
-the new system goes. An existing ext2/3/4 partition can give up room for it:
+the new system goes. An existing ext2/3/4 or ntfs partition can give up room for it:
 
 ```yaml
 reusePartitions: true
@@ -163,6 +163,59 @@ targetMedia:
 The filesystem is shrunk first and the partition after it, and a `create`
 partition with no `start` goes in the largest free region. Shrinking a
 filesystem is not something to do without a backup.
+
+**Servers.** A root on RAID is only redundant if the machine can still boot
+with a disk gone, so a second disk can carry a spare ESP; and an array can
+hold a volume group or an encrypted volume rather than a filesystem:
+
+```yaml
+targetMedia:
+- name: sda
+  type: disk
+  children:
+  - { name: sda1, type: part, fstype: vfat, mountpoint: /boot/efi, size: 512M }
+  - { name: sda2, type: raid, raid: md0 }
+- name: sdb
+  type: disk
+  children:
+  - { name: sdb1, type: part, fstype: vfat, size: 512M, esp: true }   # spare ESP
+  - { name: sdb2, type: raid, raid: md0 }
+raid:
+- name: md0
+  level: 1
+  encrypted: true            # LUKS on the array (optional)
+  volumeGroup: vg0           # the array is the group's physical volume
+  children:
+  - { name: root, fstype: ext4, mountpoint: /, size: 40G }
+  - { name: var,  fstype: xfs,  mountpoint: /var }
+networkInterfaces:
+- name: bond0
+  bond: { members: [eth0, eth1], mode: 802.3ad }
+- name: bond0.100
+  vlan: { id: 100, link: bond0 }
+  addrs: [{ ip: 10.0.100.2, netmask: 255.255.255.0 }]
+  gateway: 10.0.100.1
+  routes: [{ to: 10.1.0.0/16, via: 10.0.100.254 }]
+report-url: https://deploy.example/events   # progress, stage by stage, as JSON
+```
+
+A spare ESP needs the main one at `/boot/efi` (at `/boot` the kernels would
+live on one disk only). Several `type: lvm` partitions may share a
+`volumeGroup`. Bonds, VLANs and bridges are created at each boot by a
+service the installer writes; a `bridge: { members: [...] }` entry works the
+same way.
+
+**A whole-disk image.** `disk-image: disk.raw.zst` with a single disk in
+`targetMedia` (no layout) writes the image over the disk and stops: the image
+already is the partitioned, configured system.
+
+More on the command line: the config may be an `https://` URL; `--resume`
+continues an install that failed installing the base system without
+partitioning again; `--unmount` takes down what a `--through` run left
+mounted and `--in-target "cmd"` runs a command inside it. A partition table
+whose partitions are named `CLR_BOOT`, `CLR_ROOT`, `CLR_SWAP`,
+`CLR_MNT_/path` (with `_F` to format) comes out of `--discover` already
+saying what goes where.
 
 On the command line, `--system-check config.yaml` runs every pre-install
 check and stops without changing anything. A failed install leaves a

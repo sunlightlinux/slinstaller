@@ -51,9 +51,18 @@ Also: installing the base system from a tar or squashfs image (`image`),
 describing a disk's present layout as a config (`--discover`), and shrinking
 an existing ext2/3/4 partition to make room (`resize`).
 
+For servers: spare ESPs on the other disks of an array, LVM and LUKS on
+RAID, volume groups across partitions; bonds, VLANs, bridges and static
+routes. Also: a static interface applied to the live system from the
+full-screen installer, ntfs shrinking, kept partitions checked against the
+disk, whole-disk images (`disk-image`), `--resume`, `--unmount`,
+`--in-target`, a config from a URL, progress reports (`report-url`), and
+clr-installer's role names in the partition table read by `--discover`.
+
 Not done: resizing from the full-screen installer's Safe Installation (it
-still needs unallocated space to be there already), filesystems other than
-ext2/3/4, and fetching an image from a URL.
+still needs unallocated space to be there already), shrinking btrfs or xfs,
+fetching an image from a URL, and clr-installer's small leftovers
+(`--log-level`, `--json-yaml`, its server/desktop size modes).
 
 ## What's left
 

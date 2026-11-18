@@ -12,6 +12,9 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- The pre-install check asked for `mkfs.<filesystem>` even for partitions
+  it keeps, refusing an install beside a filesystem the live medium cannot
+  make.
 - The config's proxy now applies to the reachability check made before
   the install. It used only the environment, so on a proxied network a config
   that set the proxy was refused for having no network.
@@ -57,6 +60,26 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Storage for servers: `esp: true` makes a vfat partition on a second disk
+  a spare EFI System Partition, given a copy of the bootloader and a firmware
+  entry; a `raid` entry may be `encrypted` and/or carry a `volumeGroup` with
+  logical volumes; several `lvm` partitions may share a volume group.
+- Network: `bond`, `vlan` and `bridge` interfaces and static `routes`,
+  created at each boot of the installed system by a service of their own.
+- A static interface set in the full-screen installer is applied to the live
+  system too, so an install on a network without DHCP can reach its
+  repository.
+- `resize` also shrinks ntfs. A partition kept in a `reusePartitions`
+  install is checked to hold what the config says, and the confirmation says
+  what each partition to be formatted holds now.
+- `disk-image` writes a whole-disk image over the target disk in place of an
+  install.
+- `--resume` continues an install that failed installing the base system;
+  `--unmount` and `--in-target` work on what a `--through` run left mounted;
+  the config may be an `https://` URL; `report-url` is sent the install's
+  progress as JSON.
+- `--discover` reads the roles partitions are named for in the partition
+  table (`CLR_ROOT`, `CLR_BOOT`, `CLR_SWAP`, `CLR_MNT_/path`, `_F`).
 - `image` (or `--image`) installs the base system by unpacking a tar or
   squashfs root filesystem image instead of installing packages.
 - `--discover <disk>` prints a config describing the layout already on a

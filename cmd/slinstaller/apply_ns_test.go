@@ -233,6 +233,8 @@ func applyChild(t *testing.T) {
 		t.Errorf("an aborted install was reported: %s", got)
 	}
 
+	applyDiskImage(t, confirmed)
+
 	// --resume: no confirmation is asked (nothing is erased), nothing is
 	// partitioned or formatted, and the install goes straight to the mount.
 	e = newApplyEnv(t)

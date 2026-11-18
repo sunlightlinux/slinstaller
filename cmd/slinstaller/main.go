@@ -374,6 +374,18 @@ restart:
 		return err
 	}
 
+	// A whole-disk image is not an install: there is no layout to plan and
+	// nothing to configure. It has its own, much shorter, path.
+	if cfg.DiskImage != "" {
+		if fullscreen || len(rest) == 0 {
+			return fmt.Errorf("disk-image comes from a config file")
+		}
+		if through != "" || resume || systemCheck {
+			return fmt.Errorf("disk-image writes one image and is done: --through, --resume and --system-check do not apply")
+		}
+		return installDiskImage(cfg, rest[0], apply, stdin)
+	}
+
 	// Catch a mistyped timezone or keymap here, before anything is wiped,
 	// but only when the live system actually has the data to check against
 	// (so a minimal medium that lacks it does not reject a valid value).

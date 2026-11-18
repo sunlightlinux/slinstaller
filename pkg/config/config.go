@@ -147,6 +147,14 @@ type Config struct {
 	HTTPProxy string `yaml:"httpProxy,omitempty"`
 	NoProxy   string `yaml:"noProxy,omitempty"`
 
+	// DiskImage writes a whole-disk image — partition table and all — onto
+	// the one disk named in targetMedia, in place of an install: nothing is
+	// partitioned, configured or made bootable by slinstaller, because the
+	// image already is all of that. Compressed images (.zst, .xz, .gz) are
+	// unpacked on the way. A relative path is taken from the config file's
+	// directory.
+	DiskImage string `yaml:"disk-image,omitempty"`
+
 	// Image installs the base system by unpacking a root filesystem image
 	// — a tar archive (compressed or not) or a squashfs — instead of
 	// installing packages. The image has to hold a complete system: its
@@ -925,6 +933,10 @@ func looksHashed(s string) bool {
 func (c *Config) Validate() error {
 	if c.SkipValidationAll {
 		return nil
+	}
+	if c.DiskImage != "" {
+		_, err := c.DiskImageTarget()
+		return err
 	}
 
 	disks, err := c.installDisks()
@@ -1846,6 +1858,32 @@ func cryptMapName(ch *Media) string {
 // installDisks finds the disks to install to: the disk-type media that
 // carry a partition layout. One disk is the common case; several are a
 // RAID (or otherwise multi-disk) layout.
+// DiskImageTarget is the one disk a disk-image is written to. A config that
+// also describes a layout, or names several disks, is refused: the image
+// replaces the whole disk, and which disk has to be beyond doubt.
+func (c *Config) DiskImageTarget() (*Media, error) {
+	if strings.Contains(c.DiskImage, "://") {
+		return nil, fmt.Errorf("config: disk-image: %s is a URL; fetch the image first and give its path", c.DiskImage)
+	}
+	var disks []*Media
+	for _, m := range c.TargetMedia {
+		if m != nil {
+			disks = append(disks, m)
+		}
+	}
+	switch {
+	case len(disks) != 1 || (disks[0].Type != "" && disks[0].Type != "disk"):
+		return nil, fmt.Errorf("config: disk-image is written to one disk; targetMedia names %d entries", len(disks))
+	case len(disks[0].Children) > 0 || c.ReusePartitions:
+		return nil, fmt.Errorf("config: disk-image replaces the whole of %s, partition table included; a layout cannot be given with it", disks[0].Name)
+	case disks[0].Name == "" || strings.Contains(disks[0].Name, "/"):
+		return nil, fmt.Errorf("config: disk-image: the disk needs a name (e.g. sda) or a match that was resolved")
+	case c.Image != "":
+		return nil, fmt.Errorf("config: give image (a root filesystem to install) or disk-image (a whole disk to write), not both")
+	}
+	return disks[0], nil
+}
+
 func (c *Config) installDisks() ([]*Media, error) {
 	var disks []*Media
 	for _, m := range c.TargetMedia {
