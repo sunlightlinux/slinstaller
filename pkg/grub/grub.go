@@ -50,6 +50,24 @@ type Options struct {
 	// /etc/default/grub (see CmdlineConfig); the controller writes that
 	// file, this package only renders the line.
 	KernelArgs []string
+
+	// Removable also installs the loader at the removable-media path
+	// (EFI/BOOT/BOOTX64.EFI), which firmware boots when it has no entry of
+	// its own for this disk — after its settings are reset, or when the
+	// disk is moved to another machine.
+	Removable bool
+
+	// NoNVRAM leaves the firmware's boot entries alone.
+	NoNVRAM bool
+
+	// SerialTerminal shows the boot menu on the serial console as well as
+	// the screen. The port and speed come from KernelArgs' console=ttyS…,
+	// or COM1 at 115200 when there is none.
+	SerialTerminal bool
+
+	// ProbeOtherOS lets grub-mkconfig add entries for other systems it
+	// finds on the machine (needs os-prober in the target).
+	ProbeOtherOS bool
 }
 
 // Commands returns the chrooted grub-install and grub-mkconfig commands.
@@ -70,11 +88,73 @@ func (o Options) Commands() ([][]string, error) {
 		target = DefaultTarget
 	}
 
-	return [][]string{
-		{"chroot", o.Root, "grub-install",
-			"--target=" + target, "--efi-directory=" + o.ESPDir, "--bootloader-id=" + id},
-		{"chroot", o.Root, "grub-mkconfig", "-o", configPath},
-	}, nil
+	install := []string{"chroot", o.Root, "grub-install",
+		"--target=" + target, "--efi-directory=" + o.ESPDir, "--bootloader-id=" + id}
+	if o.NoNVRAM {
+		install = append(install, "--no-nvram")
+	}
+	cmds := [][]string{install}
+	if o.Removable {
+		// A second copy at the fallback path; --removable never registers
+		// a firmware entry, so it does not disturb the one made above.
+		cmds = append(cmds, []string{"chroot", o.Root, "grub-install",
+			"--target=" + target, "--efi-directory=" + o.ESPDir, "--removable"})
+	}
+	return append(cmds, []string{"chroot", o.Root, "grub-mkconfig", "-o", configPath}), nil
+}
+
+// TerminalConfig renders the /etc/default/grub lines for the options that
+// are not the command line: the serial terminal and probing for other
+// systems. "" when neither is asked for.
+func (o Options) TerminalConfig() string {
+	var b strings.Builder
+	if o.SerialTerminal {
+		unit, speed, word, parity := serialPort(o.KernelArgs)
+		b.WriteString("GRUB_TERMINAL=\"console serial\"\n")
+		fmt.Fprintf(&b, "GRUB_SERIAL_COMMAND=\"serial --unit=%s --speed=%s --word=%s --parity=%s --stop=1\"\n",
+			unit, speed, word, parity)
+	}
+	if o.ProbeOtherOS {
+		b.WriteString("GRUB_DISABLE_OS_PROBER=false\n")
+	}
+	return b.String()
+}
+
+// serialPort reads the last console=ttyS<unit>[,<speed>[<parity>[<bits>]]]
+// among the kernel arguments, the console the kernel itself will use, with
+// 0, 115200, 8 and no parity for whatever is not given.
+func serialPort(kargs []string) (unit, speed, word, parity string) {
+	unit, speed, word, parity = "0", "115200", "8", "no"
+	for _, a := range kargs {
+		rest, ok := strings.CutPrefix(a, "console=ttyS")
+		if !ok {
+			continue
+		}
+		u, mode, _ := strings.Cut(rest, ",")
+		if u == "" || strings.Trim(u, "0123456789") != "" {
+			continue
+		}
+		unit, speed, word, parity = u, "115200", "8", "no"
+		i := 0
+		for i < len(mode) && mode[i] >= '0' && mode[i] <= '9' {
+			i++
+		}
+		if i > 0 {
+			speed = mode[:i]
+		}
+		if i < len(mode) {
+			switch mode[i] {
+			case 'o':
+				parity = "odd"
+			case 'e':
+				parity = "even"
+			}
+			if i+1 < len(mode) && (mode[i+1] == '7' || mode[i+1] == '8') {
+				word = mode[i+1 : i+2]
+			}
+		}
+	}
+	return
 }
 
 // CmdlineConfig renders the /etc/default/grub line that sets the kernel

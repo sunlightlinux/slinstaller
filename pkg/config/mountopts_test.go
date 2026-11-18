@@ -118,3 +118,27 @@ func TestSubvolumeAndMountOptionValidation(t *testing.T) {
 		t.Errorf("array in the plan: %+v", got)
 	}
 }
+
+func TestBootloaderValidation(t *testing.T) {
+	off, on := false, true
+	for name, tc := range map[string]struct {
+		b    *Bootloader
+		want string
+	}{
+		"ok":               {&Bootloader{Terminal: "serial", Removable: true, UpdateNVRAM: &off, ProbeOtherOS: true}, ""},
+		"console":          {&Bootloader{Terminal: "console", UpdateNVRAM: &on}, ""},
+		"unknown terminal": {&Bootloader{Terminal: "vga"}, `terminal "vga" is not console or serial`},
+		// Neither a firmware entry nor the fallback path: nothing would boot.
+		"nothing to boot": {&Bootloader{UpdateNVRAM: &off}, "set removable: true as well"},
+	} {
+		c := btrfsConfig()
+		c.Bootloader = tc.b
+		err := c.Validate()
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("%s: %v", name, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("%s: error %v, want %q", name, err, tc.want)
+		}
+	}
+}

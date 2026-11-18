@@ -607,3 +607,48 @@ func TestOutputWriterIsUsedWhenGiven(t *testing.T) {
 		t.Error("the configured output writer was not used")
 	}
 }
+
+func TestBootloaderOptions(t *testing.T) {
+	off := false
+	cfg := twoPartConfig()
+	cfg.KernelArguments = &config.KernelArguments{Add: []string{"console=tty0", "console=ttyS1,57600n8"}}
+	cfg.Bootloader = &config.Bootloader{Terminal: "serial", Removable: true, UpdateNVRAM: &off, ProbeOtherOS: true}
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	mkTarget(t, in, "etc", "default")
+	if err := in.bootloader(); err != nil {
+		t.Fatal(err)
+	}
+	grubDefault := readTarget(t, in, "etc", "default", "grub")
+	for _, want := range []string{
+		`GRUB_TERMINAL="console serial"`,
+		`GRUB_SERIAL_COMMAND="serial --unit=1 --speed=57600 --word=8 --parity=no --stop=1"`,
+		"GRUB_DISABLE_OS_PROBER=false",
+	} {
+		if !strings.Contains(grubDefault, want) {
+			t.Errorf("/etc/default/grub missing %q:\n%s", want, grubDefault)
+		}
+	}
+	flat := r.flat()
+	if !strings.Contains(flat, "--no-nvram") || !strings.Contains(flat, "--removable") {
+		t.Errorf("grub-install:\n%s", flat)
+	}
+	// The file is written before grub-mkconfig reads it.
+	if strings.Index(flat, "grub-mkconfig") < strings.Index(flat, "--removable") {
+		t.Errorf("order:\n%s", flat)
+	}
+
+	// Without the section nothing of the kind is written.
+	r = recorder{}
+	in = stagedInstaller(t, twoPartConfig(), &r)
+	mkTarget(t, in, "etc", "default")
+	if err := in.bootloader(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readTarget(t, in, "etc", "default", "grub"); strings.Contains(got, "GRUB_TERMINAL") || strings.Contains(got, "OS_PROBER") {
+		t.Errorf("default /etc/default/grub:\n%s", got)
+	}
+	if strings.Contains(r.flat(), "--removable") || strings.Contains(r.flat(), "--no-nvram") {
+		t.Errorf("default grub-install:\n%s", r.flat())
+	}
+}

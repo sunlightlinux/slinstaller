@@ -716,6 +716,12 @@ func (in *installer) bootloader() error {
 	}
 
 	g := grub.Options{Root: in.opts.Root, ESPDir: esp, KernelArgs: kargs}
+	if b := in.cfg.Bootloader; b != nil {
+		g.Removable = b.Removable
+		g.NoNVRAM = b.UpdateNVRAM != nil && !*b.UpdateNVRAM
+		g.SerialTerminal = b.Terminal == "serial"
+		g.ProbeOtherOS = b.ProbeOtherOS
+	}
 
 	// Extra /etc/default/grub lines, written before grub-install and
 	// grub-mkconfig both read it: the name in the boot menu, the kernel
@@ -727,6 +733,9 @@ func (in *installer) bootloader() error {
 	grubDefault.WriteString("\n# boot menu name set by slinstaller\n" + grub.DistributorConfig())
 	if line := g.CmdlineConfig(); line != "" {
 		grubDefault.WriteString("\n# kernel command line set by slinstaller\n" + line)
+	}
+	if lines := g.TerminalConfig(); lines != "" {
+		grubDefault.WriteString("\n# boot menu options set by slinstaller\n" + lines)
 	}
 	if in.bootOnEncrypted() {
 		grubDefault.WriteString("\n# /boot is encrypted — let GRUB unlock it\nGRUB_ENABLE_CRYPTODISK=y\n")

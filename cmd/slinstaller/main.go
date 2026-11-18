@@ -379,6 +379,9 @@ restart:
 	for _, p := range layoutPackages(plan) {
 		addPkg(p)
 	}
+	if cfg.Bootloader != nil && cfg.Bootloader.ProbeOtherOS {
+		addPkg("os-prober")
+	}
 	// The configured kernel (clr's kernel-native/kernel-lts → linux/linux-lts)
 	// and any extra packages the config asks for.
 	addPkg(cfg.KernelPackage())

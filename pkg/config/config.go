@@ -61,6 +61,10 @@ type Config struct {
 
 	KernelArguments *KernelArguments `yaml:"kernel-arguments,omitempty"`
 
+	// Bootloader holds the choices about how GRUB is installed; without it
+	// the loader is installed and registered with the firmware, as before.
+	Bootloader *Bootloader `yaml:"bootloader,omitempty"`
+
 	// ConsoleLogLevel sets the kernel console log verbosity (0 emergency … 7
 	// debug) in two places: loglevel=N on the kernel command line, and
 	// kernel.printk = N 4 1 7 via /etc/sysctl.d on the installed system. nil
@@ -229,6 +233,28 @@ type Media struct {
 	// its serial number, WWN, model or a /dev/disk/by-* path — instead of
 	// by its kernel name, which can. ResolveDisks turns it into the name.
 	Match *DiskMatch `yaml:"match,omitempty"`
+}
+
+// Bootloader is how GRUB is installed.
+type Bootloader struct {
+	// Terminal is where the boot menu shows: "" or "console" for the
+	// screen only, "serial" for the screen and the serial console the
+	// kernel uses (console=ttyS… among the kernel arguments).
+	Terminal string `yaml:"terminal,omitempty"`
+
+	// Removable also installs the loader at the removable-media path
+	// (EFI/BOOT/BOOTX64.EFI), which the firmware boots when it has no
+	// entry of its own for the disk.
+	Removable bool `yaml:"removable,omitempty"`
+
+	// UpdateNVRAM, when false, leaves the firmware's boot entries alone;
+	// the system then boots from the removable-media path, so Removable
+	// has to be set. Unset means true.
+	UpdateNVRAM *bool `yaml:"update-nvram,omitempty"`
+
+	// ProbeOtherOS adds the other systems found on the machine to the
+	// boot menu (installs os-prober in the target).
+	ProbeOtherOS bool `yaml:"probe-other-os,omitempty"`
 }
 
 // Subvolume is one btrfs subvolume and where it is mounted.
@@ -676,6 +702,17 @@ func (c *Config) Validate() error {
 	for _, al := range c.BlockDevices {
 		if al != nil && al.File != "" && !strings.HasPrefix(al.File, "/dev/") {
 			add("block-devices: %s points at %s, an image file; installing into an image is not supported (name a device such as /dev/sda)", al.Name, al.File)
+		}
+	}
+
+	if b := c.Bootloader; b != nil {
+		switch b.Terminal {
+		case "", "console", "serial":
+		default:
+			add("bootloader: terminal %q is not console or serial", b.Terminal)
+		}
+		if b.UpdateNVRAM != nil && !*b.UpdateNVRAM && !b.Removable {
+			add("bootloader: update-nvram: false leaves the firmware nothing to boot; set removable: true as well")
 		}
 	}
 
