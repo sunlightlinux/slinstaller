@@ -30,6 +30,28 @@ func TestResizeShrinksTheFilesystemFirst(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("resize commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
+	// ntfs: a trial that changes nothing, then the real run, then the
+	// partition — the same order, with its own tool.
+	nt := resizePlan()
+	nt.Parts[1].Filesystem = "ntfs"
+	var ntfs []string
+	for _, c := range nt.ResizeCommands() {
+		ntfs = append(ntfs, strings.Join(c, " "))
+	}
+	wantNTFS := []string{
+		"ntfsresize --no-action --no-progress-bar -s 42949672960 /dev/sda2",
+		"sh -c echo y | ntfsresize --no-progress-bar -f -s 42949672960 /dev/sda2",
+		"sh -c echo ',40960MiB' | sfdisk --no-reread -N 2 /dev/sda",
+		"partprobe /dev/sda",
+	}
+	if strings.Join(ntfs, "\n") != strings.Join(wantNTFS, "\n") {
+		t.Errorf("ntfs resize commands:\n%s", strings.Join(ntfs, "\n"))
+	}
+	for fs, want := range map[string]bool{"ext2": true, "ext3": true, "ext4": true, "ntfs": true, "xfs": false, "btrfs": false, "": false} {
+		if Resizable(fs) != want {
+			t.Errorf("Resizable(%q) = %v", fs, !want)
+		}
+	}
 	// Only the partition that asks is touched, and a plan with no resize
 	// has no such commands.
 	for _, c := range got {
@@ -114,5 +136,19 @@ func TestPlaceInFreeUsesTheLargestRegion(t *testing.T) {
 	partedPrintFree = func(string) (string, error) { t.Error("the disk was read for nothing"); return "", nil }
 	if err := (&Plan{Parts: []Partition{{Device: "/dev/sda1"}}}).PlaceInFree(); err != nil {
 		t.Error(err)
+	}
+}
+
+// A kept partition needs no mkfs: asking for one would refuse an install
+// beside a system whose filesystem the live medium cannot make.
+func TestRequiredToolsSkipKeptPartitions(t *testing.T) {
+	pl := resizePlan()
+	pl.Parts[1].Filesystem = "ntfs"
+	tools := " " + strings.Join(pl.RequiredTools(), " ") + " "
+	if strings.Contains(tools, "mkfs.ntfs") || strings.Contains(tools, "mkfs.vfat") {
+		t.Errorf("mkfs asked for a kept partition: %s", tools)
+	}
+	if !strings.Contains(tools, " mkfs.ext4 ") || !strings.Contains(tools, " ntfsresize ") {
+		t.Errorf("tools for what is made and shrunk are missing: %s", tools)
 	}
 }

@@ -40,13 +40,17 @@ func discoverConfig(devs []blockdev.Device, disk string) (*config.Config, []stri
 			Name: p.Name, Type: "part", Label: p.Label, Preserve: true,
 			Size: fmt.Sprintf("%dM", p.Size>>20),
 		}
+		// What it holds is written down as it is: a kept partition is
+		// checked against it at install time, and a resize needs it.
+		ch.FsType = p.FsType
 		switch {
 		case storage.KnownFilesystem(p.FsType):
-			ch.FsType = p.FsType
 		case p.FsType == "":
 			notes = append(notes, fmt.Sprintf("%s has no filesystem slinstaller recognises; give it an fstype to use it", p.Path))
+		case storage.Resizable(p.FsType):
+			notes = append(notes, fmt.Sprintf("%s holds %s: it can be kept, and shrunk with resize, but not installed to", p.Path, p.FsType))
 		default:
-			notes = append(notes, fmt.Sprintf("%s holds %s, which an install into existing partitions cannot use; leave it out or keep it untouched", p.Path, p.FsType))
+			notes = append(notes, fmt.Sprintf("%s holds %s, which can only be kept as it is", p.Path, p.FsType))
 		}
 		if p.FsType == "vfat" {
 			notes = append(notes, fmt.Sprintf("%s is vfat: if it is the EFI System Partition, give it mountpoint: /boot/efi", p.Path))

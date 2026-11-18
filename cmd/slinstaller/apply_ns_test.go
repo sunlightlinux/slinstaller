@@ -378,7 +378,22 @@ func applyChild(t *testing.T) {
 	e = newApplyEnv(t, shrinkTools...)
 	setListing(t, e.bin, existing("ntfs", "107374182400"))
 	_, err = e.run(confirmed, shrink)
-	e.refused("resize of another filesystem", err, "holds ntfs; only ext2, ext3 and ext4 can be resized")
+	e.refused("a kept partition that is not what the config says", err, "is to be kept as ext4, but holds ntfs")
+	// A kept partition with no filesystem at all is not what was described either.
+	e = newApplyEnv(t, shrinkTools...)
+	setListing(t, e.bin, existing("", "107374182400"))
+	_, err = e.run(confirmed, shrink)
+	e.refused("a kept partition that is empty", err, "is to be kept as ext4, but holds -")
+	// An ntfs partition described as one can be shrunk, with its own tool.
+	ntfs := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{
+		{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Name: testName + "p2", Type: "part", FsType: "ntfs", Preserve: true, Resize: "40G"},
+		{Name: testName + "p3", Type: "part", FsType: "ext4", Mountpoint: "/", Create: true},
+	}}}}
+	e = newApplyEnv(t, "sh")
+	setListing(t, e.bin, existing("ntfs", "107374182400"))
+	_, err = e.run(confirmed, ntfs)
+	e.refused("no ntfsresize", err, "missing tools on the live system: ntfsresize")
 	e = newApplyEnv(t, shrinkTools...)
 	setListing(t, e.bin, existing("ext4", "21474836480"))
 	_, err = e.run(confirmed, shrink)
@@ -398,6 +413,21 @@ func applyChild(t *testing.T) {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("confirmation missing %q:\n%s", want, errOut)
 		}
+	}
+
+	// Formatting an existing partition: the operator is shown what is on it now.
+	reformat := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{
+		{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Name: testName + "p2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+	}}}}
+	e = newApplyEnv(t)
+	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":128000000000,"type":"disk","children":[
+		{"name":"slitest0p1","path":"`+testDisk+`p1","size":536870912,"type":"part","fstype":"vfat"},
+		{"name":"slitest0p2","path":"`+testDisk+`p2","size":107374182400,"type":"part","fstype":"ntfs","label":"Windows"}]}`)
+	errOut, err = e.run("no\n", reformat)
+	e.refused("format not confirmed", err, "aborted")
+	if !strings.Contains(errOut, `FORMAT `+testDisk+`p2 as ext4 -> /  (now ntfs, labelled "Windows")`) {
+		t.Errorf("the confirmation does not say what is erased:\n%s", errOut)
 	}
 
 	// --- the LUKS passphrase ---

@@ -248,7 +248,7 @@ type Media struct {
 	ESP bool `yaml:"esp,omitempty"`
 
 	// Resize, in a reusePartitions install, shrinks this existing ext2/3/4
-	// partition to the given size, filesystem first, keeping what is on it
+	// or ntfs partition to the given size, filesystem first, keeping what is on it
 	// (it has to be preserve: true). The space it gives up can take a
 	// `create: true` partition.
 	Resize string `yaml:"resize,omitempty"`
@@ -930,8 +930,8 @@ func (c *Config) Validate() error {
 				add("%s: resize is for a reusePartitions install; a normal install repartitions the disk", ch.Name)
 			case !ch.Preserve || ch.Create:
 				add("%s: resize keeps what is on the partition, so it has to be an existing one with preserve: true", ch.Name)
-			case ch.FsType != "ext2" && ch.FsType != "ext3" && ch.FsType != "ext4":
-				add("%s: only ext2, ext3 and ext4 can be resized, not %q", ch.Name, ch.FsType)
+			case !storage.Resizable(ch.FsType):
+				add("%s: only ext2, ext3, ext4 and ntfs can be resized, not %q", ch.Name, ch.FsType)
 			}
 			if mib, err := offsetMiB(ch.Resize); err != nil || mib == 0 {
 				add("%s: resize %q is not a size", ch.Name, ch.Resize)
@@ -1178,7 +1178,12 @@ func (c *Config) Validate() error {
 					add("%s: reusePartitions supports only plain partitions (no crypt, lvm, raid or encrypted)", where)
 					continue
 				}
-				checkFS(where, ch.FsType, ch.Mountpoint)
+				// A partition that is kept and not mounted is only being
+				// stepped around (or shrunk): what it holds need not be a
+				// filesystem slinstaller can make.
+				if !(ch.Preserve && ch.Mountpoint == "") {
+					checkFS(where, ch.FsType, ch.Mountpoint)
+				}
 				checkMount(where, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, ch.Preserve)
 				if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
 					esps++

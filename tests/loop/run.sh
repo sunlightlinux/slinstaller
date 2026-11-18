@@ -155,6 +155,39 @@ mount -o ro "${disk}p2" "$WORK/data"
 umount "$WORK/data"
 pass "shrink: a size below the data is refused, partition and data untouched"
 
+# --- 3b. The same beside an ntfs partition, as next to another system -------
+if command -v mkfs.ntfs >/dev/null && command -v ntfscp >/dev/null; then
+	disk="$(new_disk 2048)"; name="$(basename "$disk")"
+	parted -s "$disk" mklabel gpt
+	parted -s "$disk" mkpart EFI fat32 1MiB 257MiB
+	parted -s "$disk" set 1 esp on
+	parted -s "$disk" mkpart other ntfs 257MiB 1800MiB
+	partprobe "$disk"; udevadm settle 2>/dev/null || true
+	mkfs.vfat -F32 "${disk}p1" >/dev/null
+	mkfs.ntfs -Q -F "${disk}p2" >/dev/null
+	head -c 100M /dev/urandom > "$WORK/payload.bin"
+	ntfscp -f "${disk}p2" "$WORK/payload.bin" payload.bin
+	sum_before="$(sha256sum < "$WORK/payload.bin")"
+	cat > "$WORK/ntfs.yaml" <<YAML
+reusePartitions: true
+targetMedia:
+- name: $name
+  type: disk
+  children:
+  - { name: ${name}p1, type: part, fstype: vfat, mountpoint: /boot/efi, preserve: true }
+  - { name: ${name}p2, type: part, fstype: ntfs, preserve: true, resize: 800M }
+  - { name: ${name}p3, type: part, fstype: ext4, mountpoint: /, create: true }
+YAML
+	install partition "$WORK/ntfs.yaml" "$disk"
+	[ "$(size_mib "${disk}p2")" = 800 ] || fail "ntfs: p2 is $(size_mib "${disk}p2") MiB, want 800"
+	[ "$(fstype "${disk}p2")" = ntfs ] || fail "ntfs: p2 is no longer ntfs"
+	[ "$(ntfscat -f "${disk}p2" payload.bin | sha256sum)" = "$sum_before" ] || fail "ntfs: the data changed"
+	[ "$(fstype "${disk}p3")" = ext4 ] || fail "ntfs: the new root was not made"
+	pass "shrink ntfs: 1543 -> 800 MiB with its data intact, new root beside it"
+else
+	echo "skip: no ntfs tools (ntfs-3g) for the ntfs shrink case"
+fi
+
 # --- 4. btrfs subvolumes, mount options, a discarded disk -------------------
 disk="$(new_disk 2048)"; name="$(basename "$disk")"
 cat > "$WORK/btrfs.yaml" <<YAML

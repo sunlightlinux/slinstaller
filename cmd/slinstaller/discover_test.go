@@ -54,14 +54,16 @@ func TestDiscoverDescribesTheExistingLayout(t *testing.T) {
 	if d.Children[2].FsType != "ext4" || d.Children[2].Size != "51200M" {
 		t.Errorf("data = %+v", d.Children[2])
 	}
-	// What cannot be used as it is has no filesystem named, and a note.
-	if d.Children[1].FsType != "" || d.Children[3].FsType != "" {
-		t.Errorf("unusable filesystems were carried over: %q, %q", d.Children[1].FsType, d.Children[3].FsType)
+	// What each partition holds is written down as it is — the install
+	// checks a kept partition against it — with a note on what can be done
+	// with the ones slinstaller cannot install to.
+	if d.Children[1].FsType != "ntfs" || d.Children[3].FsType != "crypto_LUKS" {
+		t.Errorf("filesystems: %q, %q", d.Children[1].FsType, d.Children[3].FsType)
 	}
 	for _, want := range []string{
 		"/dev/sda1 is vfat: if it is the EFI System Partition",
-		"/dev/sda2 holds ntfs",
-		"/dev/sda4 holds crypto_LUKS",
+		"/dev/sda2 holds ntfs: it can be kept, and shrunk with resize",
+		"/dev/sda4 holds crypto_LUKS, which can only be kept as it is",
 		"/dev/sda4 carries other devices",
 		"/dev/sda5 has no filesystem slinstaller recognises",
 	} {
@@ -77,8 +79,9 @@ func TestDiscoverDescribesTheExistingLayout(t *testing.T) {
 	// partition given to it.
 	d.Children[0].Mountpoint = "/boot/efi"
 	d.Children[2].Mountpoint, d.Children[2].Preserve = "/", false
+	// The Windows partition stays in, kept and untouched, and may be shrunk.
 	d.Children = []*config.Media{d.Children[0], d.Children[1], d.Children[2]}
-	d.Children[1].FsType = "ext4" // stands in for a partition kept and not mounted
+	d.Children[1].Resize = "60G"
 	cfg.Users = []*config.User{{Login: "ion", Password: "$6$a$b", Admin: true}}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("edited config: %v", err)

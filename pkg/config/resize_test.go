@@ -55,7 +55,7 @@ func TestResizeValidation(t *testing.T) {
 		"normal install": {func(c *Config) { c.ReusePartitions = false }, "resize is for a reusePartitions install"},
 		"not preserved":  {func(c *Config) { c.TargetMedia[0].Children[1].Preserve = false }, "has to be an existing one with preserve: true"},
 		"a new one":      {func(c *Config) { c.TargetMedia[0].Children[1].Create = true }, "has to be an existing one with preserve: true"},
-		"not ext":        {func(c *Config) { c.TargetMedia[0].Children[1].FsType = "btrfs" }, `only ext2, ext3 and ext4 can be resized, not "btrfs"`},
+		"not resizable":  {func(c *Config) { c.TargetMedia[0].Children[1].FsType = "btrfs" }, `only ext2, ext3, ext4 and ntfs can be resized, not "btrfs"`},
 		"not a size":     {func(c *Config) { c.TargetMedia[0].Children[1].Resize = "smaller" }, `resize "smaller" is not a size`},
 		"zero":           {func(c *Config) { c.TargetMedia[0].Children[1].Resize = "0" }, `resize "0" is not a size`},
 		"two in free": {func(c *Config) {
@@ -82,5 +82,29 @@ func TestResizeValidation(t *testing.T) {
 	c.SkipValidationAll = true
 	if _, err := c.Plan(); err == nil {
 		t.Error("Plan with a bad size on a new partition")
+	}
+}
+
+// A partition that is kept and not mounted is only stepped around: it may
+// hold a filesystem slinstaller cannot make, such as another system's.
+func TestKeptUnmountedPartitionMayHoldAnyFilesystem(t *testing.T) {
+	c := resizeConfig()
+	c.TargetMedia[0].Children[1].FsType = "ntfs"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a kept ntfs partition, shrunk: %v", err)
+	}
+	plan, _ := c.Plan()
+	if p := plan.Parts[1]; p.Filesystem != "ntfs" || p.ResizeMiB != 40960 {
+		t.Errorf("ntfs partition = %+v", p)
+	}
+	// Mounting it, or formatting it as that, is still refused.
+	c.TargetMedia[0].Children[1].Mountpoint = "/windows"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), `filesystem "ntfs" is not supported`) {
+		t.Errorf("a mounted ntfs partition: %v", err)
+	}
+	c = resizeConfig()
+	c.TargetMedia[0].Children[1].FsType, c.TargetMedia[0].Children[1].Preserve, c.TargetMedia[0].Children[1].Resize = "ntfs", false, ""
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), `filesystem "ntfs" is not supported`) {
+		t.Errorf("formatting as ntfs: %v", err)
 	}
 }

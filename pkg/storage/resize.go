@@ -2,6 +2,16 @@ package storage
 
 import "fmt"
 
+// Resizable reports whether a partition holding this filesystem can be
+// shrunk in place.
+func Resizable(fs string) bool {
+	switch fs {
+	case "ext2", "ext3", "ext4", "ntfs":
+		return true
+	}
+	return false
+}
+
 // ResizeCommands returns the commands that shrink each partition asking for
 // it, in the only safe order: the filesystem is checked, then shrunk, and
 // only then is the partition cut down to it. resize2fs refuses a size the
@@ -21,9 +31,19 @@ func (pl *Plan) ResizeCommands() [][]string {
 		if disk == "" {
 			disk = pl.Disk
 		}
+		if p.Filesystem == "ntfs" {
+			// A trial first: it changes nothing and fails if the data does
+			// not fit. The real run asks for confirmation on its input.
+			bytes := fmt.Sprintf("%d", p.ResizeMiB<<20)
+			cmds = append(cmds,
+				[]string{"ntfsresize", "--no-action", "--no-progress-bar", "-s", bytes, p.Device},
+				[]string{"sh", "-c", fmt.Sprintf("echo y | ntfsresize --no-progress-bar -f -s %s %s", bytes, p.Device)})
+		} else {
+			cmds = append(cmds,
+				[]string{"e2fsck", "-f", "-p", p.Device},
+				[]string{"resize2fs", p.Device, fmt.Sprintf("%dM", p.ResizeMiB)})
+		}
 		cmds = append(cmds,
-			[]string{"e2fsck", "-f", "-p", p.Device},
-			[]string{"resize2fs", p.Device, fmt.Sprintf("%dM", p.ResizeMiB)},
 			[]string{"sh", "-c", fmt.Sprintf("echo ',%dMiB' | sfdisk --no-reread -N %d %s", p.ResizeMiB, p.Number, disk)},
 			[]string{"partprobe", disk},
 		)

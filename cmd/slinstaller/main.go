@@ -682,15 +682,20 @@ restart:
 				if d.Type != "part" {
 					return fmt.Errorf("reusePartitions: %s is a %s, not a partition", p.Device, d.Type)
 				}
+				// What is kept has to be what the config says it is: a config
+				// written for another disk, or before the disk was changed,
+				// must not have its partitions taken for these.
+				if p.Preserve && p.Filesystem != "" && d.FsType != p.Filesystem {
+					return fmt.Errorf("reusePartitions: %s is to be kept as %s, but holds %s - the config does not describe this disk (see --discover)",
+						p.Device, p.Filesystem, orDash(d.FsType))
+				}
 				if p.ResizeMiB == 0 {
 					continue
 				}
-				// A resize only ever shrinks, and only what is there to be
-				// shrunk — whatever the config says the partition holds.
-				switch {
-				case d.FsType != "ext2" && d.FsType != "ext3" && d.FsType != "ext4":
-					return fmt.Errorf("resize: %s holds %s; only ext2, ext3 and ext4 can be resized", p.Device, orDash(d.FsType))
-				case p.ResizeMiB<<20 >= d.Size:
+				// A resize only ever shrinks. (That the partition holds what
+				// the config says, and so something that can be shrunk, was
+				// checked just above.)
+				if p.ResizeMiB<<20 >= d.Size {
 					return fmt.Errorf("resize: %s is %s; resizing it to %s would not shrink it", p.Device, humanSize(d.Size), humanSize(p.ResizeMiB<<20))
 				}
 			}
@@ -1027,6 +1032,19 @@ func terminalSize(f *os.File) (cols, rows int, ok bool) {
 	return int(ws.Col), int(ws.Row), true
 }
 
+// holdsNow says what a partition about to be formatted holds at present, so
+// the operator sees what is erased and not only what replaces it.
+func holdsNow(devs []blockdev.Device, path string) string {
+	d := blockdev.FindByPath(devs, path)
+	if d == nil || d.FsType == "" {
+		return ""
+	}
+	if d.Label != "" {
+		return fmt.Sprintf("  (now %s, labelled %q)", d.FsType, d.Label)
+	}
+	return fmt.Sprintf("  (now %s)", d.FsType)
+}
+
 // confirm requires the operator to retype the target disk. A yes/no
 // prompt is too easy to answer on the wrong machine; retyping the path
 // makes the operator look at which disk they are about to erase. With
@@ -1037,6 +1055,7 @@ func confirm(in *bufio.Reader, plan *storage.Plan) bool {
 		// Reuse install: the partition table is untouched; only the listed
 		// partitions are formatted (and the preserved ones mounted as-is).
 		fmt.Fprintln(os.Stderr, "\nReusing the existing partitions (the disk is NOT repartitioned).")
+		devs, _ := blockdev.List() // best effort: only to say what is there now
 		for _, p := range plan.Parts {
 			if p.LV || p.Raid {
 				continue
@@ -1051,7 +1070,7 @@ func confirm(in *bufio.Reader, plan *storage.Plan) bool {
 			if p.Preserve {
 				fmt.Fprintf(os.Stderr, "  KEEP   %s -> %s (not formatted)\n", p.Device, orDash(p.Mountpoint))
 			} else {
-				fmt.Fprintf(os.Stderr, "  FORMAT %s as %s -> %s\n", p.Device, p.Filesystem, orDash(p.Mountpoint))
+				fmt.Fprintf(os.Stderr, "  FORMAT %s as %s -> %s%s\n", p.Device, p.Filesystem, orDash(p.Mountpoint), holdsNow(devs, p.Device))
 			}
 		}
 		for _, p := range plan.Parts {

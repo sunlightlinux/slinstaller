@@ -16,7 +16,9 @@ func (pl *Plan) RequiredTools() []string {
 			seen["btrfs"] = true
 			tools = append(tools, "btrfs")
 		}
-		if p.Filesystem == "" || p.Filesystem == "swap" {
+		// No mkfs is needed for what is not made: swap has its own tool,
+		// and a kept partition keeps the filesystem it has.
+		if p.Filesystem == "" || p.Filesystem == "swap" || p.Preserve {
 			continue
 		}
 		mk := "mkfs." + p.Filesystem
