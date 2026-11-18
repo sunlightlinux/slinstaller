@@ -1,16 +1,17 @@
-# Formatting, vet, build and the unit suite (with -race), on every push and
-# pull request.
+# Formatting, vet, build, the unit suite (with -race), a dry run of every
+# shipped config, and the storage stages for real on loop devices — on every
+# push and pull request.
 #
 # Why this exists: until this workflow, nothing checked a change but the
 # maintainer running gofmt, go vet and go test by hand before committing. A
 # contributor had no way to know whether their change broke a test short of
 # running the suite themselves, and a forgotten run stayed forgotten.
 #
-# What is deliberately NOT here: an install. Partitioning, mkfs and the
-# bootloader are only honestly tested by installing into a VM under UEFI
-# firmware (see CLAUDE.md), which needs a live medium and a scratch disk;
-# the unit suite covers the logic that does not touch a real disk, through
-# recorded commands and stubbed sysfs.
+# What is deliberately NOT here: a whole install. The base system, the
+# bootloader and a first boot are only honestly tested by installing into a
+# VM under UEFI firmware (see CLAUDE.md and demo/vm), which needs a live
+# medium. The `loop` job goes as far as a runner can: it partitions, makes
+# filesystems, shrinks and mounts on real block devices, and stops there.
 name: Slinstaller tests
 
 on:
@@ -49,7 +50,134 @@ jobs:
       - name: go build
         run: go build ./...
 
+      # The tests that matter most — everything --apply checks before it
+      # wipes a disk, and the mount stages — run as root inside a user
+      # namespace, and skip themselves where a namespace cannot be made.
+      # The runner image restricts unprivileged user namespaces through
+      # AppArmor; left that way those tests skip, the job stays green, and
+      # the part of the suite that guards the destructive path has checked
+      # nothing. So the restriction is lifted here, and the next step fails
+      # if they skipped anyway.
+      - name: Allow unprivileged user namespaces
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      - name: The namespace tests must run, not skip
+        run: |
+          go test -count=1 -v -run 'InAUserNamespace' ./cmd/... ./pkg/storage/ ./pkg/controller/ | tee namespace.log
+          if grep -q -- '--- SKIP' namespace.log; then
+            echo "::error::a namespace test skipped: the --apply preflight and the mount stages were not tested"
+            exit 1
+          fi
+          # Three of them, one per package; fewer means one was renamed out
+          # of the pattern above and is no longer being checked here.
+          ran="$(grep -c -- '--- PASS: Test.*InAUserNamespace' namespace.log)"
+          if [ "$ran" -lt 3 ]; then
+            echo "::error::only $ran namespace tests ran, expected 3"
+            exit 1
+          fi
+
       - name: Unit tests with the race detector
         # -timeout well under the job default: a hung test that burns the
         # whole runner budget tells you much less than a stack dump.
-        run: go test -race -count=1 -timeout 10m ./...
+        run: go test -race -count=1 -timeout 10m -coverprofile=cover.out ./...
+
+      # A floor, not a target. The suite sits near 97%; what is not covered
+      # is main(), the reboot, the full-screen front-end on a real terminal
+      # and the tail of a full install — things a runner cannot do. The
+      # floor is there to catch a change that arrives with no tests at all,
+      # or a namespace test that has quietly stopped contributing.
+      - name: Coverage
+        run: |
+          total="$(go tool cover -func=cover.out | awk '/^total:/ { sub("%", "", $3); print $3 }')"
+          {
+            echo "### Coverage: ${total}%"
+            echo
+            echo '| package | coverage |'
+            echo '|---|---|'
+            go test -count=1 -cover ./... | awk '$1 == "ok" { sub("github.com/sunlightlinux/slinstaller/", "", $2); print "| " $2 " | " $5 " |" }'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "total coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { exit !(t >= 95.0) }' || {
+            echo "::error::coverage ${total}% is below the 95% floor"
+            exit 1
+          }
+
+  # Every config the repository ships has to keep planning. A dry run reads
+  # the config, validates it and prints the commands; it touches nothing and
+  # needs no root. This is what catches a validation rule that became
+  # stricter than the examples people copy from.
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build -o slinstaller ./cmd/slinstaller
+
+      - name: Dry-run the shipped configs
+        run: |
+          # Discovered from the tree rather than listed: a workflow holding
+          # its own copy of the list goes stale with the first new example.
+          status=0
+          count=0
+          for cfg in demo/*.yaml demo/vm/config*.yaml; do
+            count=$((count + 1))
+            if ./slinstaller "$cfg" > plan.txt 2> err.txt; then
+              echo "ok    $cfg ($(wc -l < plan.txt) commands)"
+            else
+              echo "::error file=$cfg::the config no longer plans"
+              cat err.txt
+              status=1
+            fi
+          done
+          if [ "$count" -lt 2 ]; then
+            echo "::error::found only $count configs: the globs above no longer match the tree"
+            exit 1
+          fi
+          exit $status
+
+      - name: A written template plans too
+        run: |
+          ./slinstaller --template template.yaml
+          ./slinstaller template.yaml > /dev/null
+
+  # The storage stages on real block devices. The unit suite checks which
+  # commands would run; only running them shows that they do what is
+  # expected — that a shrink leaves the data and the neighbouring partitions
+  # alone, that btrfs subvolumes end up mounted where the config says. Loop
+  # devices are disks to parted, mkfs and the kernel, and hold nobody's data.
+  # See tests/loop/run.sh for the cases.
+  loop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install the storage tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parted dosfstools e2fsprogs btrfs-progs util-linux
+
+      - name: Build
+        run: go build -o slinstaller ./cmd/slinstaller
+
+      - name: Partition, shrink and mount on loop devices
+        run: sudo bash tests/loop/run.sh ./slinstaller
+
+      # A failing case names itself on its last line; the install log is
+      # what says why, and it is gone with the runner unless kept.
+      - name: Show the disks on failure
+        if: failure()
+        run: |
+          lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT || true
+          sudo losetup -a || true
