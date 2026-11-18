@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
@@ -244,5 +246,75 @@ func TestSmallAndUnsizedScreens(t *testing.T) {
 	ready.hubCursor = len(ready.visibleSections(0))
 	if !strings.Contains(viewOf(ready), "Install") {
 		t.Error("the hub does not show Install")
+	}
+}
+
+// A static interface set in the installer is put in force on the running
+// system too — otherwise an install on a network without DHCP cannot reach
+// its repository with the very settings the operator just typed.
+func TestStaticInterfaceIsAppliedToTheLiveSystem(t *testing.T) {
+	defer func(run func([]string) error, res func(network.Interface) error) {
+		liveNetRun, liveNetResolv = run, res
+	}(liveNetRun, liveNetResolv)
+	var ran []string
+	var resolv network.Interface
+	liveNetRun = func(args []string) error { ran = append(ran, strings.Join(args, " ")); return nil }
+	liveNetResolv = func(i network.Interface) error { resolv = i; return nil }
+
+	m := withSize(newModel(twoTestDisks()))
+	m.view = viewNetList
+	m.netIfaces = []netIfaceEntry{{Name: "eth0"}}
+	m = send(send(send(m, enter), down), enter) // eth0 -> Static
+	m = send(typeText(m, "10.0.0.2/24"), enter)
+	m = send(typeText(m, "10.0.0.1"), enter)
+	nm, cmd := typeText(m, "10.0.0.53").Update(enter)
+	if cmd == nil {
+		t.Fatal("finishing the static form applied nothing")
+	}
+	if len(ran) != 0 {
+		t.Fatal("the network was changed on the UI goroutine")
+	}
+	nm, _ = nm.(model).Update(cmd())
+	m = nm.(model)
+	want := "ip addr flush dev eth0|ip addr add 10.0.0.2/24 dev eth0|ip link set eth0 up|ip route replace default via 10.0.0.1 dev eth0"
+	if strings.Join(ran, "|") != want {
+		t.Errorf("live commands:\n%s", strings.Join(ran, "\n"))
+	}
+	if resolv.DNS != "10.0.0.53" {
+		t.Errorf("resolver given %+v", resolv)
+	}
+	if msg := strings.Join(m.popupMsg, " "); m.popup != popupMessage || !strings.Contains(msg, "eth0 is now 10.0.0.2/24 on this system as well") {
+		t.Errorf("popup: %v", m.popupMsg)
+	}
+	// Either way the settings are kept for the installed system.
+	if !m.netIfaces[0].Static || m.netIfaces[0].Addr != "10.0.0.2/24" {
+		t.Errorf("interface = %+v", m.netIfaces[0])
+	}
+
+	// A command failing stops there and is shown; nothing after it runs.
+	ran = nil
+	liveNetRun = func(args []string) error {
+		ran = append(ran, strings.Join(args, " "))
+		if args[1] == "addr" && args[2] == "add" {
+			return errors.New("ip addr add: RTNETLINK answers: Operation not permitted")
+		}
+		return nil
+	}
+	nm, _ = m.Update(applyLiveNetCmd(m.netIfaces[0])())
+	failed := nm.(model)
+	if len(ran) != 2 || !strings.Contains(strings.Join(failed.popupMsg, " "), "could not be set on this one") ||
+		!strings.Contains(strings.Join(failed.popupMsg, " "), "Operation not permitted") {
+		t.Errorf("failure: ran %v, popup %v", ran, failed.popupMsg)
+	}
+	// An address that is not one changes nothing on the system.
+	ran = nil
+	done := applyLiveNetCmd(netIfaceEntry{Name: "eth0", Addr: "10.0.0.2"})().(netApplyDoneMsg)
+	if done.err == nil || len(ran) != 0 {
+		t.Errorf("bad address: err %v, ran %v", done.err, ran)
+	}
+	// Choosing DHCP applies nothing: the live system is left as it booted.
+	m.view = viewNetList
+	if _, cmd := send(m, enter).Update(enter); cmd != nil && m.netIfaces[0].Static == false {
+		t.Error("DHCP ran live commands")
 	}
 }

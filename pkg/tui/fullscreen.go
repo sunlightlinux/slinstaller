@@ -430,6 +430,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, spinnerTickCmd()
 		}
 		return m, nil
+	case netApplyDoneMsg:
+		m.popup = popupMessage
+		if msg.err != nil {
+			m.popupMsg = append([]string{"Network Interface", "",
+				msg.name + " is saved for the installed system, but could",
+				"not be set on this one:", ""}, wrapWords(msg.err.Error(), 60, 4)...)
+		} else {
+			m.popupMsg = []string{"Network Interface", "",
+				msg.name + " is now " + msg.addr + " on this system as well.",
+				"Use Test Network Settings to check the connection."}
+		}
+		return m, nil
 	case netTestDoneMsg:
 		// The check finished: swap the spinner for a result message popup.
 		m.testingNet = false

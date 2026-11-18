@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"net"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,54 @@ func testNetCmd() tea.Cmd {
 			return netTestDoneMsg{result: "[FAIL] No connectivity: " + err.Error()}
 		}
 		return netTestDoneMsg{result: "[ OK ] Network is reachable.", ok: true}
+	}
+}
+
+// netApplyDoneMsg reports a static interface applied to the live system.
+type netApplyDoneMsg struct {
+	name, addr string
+	err        error
+}
+
+// liveNetRun runs one command that changes the live system's network (a
+// variable so tests can record instead).
+var liveNetRun = func(args []string) error {
+	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// liveNetResolv writes the live system's resolver configuration (a variable
+// for the same reason).
+var liveNetResolv = network.WriteLiveResolv
+
+// applyLiveNetCmd puts a static interface's settings in force on the running
+// system, off the UI goroutine, and reports how it went.
+func applyLiveNetCmd(ni netIfaceEntry) tea.Cmd {
+	return func() tea.Msg {
+		done := netApplyDoneMsg{name: ni.Name, addr: ni.Addr}
+		a := parseCIDR(strings.TrimSpace(ni.Addr))
+		if a == nil {
+			done.err = fmt.Errorf("%q is not an address in CIDR form (e.g. 192.168.1.50/24)", ni.Addr)
+			return done
+		}
+		iface := network.Interface{Name: ni.Name, Static: true, Gateway: ni.Gateway, DNS: ni.DNS,
+			Addrs: []network.Addr{{IP: a.IP, Netmask: a.Netmask, V6: a.Version == 1}}}
+		cmds, err := network.LiveCommands(iface)
+		if err != nil {
+			done.err = err
+			return done
+		}
+		for _, c := range cmds {
+			if err := liveNetRun(c); err != nil {
+				done.err = err
+				return done
+			}
+		}
+		done.err = liveNetResolv(iface)
+		return done
 	}
 }
 
@@ -200,7 +249,9 @@ func (m model) updateNetForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ni.DNS = v
 			ni.Static = true
 			m.view = viewNetList
-			return m, nil
+			// In force on this system too, now: an install on a network
+			// with no DHCP has to reach its repository with these settings.
+			return m, applyLiveNetCmd(*ni)
 		}
 		m.formStep++
 		ti := textinput.New()
