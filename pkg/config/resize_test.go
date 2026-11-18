@@ -55,9 +55,10 @@ func TestResizeValidation(t *testing.T) {
 		"normal install": {func(c *Config) { c.ReusePartitions = false }, "resize is for a reusePartitions install"},
 		"not preserved":  {func(c *Config) { c.TargetMedia[0].Children[1].Preserve = false }, "has to be an existing one with preserve: true"},
 		"a new one":      {func(c *Config) { c.TargetMedia[0].Children[1].Create = true }, "has to be an existing one with preserve: true"},
-		"not resizable":  {func(c *Config) { c.TargetMedia[0].Children[1].FsType = "btrfs" }, `only ext2, ext3, ext4 and ntfs can be resized, not "btrfs"`},
-		"not a size":     {func(c *Config) { c.TargetMedia[0].Children[1].Resize = "smaller" }, `resize "smaller" is not a size`},
-		"zero":           {func(c *Config) { c.TargetMedia[0].Children[1].Resize = "0" }, `resize "0" is not a size`},
+		// xfs cannot be shrunk at all.
+		"not resizable": {func(c *Config) { c.TargetMedia[0].Children[1].FsType = "xfs" }, `only ext2, ext3, ext4, ntfs and btrfs can be resized, not "xfs"`},
+		"not a size":    {func(c *Config) { c.TargetMedia[0].Children[1].Resize = "smaller" }, `resize "smaller" is not a size`},
+		"zero":          {func(c *Config) { c.TargetMedia[0].Children[1].Resize = "0" }, `resize "0" is not a size`},
 		"two in free": {func(c *Config) {
 			c.TargetMedia[0].Children = append(c.TargetMedia[0].Children,
 				&Media{Name: "sda4", Type: "part", FsType: "ext4", Mountpoint: "/home", Create: true})

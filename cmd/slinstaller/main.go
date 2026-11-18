@@ -881,10 +881,24 @@ restart:
 	// postReboot: an unattended install that should come up into the new
 	// system reboots once the full run has finished (not a staged --through).
 	if action := cfg.PowerAction(); action != "" {
-		fmt.Fprintf(os.Stderr, "install finished: %s...\n", action)
-		return powerCommand(action)
+		return powerAfter(action, cfg.PowerStateDelay)
 	}
 	return nil
+}
+
+// powerSleep waits before a power action (a variable so tests need not).
+var powerSleep = time.Sleep
+
+// powerAfter announces a power action, waits the configured delay, and
+// carries it out.
+func powerAfter(action string, delay int) error {
+	if delay > 0 {
+		fmt.Fprintf(os.Stderr, "install finished: %s in %d seconds (Ctrl+C to stay)...\n", action, delay)
+		powerSleep(time.Duration(delay) * time.Second)
+	} else {
+		fmt.Fprintf(os.Stderr, "install finished: %s...\n", action)
+	}
+	return powerCommand(action)
 }
 
 // checkLocale rejects a timezone or keymap the live system does not know.

@@ -407,3 +407,33 @@ func TestResumeSkipsPartitioning(t *testing.T) {
 		t.Errorf("StageNames = %v", all)
 	}
 }
+
+// The stage names a config may hang hooks on are the stages there are.
+func TestStageNamesMatchTheConfigs(t *testing.T) {
+	if strings.Join(StageNames(), ",") != strings.Join(config.StageNames, ",") {
+		t.Errorf("controller stages %v, config's list %v", StageNames(), config.StageNames)
+	}
+}
+
+func TestHooksAfterAStage(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.StageHooks = map[string][]*config.Hook{
+		"pre-install": {{Cmd: "echo never-validated-but-harmless"}},
+		"partition":   {{Cmd: "echo after-partition"}, nil, {Cmd: "echo second"}},
+	}
+	var r recorder
+	if err := Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices}); err != nil {
+		t.Fatal(err)
+	}
+	flat := r.flat()
+	// After the stage's own work — the filesystems are made by then.
+	if i, j := strings.LastIndex(flat, "mkfs.ext4"), strings.Index(flat, "echo after-partition"); i < 0 || j < i || strings.Index(flat, "echo second") < j {
+		t.Errorf("hook order:\n%s", flat)
+	}
+	// A failing hook fails the install, named for the stage it follows.
+	r = recorder{}
+	err := Install(cfg, Options{Through: "partition", Runner: r.failOn("after-partition"), Devices: noDevices})
+	if err == nil || !strings.Contains(err.Error(), "controller: hooks after partition") {
+		t.Errorf("failing hook: %v", err)
+	}
+}

@@ -224,6 +224,11 @@ func (in *installer) run() error {
 			_ = in.mnt.UnmountAll()
 			return fmt.Errorf("controller: %s: %w", s.name, err)
 		}
+		// The config's own commands for after this stage, if any.
+		if err := in.runHooks(in.cfg.StageHooks[s.name]); err != nil {
+			_ = in.mnt.UnmountAll()
+			return fmt.Errorf("controller: hooks after %s: %w", s.name, err)
+		}
 	}
 	if in.opts.Progress != nil {
 		in.opts.Progress(limit, limit, "complete")
@@ -267,8 +272,8 @@ func (in *installer) partition() error {
 	}
 	// An existing partition asked to give up space does so now, and a new
 	// partition waiting for that space is given its place.
-	if resize := in.plan.ResizeCommands(); len(resize) > 0 {
-		if err := storage.RunCommands(resize, in.opts.Runner); err != nil {
+	if len(in.plan.ResizeCommands()) > 0 {
+		if err := in.plan.Resize(in.opts.Runner); err != nil {
 			return err
 		}
 		in.settle()

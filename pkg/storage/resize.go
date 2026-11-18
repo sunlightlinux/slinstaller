@@ -6,7 +6,7 @@ import "fmt"
 // shrunk in place.
 func Resizable(fs string) bool {
 	switch fs {
-	case "ext2", "ext3", "ext4", "ntfs":
+	case "ext2", "ext3", "ext4", "ntfs", "btrfs":
 		return true
 	}
 	return false
@@ -31,7 +31,11 @@ func (pl *Plan) ResizeCommands() [][]string {
 		if disk == "" {
 			disk = pl.Disk
 		}
-		if p.Filesystem == "ntfs" {
+		if p.Filesystem == "btrfs" {
+			// btrfs is shrunk while mounted; Resize mounts it for the
+			// purpose. Shown here by the device it is done on.
+			cmds = append(cmds, []string{"btrfs", "filesystem", "resize", fmt.Sprintf("%dM", p.ResizeMiB), "[" + p.Device + "]"})
+		} else if p.Filesystem == "ntfs" {
 			// A trial first: it changes nothing and fails if the data does
 			// not fit. The real run asks for confirmation on its input.
 			bytes := fmt.Sprintf("%d", p.ResizeMiB<<20)
@@ -49,6 +53,32 @@ func (pl *Plan) ResizeCommands() [][]string {
 		)
 	}
 	return cmds
+}
+
+// WithMountedFS is the filesystem type Resize mounts with; tests substitute
+// one they can mount.
+var WithMountedFS = func(fs string) string { return fs }
+
+// Resize carries out ResizeCommands. They are run as they are, except that a
+// btrfs filesystem is mounted on a directory of its own for its resize, as
+// the tool needs.
+func (pl *Plan) Resize(run Runner) error {
+	for _, c := range pl.ResizeCommands() {
+		if c[0] != "btrfs" {
+			if err := RunCommands([][]string{c}, run); err != nil {
+				return err
+			}
+			continue
+		}
+		device := c[4][1 : len(c[4])-1]
+		err := WithMounted(device, WithMountedFS("btrfs"), func(dir string) error {
+			return RunCommands([][]string{{"btrfs", "filesystem", "resize", c[3], dir}}, run)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // PlaceInFree gives every CreateInFree partition its place: the largest

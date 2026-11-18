@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
@@ -234,4 +235,18 @@ func TestSystemCheckForAnImageInstall(t *testing.T) {
 	wantRunErr(t, "under the root", err, "is under the target root")
 	_, _, err = runWith(t, "", "--system-check", "--image", "https://example.org/base.tar", path)
 	wantRunErr(t, "a URL", err, "is a URL; fetch the image first")
+}
+
+func TestPowerAfterWaitsTheDelay(t *testing.T) {
+	onlyTools(t, t.TempDir(), "poweroff")
+	defer func(f func(time.Duration)) { powerSleep = f }(powerSleep)
+	var slept time.Duration
+	powerSleep = func(d time.Duration) { slept += d }
+	if err := powerAfter("poweroff", 30); err != nil || slept != 30*time.Second {
+		t.Errorf("powerAfter with a delay: %v, slept %v", err, slept)
+	}
+	slept = 0
+	if err := powerAfter("poweroff", 0); err != nil || slept != 0 {
+		t.Errorf("powerAfter with no delay: %v, slept %v", err, slept)
+	}
 }

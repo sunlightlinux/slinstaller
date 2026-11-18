@@ -162,6 +162,22 @@ type Config struct {
 	// mdadm). A relative path is taken from the config file's directory.
 	Image string `yaml:"image,omitempty"`
 
+	// StageHooks are commands run after a named stage of the install
+	// (partition, mount, meta-fs, base-install, fstab, swapfile, bootloader,
+	// first-boot, network, save-config), in the shape of pre-install and
+	// post-install hooks. A chroot hook needs the target mounted, so it
+	// belongs after meta-fs or later.
+	StageHooks map[string][]*Hook `yaml:"stage-hooks,omitempty"`
+
+	// PowerStateDelay is how many seconds to wait before power-state (or
+	// postReboot) takes effect, to leave time to read the last messages.
+	PowerStateDelay int `yaml:"power-state-delay,omitempty"`
+
+	// InstallType raises the smallest root the config may ask for, as
+	// clr-installer does for what it installs: "server" needs 4 GB,
+	// "desktop" 20 GB. Unset, the minimum is 2 GB.
+	InstallType string `yaml:"install-type,omitempty"`
+
 	// ReportURL, when set, is sent the install's progress: a JSON POST as
 	// each stage begins and one when the install ends, with its result.
 	ReportURL string `yaml:"report-url,omitempty"`
@@ -310,6 +326,24 @@ type Media struct {
 	// its serial number, WWN, model or a /dev/disk/by-* path — instead of
 	// by its kernel name, which can. ResolveDisks turns it into the name.
 	Match *DiskMatch `yaml:"match,omitempty"`
+}
+
+// StageNames are the install's stages, in order. Hooks may be attached to
+// any of them but the first and last, which have pre-install and
+// post-install.
+var StageNames = []string{"pre-install", "partition", "mount", "meta-fs", "base-install", "fstab",
+	"swapfile", "bootloader", "first-boot", "network", "save-config", "post-install"}
+
+// minRoot is the smallest root filesystem the config may ask for, and how
+// to say it.
+func (c *Config) minRoot() (uint64, string) {
+	switch c.InstallType {
+	case "server":
+		return 4 * 1000 * 1000 * 1000, "4 GB"
+	case "desktop":
+		return 20 * 1000 * 1000 * 1000, "20 GB"
+	}
+	return storage.MinRootSize, "2 GB"
 }
 
 // autoSize is the swap size that means "work it out from the memory".
@@ -989,6 +1023,7 @@ func (c *Config) Validate() error {
 
 	var probs []string
 	add := func(format string, a ...any) { probs = append(probs, fmt.Sprintf(format, a...)) }
+	rootMin, rootMinLabel := c.minRoot()
 
 	// A clr-installer alias whose file is not a device asks for an install
 	// into an image file (made, loop-mounted, kept with keepImage), which
@@ -1085,7 +1120,7 @@ func (c *Config) Validate() error {
 			case !ch.Preserve || ch.Create:
 				add("%s: resize keeps what is on the partition, so it has to be an existing one with preserve: true", ch.Name)
 			case !storage.Resizable(ch.FsType):
-				add("%s: only ext2, ext3, ext4 and ntfs can be resized, not %q", ch.Name, ch.FsType)
+				add("%s: only ext2, ext3, ext4, ntfs and btrfs can be resized, not %q", ch.Name, ch.FsType)
 			}
 			if mib, err := offsetMiB(ch.Resize); err != nil || mib == 0 {
 				add("%s: resize %q is not a size", ch.Name, ch.Resize)
@@ -1116,6 +1151,23 @@ func (c *Config) Validate() error {
 		add("a swap size of \"auto\" has to be worked out from this machine's memory first (ResolveAutoSwap)")
 	}
 
+	switch c.InstallType {
+	case "", "server", "desktop":
+	default:
+		add("install-type: %q is not server or desktop", c.InstallType)
+	}
+	if c.PowerStateDelay < 0 || c.PowerStateDelay > 3600 {
+		add("power-state-delay: %d is not between 0 and 3600 seconds", c.PowerStateDelay)
+	}
+	for stage := range c.StageHooks {
+		known := false
+		for _, n := range StageNames[1 : len(StageNames)-1] {
+			known = known || n == stage
+		}
+		if !known {
+			add("stage-hooks: %q is not a stage hooks can follow (%s)", stage, strings.Join(StageNames[1:len(StageNames)-1], ", "))
+		}
+	}
 	switch c.PowerState {
 	case "", "reboot", "poweroff", "halt":
 	default:
@@ -1305,7 +1357,7 @@ func (c *Config) Validate() error {
 			checkMount(lvWhere, lv.FsType, lv.Mountpoint, lv.MountOptions, lv.Subvolumes, false)
 			checkMin(lvWhere, lv.Size, storage.MinPartitionSize, "1 MiB", "size")
 			if lv.Mountpoint == "/" {
-				checkMin(lvWhere, lv.Size, storage.MinRootSize, "2 GB", "root size")
+				checkMin(lvWhere, lv.Size, rootMin, rootMinLabel, "root size")
 			}
 			if s := strings.TrimSpace(lv.Size); s == "" || s == "0" || strings.EqualFold(s, "rest") {
 				if lvFills[vg]++; lvFills[vg] == 2 {
@@ -1386,7 +1438,7 @@ func (c *Config) Validate() error {
 			checkMount(where, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, ch.Preserve)
 			checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "size")
 			if ch.Mountpoint == "/" {
-				checkMin(where, ch.Size, storage.MinRootSize, "2 GB", "root size")
+				checkMin(where, ch.Size, rootMin, rootMinLabel, "root size")
 			}
 
 			if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {

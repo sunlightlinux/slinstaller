@@ -47,7 +47,7 @@ func TestResizeShrinksTheFilesystemFirst(t *testing.T) {
 	if strings.Join(ntfs, "\n") != strings.Join(wantNTFS, "\n") {
 		t.Errorf("ntfs resize commands:\n%s", strings.Join(ntfs, "\n"))
 	}
-	for fs, want := range map[string]bool{"ext2": true, "ext3": true, "ext4": true, "ntfs": true, "xfs": false, "btrfs": false, "": false} {
+	for fs, want := range map[string]bool{"ext2": true, "ext3": true, "ext4": true, "ntfs": true, "btrfs": true, "xfs": false, "f2fs": false, "": false} {
 		if Resizable(fs) != want {
 			t.Errorf("Resizable(%q) = %v", fs, !want)
 		}
@@ -150,5 +150,45 @@ func TestRequiredToolsSkipKeptPartitions(t *testing.T) {
 	}
 	if !strings.Contains(tools, " mkfs.ext4 ") || !strings.Contains(tools, " ntfsresize ") {
 		t.Errorf("tools for what is made and shrunk are missing: %s", tools)
+	}
+}
+
+// btrfs is shrunk while mounted: the plan shows it by its device, and
+// carrying it out mounts the filesystem for the purpose.
+func TestResizeBtrfs(t *testing.T) {
+	pl := resizePlan()
+	pl.Parts[1].Filesystem = "btrfs"
+	var shown []string
+	for _, c := range pl.ResizeCommands() {
+		shown = append(shown, strings.Join(c, " "))
+	}
+	want := "btrfs filesystem resize 40960M [/dev/sda2]|sh -c echo ',40960MiB' | sfdisk --no-reread -N 2 /dev/sda|partprobe /dev/sda"
+	if strings.Join(shown, "|") != want {
+		t.Errorf("btrfs resize, as shown:\n%s", strings.Join(shown, "\n"))
+	}
+	// A filesystem that cannot be mounted is not shrunk, and so its
+	// partition is not cut down either.
+	var ran []string
+	err := pl.Resize(func(args []string) error { ran = append(ran, args[0]); return nil })
+	if err == nil || len(ran) != 0 {
+		t.Errorf("Resize on an unmountable btrfs: %v, ran %v", err, ran)
+	}
+	// The others are run as shown, stopping at the first failure.
+	pl.Parts[1].Filesystem = "ext4"
+	ran = nil
+	if err := pl.Resize(func(args []string) error { ran = append(ran, args[0]); return nil }); err != nil || strings.Join(ran, ",") != "e2fsck,resize2fs,sh,partprobe" {
+		t.Errorf("Resize ext4: %v, ran %v", err, ran)
+	}
+	ran = nil
+	boom := errors.New("resize2fs: no space")
+	err = pl.Resize(func(args []string) error {
+		ran = append(ran, args[0])
+		if args[0] == "resize2fs" {
+			return boom
+		}
+		return nil
+	})
+	if !errors.Is(err, boom) || strings.Join(ran, ",") != "e2fsck,resize2fs" {
+		t.Errorf("failed Resize: %v, ran %v", err, ran)
 	}
 }

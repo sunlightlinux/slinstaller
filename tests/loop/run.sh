@@ -190,6 +190,38 @@ else
 	echo "skip: no ntfs tools (ntfs-3g) for the ntfs shrink case"
 fi
 
+# --- 3c. And a btrfs partition, which is shrunk while mounted ----------------
+disk="$(new_disk 2048)"; name="$(basename "$disk")"
+parted -s "$disk" mklabel gpt
+parted -s "$disk" mkpart EFI fat32 1MiB 257MiB
+parted -s "$disk" set 1 esp on
+parted -s "$disk" mkpart data btrfs 257MiB 1800MiB
+partprobe "$disk"; udevadm settle 2>/dev/null || true
+mkfs.vfat -F32 "${disk}p1" >/dev/null
+mkfs.btrfs -q -f "${disk}p2"
+mount "${disk}p2" "$WORK/data"
+head -c 100M /dev/urandom > "$WORK/data/payload"
+sum_before="$(sha256sum < "$WORK/data/payload")"
+umount "$WORK/data"
+cat > "$WORK/btrfs-shrink.yaml" <<YAML
+reusePartitions: true
+targetMedia:
+- name: $name
+  type: disk
+  children:
+  - { name: ${name}p1, type: part, fstype: vfat, mountpoint: /boot/efi, preserve: true }
+  - { name: ${name}p2, type: part, fstype: btrfs, preserve: true, resize: 900M }
+  - { name: ${name}p3, type: part, fstype: ext4, mountpoint: /, create: true }
+YAML
+install partition "$WORK/btrfs-shrink.yaml" "$disk"
+[ "$(size_mib "${disk}p2")" = 900 ] || fail "btrfs shrink: p2 is $(size_mib "${disk}p2") MiB, want 900"
+btrfs check --readonly "${disk}p2" >/dev/null 2>&1 || fail "btrfs shrink: the shrunk filesystem does not check clean"
+mount -o ro "${disk}p2" "$WORK/data"
+[ "$(sha256sum < "$WORK/data/payload")" = "$sum_before" ] || fail "btrfs shrink: the data changed"
+umount "$WORK/data"
+[ "$(fstype "${disk}p3")" = ext4 ] || fail "btrfs shrink: the new root was not made"
+pass "shrink btrfs: 1543 -> 900 MiB with its data intact, new root beside it"
+
 # --- 4. btrfs subvolumes, mount options, a discarded disk -------------------
 disk="$(new_disk 2048)"; name="$(basename "$disk")"
 cat > "$WORK/btrfs.yaml" <<YAML

@@ -133,6 +133,26 @@ func mountChild(t *testing.T) {
 		t.Errorf("the temporary mount %s was left behind", top)
 	}
 
+	// A btrfs resize runs inside the filesystem, mounted for the purpose —
+	// which is what Resize arranges (tmpfs standing in; command recorded).
+	saved := WithMountedFS
+	WithMountedFS = func(string) string { return "tmpfs" }
+	rp := &Plan{Disk: "/dev/sdq", Parts: []Partition{{Number: 2, Device: "tmpfs", Filesystem: "btrfs", ResizeMiB: 512}}}
+	var resized []string
+	rerr := rp.Resize(func(args []string) error {
+		if args[0] == "btrfs" {
+			resized = append(resized, strings.Join(args[:4], " "))
+			if dev(args[4]) == dev(filepath.Dir(args[4])) {
+				t.Error("btrfs resize was not given a mounted filesystem")
+			}
+		}
+		return nil
+	})
+	WithMountedFS = saved
+	if rerr != nil || strings.Join(resized, ";") != "btrfs filesystem resize 512M" {
+		t.Errorf("Resize btrfs = %v, %v", resized, rerr)
+	}
+
 	// What a staged install leaves mounted is found from the mount table and
 	// unmounted, deepest first, without the list the installer kept.
 	tree := filepath.Join(os.TempDir(), "unmount-tree")

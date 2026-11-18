@@ -104,8 +104,7 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply bool, stdin *buf
 	}
 	fmt.Fprintf(os.Stderr, "\n%s is written to %s.\n", filepath.Base(image), disk)
 	if action := cfg.PowerAction(); action != "" {
-		fmt.Fprintf(os.Stderr, "finished: %s...\n", action)
-		return powerCommand(action)
+		return powerAfter(action, cfg.PowerStateDelay)
 	}
 	return nil
 }
