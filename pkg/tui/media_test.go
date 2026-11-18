@@ -391,3 +391,92 @@ func TestPartitionEditor(t *testing.T) {
 		t.Error("Esc did not leave the editor")
 	}
 }
+
+const partedFull = `BYT;
+/dev/sdb:122070MiB:scsi:512:512:gpt:Test:;
+1:1.00MiB:513MiB:512MiB:fat32::boot, esp;
+2:513MiB:122069MiB:121556MiB:ext4::;`
+
+// With no unallocated space, Safe Installation offers to shrink a partition
+// that can give some up. Nothing is done to the disk in the dialog: the
+// layout it records is shrunk by the install, after its own confirmation.
+func TestSafeInstallOffersToShrink(t *testing.T) {
+	safe := func() model {
+		m := mediaDialog()
+		m.mediaMode, m.diskIdx = 2, 1
+		m.mediaCursor = m.mediaEncIndex() + 1
+		return send(m, enter)
+	}
+	fakeParted(t, partedFull, 0)
+	fakeLsblk(t, `{"name":"sdb","path":"/dev/sdb","size":128000000000,"type":"disk","children":[
+		{"name":"sdb1","path":"/dev/sdb1","size":536870912,"type":"part","fstype":"vfat"},
+		{"name":"sdb2","path":"/dev/sdb2","size":127460704256,"type":"part","fstype":"ext4"}]}`)
+	m := safe()
+	if m.popup != popupShrink || m.shrinkPart.Path != "/dev/sdb2" {
+		t.Fatalf("no shrink offered: popup %d, candidate %+v", m.popup, m.shrinkPart)
+	}
+	view := viewOf(m)
+	for _, want := range []string{"/dev/sdb2 (ext4, 119GiB) can be shrunk", "Have a backup", "New size for sdb2"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("shrink dialog missing %q:\n%s", want, view)
+		}
+	}
+	// Half is offered.
+	if m.input.Value() != "59G" {
+		t.Errorf("offered size = %q", m.input.Value())
+	}
+	// A size that is not one, that does not shrink, or that frees too little.
+	for size, want := range map[string]string{"lots": "not a size", "200G": "would not shrink it", "118G": "frees too little"} {
+		got := send(typeText(m, size), enter)
+		if got.popup != popupShrink || !strings.Contains(got.popupErr, want) || len(got.parts) != 0 {
+			t.Errorf("size %q: popup %d, error %q", size, got.popup, got.popupErr)
+		}
+	}
+	if got := send(m, escKey); got.popup != popupNone || got.safeInstall || len(got.parts) != 0 {
+		t.Error("Esc did not cancel the shrink")
+	}
+
+	done := send(typeText(m, "60G"), enter)
+	if done.popup != popupNone || done.view != viewHub || !done.safeInstall || len(done.parts) != 3 {
+		t.Fatalf("after choosing a size: popup %d view %d parts %+v", done.popup, done.view, done.parts)
+	}
+	// The ESP is shared, the old partition kept and shrunk, the new root
+	// created in the room that leaves.
+	cfg := planOf(t, done.parts)
+	cfg.TargetMedia[0].Name, cfg.ReusePartitions = "sdb", true
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("the layout does not validate: %v", err)
+	}
+	plan, err := cfg.Plan()
+	if err != nil || plan.Wipe {
+		t.Fatalf("plan: %v", err)
+	}
+	esp, old, root := plan.Parts[0], plan.Parts[1], plan.Parts[2]
+	if esp.Device != "/dev/sdb1" || !esp.Preserve || esp.Mountpoint != "/boot/efi" {
+		t.Errorf("ESP = %+v", esp)
+	}
+	if old.Device != "/dev/sdb2" || !old.Preserve || old.ResizeMiB != 61440 || old.Filesystem != "ext4" {
+		t.Errorf("shrunk partition = %+v", old)
+	}
+	if root.Device != "/dev/sdb3" || !root.Create || !root.CreateInFree || root.Mountpoint != "/" {
+		t.Errorf("new root = %+v", root)
+	}
+
+	// Nothing that can be shrunk (xfs here): the plain refusal, as before.
+	fakeLsblk(t, `{"name":"sdb","path":"/dev/sdb","size":128000000000,"type":"disk","children":[
+		{"name":"sdb2","path":"/dev/sdb2","size":127460704256,"type":"part","fstype":"xfs"}]}`)
+	if m = safe(); m.popup != popupMessage || !strings.Contains(strings.Join(m.popupMsg, " "), "No partition on the disk can be shrunk") {
+		t.Errorf("no candidate: popup %d %v", m.popup, m.popupMsg)
+	}
+	// A partition in use, or too small to give up a root's worth, is not offered.
+	fakeLsblk(t, `{"name":"sdb","path":"/dev/sdb","size":128000000000,"type":"disk","children":[
+		{"name":"sdb2","path":"/dev/sdb2","size":127460704256,"type":"part","fstype":"ext4","mountpoint":"/mnt"},
+		{"name":"sdb3","path":"/dev/sdb3","size":1073741824,"type":"part","fstype":"ext4"}]}`)
+	if m = safe(); m.popup != popupMessage {
+		t.Errorf("a mounted or tiny partition was offered: popup %d", m.popup)
+	}
+	fakeLsblk(t, "FAIL")
+	if m = safe(); m.popup != popupMessage {
+		t.Errorf("with no listing: popup %d", m.popup)
+	}
+}

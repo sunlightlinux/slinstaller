@@ -268,6 +268,7 @@ const (
 	popupPassphrase
 	popupMessage
 	popupSpinner // a running operation with a small animated indicator
+	popupShrink  // Safe Installation: how far to shrink a partition for room
 )
 
 type model struct {
@@ -392,6 +393,11 @@ type model struct {
 	passFirst, popupErr string
 
 	confirmed bool
+
+	// Safe Installation, when a partition has to be shrunk for room: the
+	// ESP to share and the partition offered.
+	shrinkESP  string
+	shrinkPart blockdev.Device
 }
 
 func newModel(disks []blockdev.Device) model {
@@ -513,6 +519,9 @@ func (m model) updatePopup(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.popup = popupNone
 		return m, nil
 	}
+	if m.popup == popupShrink {
+		return m.updateShrinkPopup(key)
+	}
 	// passphrase: typed twice, as a mistake here cannot be undone later. A
 	// mistyped LUKS passphrase locks the disk it was set on.
 	switch key.String() {
@@ -617,6 +626,8 @@ func (m model) popupBox() string {
 		}
 		inner = append([]string{popupTitle.Render(title), ""}, body...)
 		inner = append(inner, "", popupHint.Render("press any key to continue"))
+	case popupShrink:
+		inner = m.shrinkPopupLines()
 	case popupSpinner:
 		inner = []string{
 			popupTitle.Render("Test Network Settings"),

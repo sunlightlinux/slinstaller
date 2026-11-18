@@ -33,6 +33,8 @@ type partEntry struct {
 	Preserve bool
 	Create   bool
 	Start    string
+	// Resize shrinks this existing, kept partition to make room.
+	Resize string
 }
 
 // layoutToMedia turns the editor's partition list into config children,
@@ -47,7 +49,7 @@ func layoutToMedia(disk string, parts []partEntry) []*config.Media {
 		}
 		m := &config.Media{
 			Name: name, Type: p.Type, FsType: p.FS, Mountpoint: p.Mount, Size: p.Size,
-			Preserve: p.Preserve, Create: p.Create, Start: p.Start,
+			Preserve: p.Preserve, Create: p.Create, Start: p.Start, Resize: p.Resize,
 		}
 		if p.Type == "lvm" {
 			m.FsType, m.Mountpoint = "", ""
@@ -228,10 +230,16 @@ func (m model) confirmSafe() (tea.Model, tea.Cmd) {
 		return fail("Could not read free space: " + err.Error())
 	}
 	if !ok {
+		// No room as the disk stands — but a partition on it may be able to
+		// give some up.
+		if cand, found := shrinkCandidate(disk); found {
+			return m.openShrinkPopup(esp, cand)
+		}
 		return fail(
 			fmt.Sprintf("No unallocated region of at least %d MiB was found.", minMiB),
-			"Free some space on the disk first (Sunlight does not yet",
-			"resize existing partitions), or use Destructive.")
+			"No partition on the disk can be shrunk to make room either",
+			"(ext4, ntfs or btrfs, not mounted). Use Destructive, or",
+			"free some space first.")
 	}
 	num, err := storage.NextPartitionNumber(disk)
 	if err != nil {
@@ -253,6 +261,105 @@ func (m model) confirmSafe() (tea.Model, tea.Cmd) {
 	m.safeInstall = true
 	m.view = viewHub
 	return m, nil
+}
+
+// shrinkCandidate picks the partition on disk that a Safe install could
+// shrink to make room: the largest one holding a filesystem that can be
+// shrunk, not mounted, and big enough to give up a root's worth and still
+// keep as much.
+func shrinkCandidate(disk string) (blockdev.Device, bool) {
+	devs, err := blockdev.List()
+	if err != nil {
+		return blockdev.Device{}, false
+	}
+	d := blockdev.FindByPath(devs, disk)
+	if d == nil {
+		return blockdev.Device{}, false
+	}
+	var best blockdev.Device
+	for _, p := range d.Children {
+		if p.Type == "part" && storage.Resizable(p.FsType) && p.Mountpoint == "" &&
+			p.Size >= 2*storage.MinRootSize && p.Size > best.Size {
+			best = p
+		}
+	}
+	return best, best.Size > 0
+}
+
+// openShrinkPopup asks how far to shrink the candidate, offering half.
+func (m model) openShrinkPopup(esp string, cand blockdev.Device) (tea.Model, tea.Cmd) {
+	m.popup, m.popupErr = popupShrink, ""
+	m.shrinkESP, m.shrinkPart = esp, cand
+	ti := textinput.New()
+	ti.Focus()
+	ti.SetValue(fmt.Sprintf("%dG", (cand.Size>>30)/2))
+	m.input = ti
+	return m, textinput.Blink
+}
+
+func (m model) shrinkPopupLines() []string {
+	p := m.shrinkPart
+	lines := []string{
+		popupTitle.Render("Safe Installation"),
+		"",
+		"This disk has no unallocated space, but",
+		fmt.Sprintf("%s (%s, %s) can be shrunk to make room.", p.Path, p.FsType, gib(p.Size)),
+		"What is on it is kept. Have a backup: a shrink",
+		"that is interrupted can lose data.",
+		"",
+		"New size for " + p.Name + " (e.g. 60G):",
+		popupInput.Render(m.input.View()),
+		"",
+	}
+	if m.popupErr != "" {
+		lines = append(lines, m.popupErr, "")
+	}
+	return append(lines, popupHint.Render("[Enter] shrink and install beside it · [Esc] cancel"))
+}
+
+// updateShrinkPopup takes the new size: it has to leave the partition
+// smaller, and free at least a root's worth. Nothing is changed on the disk
+// here — the layout is recorded, and the shrink happens in the install,
+// after its confirmation.
+func (m model) updateShrinkPopup(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		m.popup = popupNone
+		return m, nil
+	case "enter":
+		v := strings.TrimSpace(m.input.Value())
+		size, err := storage.ParseSize(v)
+		p := m.shrinkPart
+		switch {
+		case err != nil || size == 0:
+			m.popupErr = "not a size (e.g. 60G)"
+			return m, nil
+		case size >= p.Size:
+			m.popupErr = "that would not shrink it: it is " + gib(p.Size) + " now"
+			return m, nil
+		case p.Size-size < storage.MinRootSize:
+			m.popupErr = fmt.Sprintf("that frees too little: Sunlight needs at least %d MiB", storage.MinRootSize>>20)
+			return m, nil
+		}
+		disk := m.disks[m.diskIdx]
+		num, err := storage.NextPartitionNumber(disk.Path)
+		if err != nil {
+			m.popupErr = "could not read the partition table: " + err.Error()
+			return m, nil
+		}
+		m.parts = []partEntry{
+			{Name: strings.TrimPrefix(m.shrinkESP, "/dev/"), Type: "part", FS: "vfat", Mount: "/boot/efi", Preserve: true},
+			{Name: p.Name, Type: "part", FS: p.FsType, Preserve: true, Resize: v},
+			// No start: it goes in the room the shrink leaves.
+			{Name: partDevName(disk.Name, num), Type: "part", FS: "ext4", Mount: "/", Create: true},
+		}
+		m.safeInstall, m.diskSet = true, true
+		m.popup, m.view = popupNone, viewHub
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(key)
+	return m, cmd
 }
 
 // autoLayout is the standard whole-disk layout for a Destructive install:
