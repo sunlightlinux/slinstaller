@@ -101,6 +101,38 @@ func mountChild(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Subvolumes: the filesystem is mounted on its own, `btrfs subvolume
+	// create` runs once per subvolume inside it, and it is unmounted again.
+	// (tmpfs stands in for btrfs; the command is recorded, not run.)
+	var made []string
+	var during uint64
+	svPlan := &Plan{Parts: []Partition{{Device: "tmpfs", Filesystem: "tmpfs", Mountpoint: "/",
+		Subvolumes: []Subvolume{{"@", "/"}, {"@home", "/home"}}}}}
+	err := CreateSubvolumes(svPlan, func(args []string) error {
+		made = append(made, strings.Join(args[:3], " ")+" "+filepath.Base(args[3]))
+		during = dev(filepath.Dir(args[3]))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("CreateSubvolumes: %v", err)
+	}
+	if strings.Join(made, ";") != "btrfs subvolume create @;btrfs subvolume create @home" {
+		t.Errorf("subvolume commands = %v", made)
+	}
+	if during == dev(os.TempDir()) {
+		t.Error("the subvolumes were made outside the filesystem")
+	}
+	// A failing command stops it, and the filesystem is still unmounted.
+	boom := errors.New("btrfs: no space")
+	var top string
+	err = CreateSubvolumes(svPlan, func(args []string) error { top = filepath.Dir(args[3]); return boom })
+	if !errors.Is(err, boom) {
+		t.Errorf("CreateSubvolumes error = %v", err)
+	}
+	if _, statErr := os.Stat(top); statErr == nil {
+		t.Errorf("the temporary mount %s was left behind", top)
+	}
+
 	if err := m.MountMeta(); err != nil {
 		t.Fatalf("MountMeta: %v", err)
 	}

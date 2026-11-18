@@ -12,6 +12,10 @@ func (pl *Plan) RequiredTools() []string {
 	tools := []string{"parted", "partprobe", "mkswap", "blkid"}
 	seen := map[string]bool{}
 	for _, p := range pl.Parts {
+		if len(p.Subvolumes) > 0 && !seen["btrfs"] {
+			seen["btrfs"] = true
+			tools = append(tools, "btrfs")
+		}
 		if p.Filesystem == "" || p.Filesystem == "swap" {
 			continue
 		}

@@ -348,7 +348,12 @@ func (in *installer) settle() {
 	_ = in.opts.Runner([]string{"udevadm", "settle"})
 }
 
-func (in *installer) mount() error { return in.mnt.MountAll(in.plan) }
+func (in *installer) mount() error {
+	if err := storage.CreateSubvolumes(in.plan, in.opts.Runner); err != nil {
+		return err
+	}
+	return in.mnt.MountAll(in.plan)
+}
 
 func (in *installer) mountMeta() error {
 	if err := in.mnt.MountMeta(); err != nil {

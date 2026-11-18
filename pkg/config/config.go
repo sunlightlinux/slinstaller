@@ -216,10 +216,42 @@ type Media struct {
 	Create bool   `yaml:"create,omitempty"`
 	Start  string `yaml:"start,omitempty"`
 
+	// MountOptions are the fstab options for this filesystem (or swap),
+	// comma-separated as in fstab, e.g. "noatime,compress=zstd". Without
+	// them the entry says "defaults".
+	MountOptions string `yaml:"mount-options,omitempty"`
+
+	// Subvolumes splits a btrfs filesystem into subvolumes, each mounted at
+	// its own mountpoint. One of them carries this entry's mountpoint.
+	Subvolumes []*Subvolume `yaml:"subvolumes,omitempty"`
+
 	// Match, on a disk, names it by what does not change between boots —
 	// its serial number, WWN, model or a /dev/disk/by-* path — instead of
 	// by its kernel name, which can. ResolveDisks turns it into the name.
 	Match *DiskMatch `yaml:"match,omitempty"`
+}
+
+// Subvolume is one btrfs subvolume and where it is mounted.
+type Subvolume struct {
+	Name       string `yaml:"name"`
+	Mountpoint string `yaml:"mountpoint"`
+}
+
+// mountExtras carries a filesystem's mount options and subvolumes into the
+// plan. main is the subvolume mounted at the filesystem's own mountpoint.
+func mountExtras(mnt, opts string, svs []*Subvolume) (string, string, []storage.Subvolume) {
+	var out []storage.Subvolume
+	main := ""
+	for _, sv := range svs {
+		if sv == nil {
+			continue
+		}
+		out = append(out, storage.Subvolume{Name: sv.Name, Mountpoint: sv.Mountpoint})
+		if sv.Mountpoint == mnt {
+			main = sv.Name
+		}
+	}
+	return strings.TrimSpace(opts), main, out
 }
 
 // DiskMatch identifies a disk by its hardware. Every field given has to
@@ -331,6 +363,10 @@ type RaidArray struct {
 	Level      string `yaml:"level"`
 	FsType     string `yaml:"fstype,omitempty"`
 	Mountpoint string `yaml:"mountpoint,omitempty"`
+
+	// As on a partition (see Media).
+	MountOptions string       `yaml:"mount-options,omitempty"`
+	Subvolumes   []*Subvolume `yaml:"subvolumes,omitempty"`
 }
 
 // User is an account to create, in clr-installer's shape.
@@ -722,6 +758,57 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// checkMount checks a filesystem's fstab options and btrfs subvolumes.
+	// The subvolume at the filesystem's own mountpoint was counted by
+	// checkFS; the others are mountpoints in their own right.
+	checkMount := func(where, fsType, mnt, opts string, svs []*Subvolume, preserve bool) {
+		if strings.ContainsAny(opts, " \t\n") {
+			add("%s: mount-options %q must be comma-separated, without spaces", where, opts)
+		}
+		if opts != "" && mnt == "" && fsType != "swap" {
+			add("%s: mount-options on a filesystem that is not mounted", where)
+		}
+		if len(svs) == 0 {
+			return
+		}
+		if fsType != "btrfs" {
+			add("%s: subvolumes need a btrfs filesystem, not %q", where, fsType)
+			return
+		}
+		if preserve {
+			add("%s: subvolumes cannot be made on a preserved filesystem", where)
+		}
+		names, main := map[string]bool{}, false
+		for _, sv := range svs {
+			if sv == nil {
+				continue
+			}
+			switch {
+			case sv.Name == "" || strings.ContainsAny(sv.Name, "/, \t"):
+				add("%s: subvolume name %q must be a single path component", where, sv.Name)
+			case names[sv.Name]:
+				add("%s: subvolume %q is listed twice", where, sv.Name)
+			}
+			names[sv.Name] = true
+			switch {
+			case sv.Mountpoint == mnt && mnt != "":
+				main = true
+			case !strings.HasPrefix(sv.Mountpoint, "/"):
+				add("%s: subvolume %q: mountpoint %q is not absolute", where, sv.Name, sv.Mountpoint)
+			case seen[sv.Mountpoint]:
+				add("%s: mountpoint %q is used more than once", where, sv.Mountpoint)
+			default:
+				seen[sv.Mountpoint] = true
+				if sv.Mountpoint == "/" {
+					roots++
+				}
+			}
+		}
+		if !main {
+			add("%s: one subvolume must be mounted at the filesystem's own mountpoint (%q)", where, mnt)
+		}
+	}
+
 	for _, disk := range disks {
 		for i, ch := range disk.Children {
 			if ch == nil {
@@ -743,6 +830,7 @@ func (c *Config) Validate() error {
 					continue
 				}
 				checkFS(where, ch.FsType, ch.Mountpoint)
+				checkMount(where, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, ch.Preserve)
 				if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
 					esps++
 				}
@@ -766,6 +854,7 @@ func (c *Config) Validate() error {
 						lvWhere = fmt.Sprintf("%s/lv%d", where, j+1)
 					}
 					checkFS(lvWhere, lv.FsType, lv.Mountpoint)
+					checkMount(lvWhere, lv.FsType, lv.Mountpoint, lv.MountOptions, lv.Subvolumes, false)
 					checkMin(lvWhere, lv.Size, storage.MinPartitionSize, "1 MiB", "size")
 					if lv.Mountpoint == "/" {
 						checkMin(lvWhere, lv.Size, storage.MinRootSize, "2 GB", "root size")
@@ -792,6 +881,7 @@ func (c *Config) Validate() error {
 			}
 
 			checkFS(where, ch.FsType, ch.Mountpoint)
+			checkMount(where, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, ch.Preserve)
 			checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "size")
 			if ch.Mountpoint == "/" {
 				checkMin(where, ch.Size, storage.MinRootSize, "2 GB", "root size")
@@ -830,6 +920,7 @@ func (c *Config) Validate() error {
 			add("raid %s: the EFI System Partition cannot be on RAID", where)
 		} else {
 			checkFS("raid "+where, a.FsType, a.Mountpoint)
+			checkMount("raid "+where, a.FsType, a.Mountpoint, a.MountOptions, a.Subvolumes, false)
 		}
 	}
 	for name := range raidMembers {
@@ -991,6 +1082,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 				Size:       size,
 				Encrypted:  encrypted,
 			}
+			p.MountOptions, p.Subvol, p.Subvolumes = mountExtras(ch.Mountpoint, ch.MountOptions, ch.Subvolumes)
 			if encrypted {
 				p.MapName = cryptMapName(ch)
 			}
@@ -1016,14 +1108,16 @@ func (c *Config) Plan() (*storage.Plan, error) {
 				members = append(members, p.Device)
 			}
 		}
-		pl.Parts = append(pl.Parts, storage.Partition{
+		rp := storage.Partition{
 			Raid:        true,
 			RaidName:    a.Name,
 			RaidLevel:   a.Level,
 			RaidMembers: members,
 			Mountpoint:  a.Mountpoint,
 			Filesystem:  a.FsType,
-		})
+		}
+		rp.MountOptions, rp.Subvol, rp.Subvolumes = mountExtras(a.Mountpoint, a.MountOptions, a.Subvolumes)
+		pl.Parts = append(pl.Parts, rp)
 	}
 
 	if len(pl.Parts) == 0 {
@@ -1092,6 +1186,7 @@ func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 				Options:    strings.Fields(ch.Options),
 				Preserve:   ch.Preserve,
 			}
+			p.MountOptions, p.Subvol, p.Subvolumes = mountExtras(ch.Mountpoint, ch.MountOptions, ch.Subvolumes)
 			// A Create child is cut fresh in unallocated space (Safe install):
 			// Start is the MiB offset, Size the length, so End = Start + Size.
 			if ch.Create {
@@ -1194,11 +1289,13 @@ func lvmParts(disk string, i int, ch *Media) (storage.Partition, []storage.Parti
 		if lvSize == "" || lvSize == "0" || strings.EqualFold(lvSize, "rest") {
 			lvSize = storage.SizeRest
 		}
-		lvs = append(lvs, storage.Partition{
+		lp := storage.Partition{
 			LV: true, VGName: ch.VolumeGroup, LVName: lv.Name,
 			Mountpoint: lv.Mountpoint, Filesystem: lv.FsType, Size: lvSize,
 			Label: lv.Label, Options: strings.Fields(lv.Options),
-		})
+		}
+		lp.MountOptions, lp.Subvol, lp.Subvolumes = mountExtras(lv.Mountpoint, lv.MountOptions, lv.Subvolumes)
+		lvs = append(lvs, lp)
 	}
 	return pv, lvs, nil
 }

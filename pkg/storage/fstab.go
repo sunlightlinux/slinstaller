@@ -60,13 +60,13 @@ func (pl *Plan) Fstab(uuid map[string]string) string {
 		if p.Mountpoint == "/" {
 			pass = "1"
 		}
-		fmt.Fprintf(&b, "%s\t%s\t%s\tdefaults\t0 %s\n",
-			fstabSource(p, uuid), p.Mountpoint, p.Filesystem, pass)
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t0 %s\n",
+			fstabSource(p, uuid), p.Mountpoint, p.Filesystem, p.fstabOptions(), pass)
 	}
 
 	for _, p := range pl.Parts {
 		if p.Filesystem == "swap" {
-			fmt.Fprintf(&b, "%s\tnone\tswap\tdefaults\t0 0\n", fstabSource(p, uuid))
+			fmt.Fprintf(&b, "%s\tnone\tswap\t%s\t0 0\n", fstabSource(p, uuid), p.fstabOptions())
 		}
 	}
 

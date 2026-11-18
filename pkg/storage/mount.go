@@ -22,8 +22,18 @@ import (
 func (pl *Plan) MountOrder() []Partition {
 	out := make([]Partition, 0, len(pl.Parts))
 	for _, p := range pl.Parts {
-		if p.Mountpoint != "" {
+		if p.Mountpoint == "" {
+			continue
+		}
+		if len(p.Subvolumes) == 0 {
 			out = append(out, p)
+			continue
+		}
+		// One mount per subvolume, all from the same filesystem.
+		for _, sv := range p.Subvolumes {
+			m := p
+			m.Mountpoint, m.Subvol, m.Subvolumes = sv.Mountpoint, sv.Name, nil
+			out = append(out, m)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -61,7 +71,7 @@ func (m *Mounter) MountAll(pl *Plan) error {
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return fmt.Errorf("storage: mkdir %s: %w", target, err)
 		}
-		if err := syscall.Mount(p.EffectiveDevice(), target, p.Filesystem, syscall.MS_RELATIME, ""); err != nil {
+		if err := syscall.Mount(p.EffectiveDevice(), target, p.Filesystem, syscall.MS_RELATIME, p.mountData()); err != nil {
 			return fmt.Errorf("storage: mount %s on %s: %w", p.EffectiveDevice(), target, err)
 		}
 		m.mounted = append(m.mounted, target)
@@ -111,6 +121,84 @@ func (m *Mounter) UnmountAll() error {
 	m.mounted = nil
 	if len(failed) > 0 {
 		return fmt.Errorf("storage: failed to unmount: %s", strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+// vfsOptions are fstab options the kernel's mount layer or mount(8) itself
+// handles, rather than the filesystem. The install mounts with its own
+// flags, so these are left for the installed system's fstab.
+var vfsOptions = map[string]bool{
+	"defaults": true, "rw": true, "ro": true, "auto": true, "noauto": true, "nofail": true,
+	"user": true, "nouser": true, "users": true, "owner": true, "group": true,
+	"exec": true, "noexec": true, "suid": true, "nosuid": true, "dev": true, "nodev": true,
+	"atime": true, "noatime": true, "diratime": true, "nodiratime": true, "relatime": true,
+	"norelatime": true, "strictatime": true, "lazytime": true, "nolazytime": true,
+	"sync": true, "async": true, "dirsync": true, "silent": true, "loud": true, "_netdev": true,
+}
+
+// mountData is what the install passes to the filesystem when mounting the
+// partition: its subvolume and the filesystem's own options (compress=zstd,
+// discard), so they already apply to what the install writes.
+func (p Partition) mountData() string {
+	var data []string
+	if p.Subvol != "" {
+		data = append(data, "subvol="+p.Subvol)
+	}
+	for _, o := range strings.Split(p.MountOptions, ",") {
+		if o == "" || vfsOptions[o] || strings.HasPrefix(o, "x-") || strings.HasPrefix(o, "subvol") {
+			continue
+		}
+		data = append(data, o)
+	}
+	return strings.Join(data, ",")
+}
+
+// fstabOptions is the options column of the partition's fstab entry.
+func (p Partition) fstabOptions() string {
+	opts := p.MountOptions
+	if opts == "" {
+		opts = "defaults"
+	}
+	if p.Subvol != "" {
+		opts += ",subvol=" + p.Subvol
+	}
+	return opts
+}
+
+// CreateSubvolumes makes the btrfs subvolumes of every freshly made
+// filesystem that has them: the filesystem is mounted on its own for a
+// moment, `btrfs subvolume create` runs for each, and it is unmounted.
+func CreateSubvolumes(pl *Plan, run func([]string) error) error {
+	for _, p := range pl.Parts {
+		if len(p.Subvolumes) == 0 || p.Preserve {
+			continue
+		}
+		if err := createSubvolumes(p, run); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func createSubvolumes(p Partition, run func([]string) error) (err error) {
+	top, err := os.MkdirTemp("", "slinstaller-btrfs-")
+	if err != nil {
+		return fmt.Errorf("storage: %w", err)
+	}
+	defer os.Remove(top)
+	if err := syscall.Mount(p.EffectiveDevice(), top, p.Filesystem, 0, ""); err != nil {
+		return fmt.Errorf("storage: mount %s to make its subvolumes: %w", p.EffectiveDevice(), err)
+	}
+	defer func() {
+		if uerr := syscall.Unmount(top, 0); uerr != nil && err == nil {
+			err = fmt.Errorf("storage: unmount %s: %w", top, uerr)
+		}
+	}()
+	for _, sv := range p.Subvolumes {
+		if err := run([]string{"btrfs", "subvolume", "create", filepath.Join(top, sv.Name)}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// Subvolume is a btrfs subvolume and where it is mounted.
+type Subvolume struct {
+	Name, Mountpoint string
+}
+
 // Partition is one partition to create on the target disk.
 //
 // Number and Device are the on-disk position and the device path the
@@ -23,6 +28,14 @@ type Partition struct {
 	Filesystem string
 	Label      string
 	Options    []string // extra mkfs options, after slinstaller's own
+
+	// MountOptions are the fstab options, comma-separated; "" means
+	// "defaults". Subvolumes are the btrfs subvolumes made on the
+	// filesystem, each mounted at its own mountpoint; Subvol is the one
+	// mounted at Mountpoint.
+	MountOptions string
+	Subvol       string
+	Subvolumes   []Subvolume
 
 	// Size is a byte count, a human size such as "512M", or SizeRest for
 	// the partition that takes whatever space is left.
