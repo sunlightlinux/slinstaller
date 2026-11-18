@@ -33,12 +33,15 @@ type Device struct {
 	Mountpoint string
 	FsType     string
 	Label      string
+	// PartLabel is the partition's name in the partition table (GPT),
+	// which is not the filesystem's label.
+	PartLabel string
 }
 
 // List runs lsblk and returns the top-level block devices, each with its
 // partitions as children.
 func List() ([]Device, error) {
-	out, err := exec.Command("lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,TYPE,MODEL,SERIAL,WWN,MOUNTPOINT,FSTYPE,LABEL").Output()
+	out, err := exec.Command("lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,TYPE,MODEL,SERIAL,WWN,MOUNTPOINT,FSTYPE,LABEL,PARTLABEL").Output()
 	if err != nil {
 		return nil, fmt.Errorf("blockdev: lsblk: %w", err)
 	}
@@ -98,6 +101,7 @@ func convert(in []jsonDev) []Device {
 			Mountpoint: j.Mountpoint,
 			FsType:     j.FsType,
 			Label:      j.Label,
+			PartLabel:  j.PartLabel,
 		})
 	}
 	return out
@@ -116,6 +120,7 @@ type jsonDev struct {
 	Mountpoint string `json:"mountpoint"`
 	FsType     string `json:"fstype"`
 	Label      string `json:"label"`
+	PartLabel  string `json:"partlabel"`
 }
 
 // flexUint accepts a size that lsblk may emit as a JSON number (newer)

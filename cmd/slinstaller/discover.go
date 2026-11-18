@@ -52,7 +52,14 @@ func discoverConfig(devs []blockdev.Device, disk string) (*config.Config, []stri
 		default:
 			notes = append(notes, fmt.Sprintf("%s holds %s, which can only be kept as it is", p.Path, p.FsType))
 		}
-		if p.FsType == "vfat" {
+		// A partition named for its role in the partition table is given
+		// that role: the layout was prepared for an install, with whatever
+		// tool, and says so itself.
+		role, said := roleFromLabel(p.PartLabel, ch)
+		if said != "" {
+			notes = append(notes, fmt.Sprintf("%s is named %s: %s", p.Path, p.PartLabel, said))
+		}
+		if p.FsType == "vfat" && !role {
 			notes = append(notes, fmt.Sprintf("%s is vfat: if it is the EFI System Partition, give it mountpoint: /boot/efi", p.Path))
 		}
 		if len(p.Children) > 0 {
@@ -88,4 +95,63 @@ func printDiscovered(out, notes io.Writer, disk string) error {
 		fmt.Fprintln(notes, "note:", n)
 	}
 	return nil
+}
+
+// roleFromLabel reads the role a partition was given by its name in the
+// partition table, in clr-installer's convention for a layout prepared by
+// hand: CLR_BOOT (the ESP, at /boot), CLR_ROOT (/), CLR_SWAP, and
+// CLR_MNT_/path for anything else, with _F appended to have it formatted.
+// Without _F the partition is kept as it is. It sets ch accordingly and
+// returns whether the name gave a role, and what to tell the operator.
+func roleFromLabel(label string, ch *config.Media) (bool, string) {
+	if !strings.HasPrefix(label, "CLR_") {
+		return false, ""
+	}
+	name := label
+	format, encrypt := false, false
+	for {
+		switch {
+		case strings.HasSuffix(name, "_F"):
+			name, format = strings.TrimSuffix(name, "_F"), true
+			continue
+		case strings.HasSuffix(name, "_E"):
+			name, encrypt = strings.TrimSuffix(name, "_E"), true
+			continue
+		}
+		break
+	}
+	var said string
+	switch {
+	case name == "CLR_BOOT":
+		ch.Mountpoint, said = "/boot", "the EFI System Partition, mounted at /boot"
+		if ch.FsType == "" {
+			ch.FsType = "vfat"
+		}
+	case name == "CLR_ROOT":
+		ch.Mountpoint, said = "/", "the root filesystem"
+	case name == "CLR_SWAP":
+		ch.FsType, said = "swap", "swap"
+	case strings.HasPrefix(name, "CLR_MNT_/"):
+		ch.Mountpoint = strings.TrimPrefix(name, "CLR_MNT_")
+		said = "mounted at " + ch.Mountpoint
+	default:
+		return false, "not a role slinstaller knows; left as it is"
+	}
+	if format {
+		ch.Preserve = false
+		said += ", to be FORMATTED"
+		if ch.FsType == "" || !storage.KnownFilesystem(ch.FsType) {
+			ch.FsType = "ext4"
+			if name == "CLR_BOOT" {
+				ch.FsType = "vfat"
+			}
+			said += " as " + ch.FsType
+		}
+	} else {
+		said += ", kept as it is"
+	}
+	if encrypt {
+		said += "; it asks for encryption, which an install into existing partitions does not do"
+	}
+	return true, said
 }

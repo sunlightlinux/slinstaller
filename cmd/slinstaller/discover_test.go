@@ -109,3 +109,70 @@ func TestDiscoverDescribesTheExistingLayout(t *testing.T) {
 	_, _, err = runWith(t, "", "--discover", "/dev/sda")
 	wantRunErr(t, "no listing", err, "lsblk")
 }
+
+// A layout prepared by hand and named for its roles in the partition table
+// (clr-installer's convention) comes out of --discover ready to install: the
+// names say what is mounted where and what is formatted.
+func TestDiscoverHonoursRoleLabels(t *testing.T) {
+	dir := t.TempDir()
+	bin := onlyTools(t, dir)
+	setListing(t, bin, `{"name":"sda","path":"/dev/sda","size":512000000000,"type":"disk","children":[
+		{"name":"sda1","path":"/dev/sda1","size":536870912,"type":"part","fstype":"vfat","partlabel":"CLR_BOOT"},
+		{"name":"sda2","path":"/dev/sda2","size":4294967296,"type":"part","partlabel":"CLR_SWAP"},
+		{"name":"sda3","path":"/dev/sda3","size":53687091200,"type":"part","partlabel":"CLR_ROOT_F"},
+		{"name":"sda4","path":"/dev/sda4","size":107374182400,"type":"part","fstype":"xfs","partlabel":"CLR_MNT_/srv/data"},
+		{"name":"sda5","path":"/dev/sda5","size":107374182400,"type":"part","fstype":"ext4","partlabel":"CLR_MNT_/home_E_F"},
+		{"name":"sda6","path":"/dev/sda6","size":1073741824,"type":"part","fstype":"ext4","partlabel":"CLR_SOMETHING"},
+		{"name":"sda7","path":"/dev/sda7","size":1073741824,"type":"part","fstype":"ext4","partlabel":"Linux filesystem"}]}`)
+	out, notes, err := runWith(t, "", "--discover", "/dev/sda")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "found.yaml")
+	os.WriteFile(path, []byte(out), 0o600)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := cfg.TargetMedia[0].Children
+	type want struct {
+		fs, mount string
+		preserve  bool
+	}
+	for i, w := range []want{
+		{"vfat", "/boot", true},    // the ESP, kept
+		{"swap", "", true},         //
+		{"ext4", "/", false},       // _F: formatted, and nothing was there to say as what
+		{"xfs", "/srv/data", true}, // kept
+		{"ext4", "/home", false},   // _F wins; _E is said to be unsupported here
+		{"ext4", "", true},         // a name that is no role
+		{"ext4", "", true},         // an ordinary name
+	} {
+		if ch[i].FsType != w.fs || ch[i].Mountpoint != w.mount || ch[i].Preserve != w.preserve {
+			t.Errorf("%s = fstype %q mountpoint %q preserve %v, want %+v", ch[i].Name, ch[i].FsType, ch[i].Mountpoint, ch[i].Preserve, w)
+		}
+	}
+	for _, n := range []string{
+		"/dev/sda3 is named CLR_ROOT_F: the root filesystem, to be FORMATTED as ext4",
+		"/dev/sda1 is named CLR_BOOT: the EFI System Partition, mounted at /boot, kept as it is",
+		"/dev/sda5 is named CLR_MNT_/home_E_F: mounted at /home, to be FORMATTED; it asks for encryption",
+		"/dev/sda6 is named CLR_SOMETHING: not a role slinstaller knows",
+	} {
+		if !strings.Contains(notes, n) {
+			t.Errorf("notes missing %q:\n%s", n, notes)
+		}
+	}
+	// Only what the names say is formatted — and with users added, the
+	// config is an install.
+	cfg.Users = []*config.User{{Login: "ion", Password: "$6$a$b", Admin: true}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("the labelled layout does not validate: %v", err)
+	}
+	plan, _ := cfg.Plan()
+	for _, p := range plan.Parts {
+		formatted := p.Device == "/dev/sda3" || p.Device == "/dev/sda5"
+		if p.Preserve == formatted {
+			t.Errorf("%s: preserve = %v", p.Device, p.Preserve)
+		}
+	}
+}
