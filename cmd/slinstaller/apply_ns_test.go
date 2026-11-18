@@ -210,6 +210,34 @@ func applyChild(t *testing.T) {
 	_, err = e.run("", plainConfig(), "--system-check", "--through", "partition")
 	e.refused("--system-check with --through", err, "drop --through")
 
+	// Reported as it goes, and how it ended, to whoever asked.
+	sink := newEventSink(t)
+	e = newApplyEnv(t)
+	if _, err = e.run(confirmed, plainConfig(), "--through", "partition", "--report-url", sink.URL); err != nil {
+		t.Errorf("reported install: %v", err)
+	}
+	if got := sink.summary(); got != "stage pre-install, stage partition, finish success" {
+		t.Errorf("reported events = %s", got)
+	}
+	sink = newEventSink(t)
+	e = newApplyEnv(t)
+	_, _ = e.run(confirmed, plainConfig(), "--report-url", sink.URL)
+	if got := sink.summary(); !strings.HasSuffix(got, "stage mount, finish failure") {
+		t.Errorf("reported events for a failed install = %s", got)
+	}
+	// An operator who declines has started nothing, and nothing is reported.
+	sink = newEventSink(t)
+	e = newApplyEnv(t)
+	_, _ = e.run("no\n", plainConfig(), "--report-url", sink.URL)
+	if got := sink.summary(); got != "" {
+		t.Errorf("an aborted install was reported: %s", got)
+	}
+
+	// --in-target wants a target that is really mounted.
+	e = newApplyEnv(t)
+	_, _, err = runWith(t, "", "--in-target", "true", "--root", filepath.Join(e.base, "empty"))
+	wantRunErr(t, "--in-target with no target", err, "does not look like a mounted target")
+
 	// The config's proxy is in force for the run itself.
 	e = newApplyEnv(t)
 	proxied := plainConfig()

@@ -154,6 +154,10 @@ type Config struct {
 	// mdadm). A relative path is taken from the config file's directory.
 	Image string `yaml:"image,omitempty"`
 
+	// ReportURL, when set, is sent the install's progress: a JSON POST as
+	// each stage begins and one when the install ends, with its result.
+	ReportURL string `yaml:"report-url,omitempty"`
+
 	// WriteFiles are files written into the installed system once it is
 	// configured, before the post-install hooks run.
 	WriteFiles []*WriteFile `yaml:"write-files,omitempty"`
@@ -937,6 +941,9 @@ func (c *Config) Validate() error {
 				add("%s: resize %q is not a size", ch.Name, ch.Resize)
 			}
 		}
+	}
+	if c.ReportURL != "" && !strings.HasPrefix(c.ReportURL, "http://") && !strings.HasPrefix(c.ReportURL, "https://") {
+		add("report-url: %s is not an http or https URL", c.ReportURL)
 	}
 	if strings.Contains(c.Image, "://") {
 		add("image: %s is a URL; fetch the image first and give its path", c.Image)

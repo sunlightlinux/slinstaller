@@ -152,6 +152,15 @@ func run(args []string) error {
 	fs.BoolVar(&allowInsecure, "allow-insecure-http", false, "allow a plain http:// repository (the config's allowInsecureHTTP)")
 	var swapFileSize string
 	fs.StringVar(&swapFileSize, "swap-file-size", "", "create a swap file of this size, e.g. 2G (the config's swapFileSize)")
+	var unmount bool
+	fs.BoolVar(&unmount, "unmount", false,
+		"unmount everything under --root - what a staged install (--through) leaves mounted - and exit")
+	var inTargetCmd string
+	fs.StringVar(&inTargetCmd, "in-target", "",
+		"run this shell command inside the mounted target at --root, and exit (after a staged install)")
+	var reportURL string
+	fs.StringVar(&reportURL, "report-url", "",
+		"POST the install's progress to this URL as JSON, stage by stage (the config's report-url)")
 	var image string
 	fs.StringVar(&image, "image", "",
 		"install the base system by unpacking this root filesystem image (tar or squashfs) instead of installing packages (the config's image)")
@@ -209,6 +218,13 @@ func run(args []string) error {
 		return printDiscovered(os.Stdout, os.Stderr, discover)
 	}
 
+	if unmount {
+		return unmountTarget(root)
+	}
+	if inTargetCmd != "" {
+		return inTarget(root, inTargetCmd)
+	}
+
 	// One reader for all terminal input, so the interactive front-end and
 	// the later prompts don't fight over buffered stdin.
 	stdin := bufio.NewReader(os.Stdin)
@@ -219,6 +235,16 @@ func run(args []string) error {
 			return fmt.Errorf("give the config either with --config or as the argument, not both")
 		}
 		rest = []string{configPath}
+	}
+	// A config given as a URL is fetched once, here; from then on it is a
+	// file like any other.
+	if len(rest) == 1 && isURL(rest[0]) {
+		path, err := fetchConfig(rest[0], allowInsecure)
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(filepath.Dir(path))
+		rest[0] = path
 	}
 	if systemCheck && len(rest) == 0 {
 		return fmt.Errorf("--system-check needs the config to check the machine against")
@@ -320,6 +346,9 @@ restart:
 	}
 	if image != "" {
 		cfg.Image = image
+	}
+	if reportURL != "" {
+		cfg.ReportURL = reportURL
 	}
 
 	// The config's proxy is for everything this run fetches, the
@@ -524,6 +553,10 @@ restart:
 		if abs, err := filepath.Abs(rest[0]); err == nil {
 			opts.ConfigDir = filepath.Dir(abs)
 		}
+	}
+	report := newReporter(cfg.ReportURL, cfg.Hostname)
+	if report != nil {
+		opts.Progress = report.stage
 	}
 
 	if !systemCheck {
@@ -778,6 +811,9 @@ restart:
 	// streamed text.
 	if fullscreen {
 		back, rerr := tui.RunInstall(cfg, opts, plan)
+		if rerr == nil || rerr.Error() != "aborted" {
+			report.finish(rerr)
+		}
 		if rerr != nil {
 			if rerr.Error() != "aborted" {
 				reportFailure(diagnostics, cfg, tui.InstallLogPath(), rerr)
@@ -797,7 +833,9 @@ restart:
 	if !confirm(stdin, plan) {
 		return fmt.Errorf("aborted")
 	}
-	if err := controller.Install(cfg, opts); err != nil {
+	err = controller.Install(cfg, opts)
+	report.finish(err)
+	if err != nil {
 		reportFailure(diagnostics, cfg, logPath, err)
 		return err
 	}

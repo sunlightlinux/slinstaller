@@ -560,7 +560,12 @@ func (m *installModel) start() tea.Cmd {
 	}
 	// The stage markers ("==> partition") go into the log as well.
 	opts.Log = &lineWriter{sink: sink}
+	// The caller's own progress hook (a report sent elsewhere) still runs.
+	outer := opts.Progress
 	opts.Progress = func(done, total int, stage string) {
+		if outer != nil {
+			outer(done, total, stage)
+		}
 		ch <- stageMsg{done: done, total: total, name: stage}
 	}
 	opts.Runner = storage.SinkRunner(sink)

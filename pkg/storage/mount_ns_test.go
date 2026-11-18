@@ -133,6 +133,26 @@ func mountChild(t *testing.T) {
 		t.Errorf("the temporary mount %s was left behind", top)
 	}
 
+	// What a staged install leaves mounted is found from the mount table and
+	// unmounted, deepest first, without the list the installer kept.
+	tree := filepath.Join(os.TempDir(), "unmount-tree")
+	os.MkdirAll(filepath.Join(tree, "boot"), 0o755)
+	defer os.Remove(tree)
+	if err := syscall.Mount("tmpfs", tree, "tmpfs", 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(tree, "boot"), 0o755)
+	if err := syscall.Mount("tmpfs", filepath.Join(tree, "boot"), "tmpfs", 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	gone, uerr := UnmountTree(tree)
+	if uerr != nil || strings.Join(gone, ",") != filepath.Join(tree, "boot")+","+tree {
+		t.Errorf("UnmountTree = %v, %v", gone, uerr)
+	}
+	if dev(tree) != dev(filepath.Dir(tree)) {
+		t.Error("the tree is still mounted")
+	}
+
 	if err := m.MountMeta(); err != nil {
 		t.Fatalf("MountMeta: %v", err)
 	}

@@ -1,0 +1,167 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+// eventSink is a local server that records what is reported to it.
+type eventSink struct {
+	mu     sync.Mutex
+	events []event
+	status int
+	*httptest.Server
+}
+
+func newEventSink(t *testing.T) *eventSink {
+	s := &eventSink{status: http.StatusOK}
+	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var e event
+		body, _ := io.ReadAll(r.Body)
+		if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" || json.Unmarshal(body, &e) != nil {
+			t.Errorf("not a JSON POST: %s %q %s", r.Method, r.Header.Get("Content-Type"), body)
+		}
+		s.mu.Lock()
+		s.events = append(s.events, e)
+		status := s.status
+		s.mu.Unlock()
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(s.Close)
+	return s
+}
+
+func (s *eventSink) summary() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, e := range s.events {
+		out = append(out, strings.TrimSpace(e.Event+" "+e.Stage+e.Result))
+	}
+	return strings.Join(out, ", ")
+}
+
+func TestReporter(t *testing.T) {
+	sink := newEventSink(t)
+	r := newReporter(sink.URL, "box")
+	r.stage(0, 3, "pre-install")
+	r.stage(1, 3, "partition")
+	r.stage(3, 3, "complete") // the end is reported by finish, with the result
+	r.finish(nil)
+	if got := sink.summary(); got != "stage pre-install, stage partition, finish success" {
+		t.Errorf("events = %s", got)
+	}
+	e := sink.events[1]
+	if e.Hostname != "box" || e.Done != 1 || e.Total != 3 || e.Time == "" {
+		t.Errorf("stage event = %+v", e)
+	}
+	r.finish(errors.New("controller: mount: no such device"))
+	if last := sink.events[len(sink.events)-1]; last.Result != "failure" || last.Error != "controller: mount: no such device" {
+		t.Errorf("failure event = %+v", last)
+	}
+
+	// No URL: nothing is sent and nothing breaks.
+	var none *reporter = newReporter("", "box")
+	none.stage(0, 1, "x")
+	none.finish(nil)
+}
+
+// A report that cannot be delivered never decides the install: it is a
+// warning, said once.
+func TestReporterFailuresAreWarnedOnce(t *testing.T) {
+	sink := newEventSink(t)
+	sink.status = http.StatusInternalServerError
+	dir := t.TempDir()
+	errFile, _ := os.Create(filepath.Join(dir, "err"))
+	saved := os.Stderr
+	os.Stderr = errFile
+	r := newReporter(sink.URL, "box")
+	r.stage(0, 2, "a")
+	r.stage(1, 2, "b")
+	gone := newReporter("http://127.0.0.1:1/nothing-listens-here", "box")
+	gone.finish(nil)
+	os.Stderr = saved
+	errFile.Close()
+	out, _ := os.ReadFile(filepath.Join(dir, "err"))
+	if n := strings.Count(string(out), "could not be reported to "+sink.URL); n != 1 {
+		t.Errorf("warned %d times for the failing server:\n%s", n, out)
+	}
+	if !strings.Contains(string(out), "nothing-listens-here") {
+		t.Errorf("no warning for the unreachable server:\n%s", out)
+	}
+}
+
+func TestConfigFromAURL(t *testing.T) {
+	onlyTools(t, t.TempDir())
+	data, _ := yaml.Marshal(plainConfig())
+	mux := http.NewServeMux()
+	mux.HandleFunc("/config.yaml", func(w http.ResponseWriter, r *http.Request) { w.Write(data) })
+	mux.HandleFunc("/huge.yaml", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(strings.Repeat("#", maxConfigBytes+10)))
+	})
+	plain := httptest.NewServer(mux)
+	defer plain.Close()
+
+	// Over plain http a config is refused unless that is asked for: it says
+	// which disk to erase.
+	_, _, err := runWith(t, "", plain.URL+"/config.yaml")
+	wantRunErr(t, "plain http", err, "is plain http")
+	out, _, err := runWith(t, "", "--allow-insecure-http", plain.URL+"/config.yaml")
+	if err != nil || !strings.Contains(out, testDisk+" mklabel gpt") {
+		t.Errorf("dry run from a URL: %v\n%s", err, out)
+	}
+	_, _, err = runWith(t, "", "--allow-insecure-http", plain.URL+"/absent.yaml")
+	wantRunErr(t, "404", err, "answered 404")
+	_, _, err = runWith(t, "", "--allow-insecure-http", plain.URL+"/huge.yaml")
+	wantRunErr(t, "too large", err, "not a config")
+	_, _, err = runWith(t, "", "--allow-insecure-http", "http://127.0.0.1:1/config.yaml")
+	wantRunErr(t, "unreachable", err, "fetching the config")
+
+	// The fetched copy is private and does not stay behind.
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	path, err := fetchConfig(plain.URL+"/config.yaml", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(path); st.Mode().Perm() != 0o600 {
+		t.Errorf("fetched config mode %v", st.Mode().Perm())
+	}
+	os.RemoveAll(filepath.Dir(path))
+	if _, _, err = runWith(t, "", "--allow-insecure-http", plain.URL+"/config.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(tmp, "slinstaller-config-*")); len(left) != 0 {
+		t.Errorf("the fetched config was left behind: %v", left)
+	}
+	t.Setenv("TMPDIR", filepath.Join(tmp, "no-such-dir"))
+	if _, err := fetchConfig(plain.URL+"/config.yaml", true); err == nil {
+		t.Error("nowhere to keep the fetched config, but no error")
+	}
+}
+
+func TestUnmountAndInTargetFlags(t *testing.T) {
+	dir := t.TempDir()
+	_, errOut, err := runWith(t, "", "--unmount", "--root", dir)
+	if err != nil || !strings.Contains(errOut, "nothing is mounted under "+dir) {
+		t.Errorf("--unmount on an unmounted root: %v\n%s", err, errOut)
+	}
+	if os.Geteuid() != 0 {
+		_, _, err = runWith(t, "", "--in-target", "true", "--root", dir)
+		wantRunErr(t, "--in-target as a user", err, "--in-target must run as root")
+	}
+	// A report URL that is not one is refused with the rest of the config.
+	onlyTools(t, dir)
+	_, _, err = runWith(t, "", "--report-url", "ftp://example.org/x", writeConfig(t, dir, plainConfig()))
+	wantRunErr(t, "bad report URL", err, "is not an http or https URL")
+}

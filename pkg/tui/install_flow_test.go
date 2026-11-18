@@ -367,6 +367,14 @@ func installReports(t *testing.T, logPath string, noFile bool) {
 	m := newInstallModel()
 	m.cfg, m.opts = cfg, controller.Options{Through: "pre-install", Root: t.TempDir()}
 	m.phase, m.steps = phaseRunning, newSteps()
+	// A progress hook the caller set (a report sent elsewhere) still runs.
+	var hooked []string
+	m.opts.Progress = func(done, total int, stage string) { hooked = append(hooked, stage) }
+	defer func() {
+		if strings.Join(hooked, ",") != "pre-install,complete" {
+			t.Errorf("the caller's progress hook saw %v", hooked)
+		}
+	}()
 	msg := m.start()()
 	if (m.logPath == "") != noFile {
 		t.Errorf("log file claimed = %q, but could one be made: %v", m.logPath, !noFile)
