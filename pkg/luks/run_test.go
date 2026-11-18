@@ -97,3 +97,20 @@ func TestUUIDIsTrimmed(t *testing.T) {
 		t.Errorf("UUID = %q, %v", got, err)
 	}
 }
+
+func TestOutputDefaultsToStderrAndUUIDFailureNamesTheDevice(t *testing.T) {
+	fakeCryptsetup(t)
+	// No writer given: the command still runs (its output goes to stderr).
+	if err := Open("/dev/sda3", "cryptroot", "pw", nil); err != nil {
+		t.Errorf("Open with no writer: %v", err)
+	}
+
+	// cryptsetup failing on luksUUID is an error naming the device, not an
+	// empty UUID for the kernel command line.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "cryptsetup"), []byte("#!/bin/sh\nexit 1\n"), 0o755)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if got, err := UUID("/dev/sda9"); err == nil || got != "" || !strings.Contains(err.Error(), "/dev/sda9") {
+		t.Errorf("UUID on failure = %q, %v", got, err)
+	}
+}

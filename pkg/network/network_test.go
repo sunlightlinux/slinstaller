@@ -177,3 +177,59 @@ func TestRetry(t *testing.T) {
 		t.Errorf("immediate success: err = %v, notified = %d", err, notified)
 	}
 }
+
+func TestVerifyConnectivityFallsBackToGET(t *testing.T) {
+	// A server that drops the connection on HEAD but answers GET is still
+	// reachable.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					conn.Close()
+				}
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	if err := VerifyConnectivity(srv.URL); err != nil {
+		t.Errorf("a server that answers GET but not HEAD: %v", err)
+	}
+}
+
+func TestWaitForConnectivity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	notified := false
+	// Reachable at once: no waiting, and the operator is not told to wait.
+	start := time.Now()
+	if err := WaitForConnectivity(srv.URL, time.Minute, func() { notified = true }); err != nil {
+		t.Errorf("WaitForConnectivity: %v", err)
+	}
+	if notified || time.Since(start) > 5*time.Second {
+		t.Errorf("waited on a reachable server (notified=%v, took %v)", notified, time.Since(start))
+	}
+	// Unreachable with no time left to retry: fails without sleeping.
+	if err := WaitForConnectivity("http://127.0.0.1:1", time.Second, nil); err == nil {
+		t.Error("an unreachable server was reported reachable")
+	}
+}
+
+func TestDhcpcdConfRefusesABadNetmask(t *testing.T) {
+	bad := func(mask string, v6 bool) error {
+		_, err := DhcpcdConf([]Interface{{Name: "eth0", Static: true, Addrs: []Addr{{IP: "10.0.0.2", Netmask: mask, V6: v6}}}})
+		return err
+	}
+	// A mask with holes is not a prefix; the error names the interface.
+	if err := bad("255.0.255.0", false); err == nil || !strings.Contains(err.Error(), "eth0") || !strings.Contains(err.Error(), "non-contiguous") {
+		t.Errorf("non-contiguous mask: %v", err)
+	}
+	if err := bad("not-a-mask", false); err == nil {
+		t.Error("a junk netmask was accepted")
+	}
+	// An IPv6 mask written out in full.
+	if n, err := maskToCIDR("ffff:ffff:ffff:ffff::", true); err != nil || n != 64 {
+		t.Errorf("IPv6 mask = %d, %v", n, err)
+	}
+}
