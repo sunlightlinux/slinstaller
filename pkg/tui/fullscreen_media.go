@@ -240,7 +240,7 @@ func (m model) confirmSafe() (tea.Model, tea.Cmd) {
 
 	base := m.disks[m.diskIdx].Name // sda
 	root := partEntry{
-		Name: partDevName("/dev/"+base, num), Type: "part", FS: "ext4", Mount: "/",
+		Name: partDevName(base, num), Type: "part", FS: "ext4", Mount: "/",
 		Create: true,
 		Start:  fmt.Sprintf("%dM", region.StartMiB),
 		Size:   fmt.Sprintf("%dM", region.SizeMiB-1), // a MiB of slack at the end

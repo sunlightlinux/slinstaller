@@ -291,11 +291,9 @@ func (m installModel) stepMark(status int) string {
 
 // logRows is how many rows the log view shows: what the dialog has left
 // under its two header rows and above the blank row and its Back button.
+// The panel is never shorter than 18 rows, so there are always some.
 func (m installModel) logRows() int {
-	if r := panelHeight(m.height) - 3 - 2 - 2; r > 3 {
-		return r
-	}
-	return 3
+	return panelHeight(m.height) - 3 - 2 - 2
 }
 
 // What a log line is, for its colour in the log view.
@@ -821,10 +819,7 @@ func cleanLogLine(s string) string {
 		}
 		if col < len(line) {
 			line[col] = r
-		} else {
-			for len(line) < col {
-				line = append(line, ' ')
-			}
+		} else { // col never passes the end: it only moves by put, \b and \r
 			line = append(line, r)
 		}
 		col++
@@ -875,11 +870,13 @@ func wrapErr(s string, n int) []string {
 	if n < 10 {
 		n = 10
 	}
+	// By character, not byte: an error naming a path may not be ASCII, and
+	// half a character draws as garbage.
+	r := []rune(s)
 	var out []string
-	for len(s) > n {
-		out = append(out, s[:n])
-		s = s[n:]
+	for len(r) > n {
+		out = append(out, string(r[:n]))
+		r = r[n:]
 	}
-	out = append(out, s)
-	return out
+	return append(out, string(r))
 }

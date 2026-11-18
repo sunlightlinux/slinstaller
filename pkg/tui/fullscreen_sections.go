@@ -773,13 +773,6 @@ func orDash(s string) string {
 	return s
 }
 
-func orDefault(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "(default)"
-	}
-	return s
-}
-
 // --- simple section editors ---
 
 // updateSectionChoice drives both choice lists: the disk chooser (when

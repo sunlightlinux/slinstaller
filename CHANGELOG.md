@@ -12,6 +12,12 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- Safe Installation from the full-screen installer named its new root
+  partition `/dev/sdX3` where the config wants `sdX3`, so the install cut the
+  partition and then failed making a filesystem on `/dev//dev/sdX3`. The name
+  is now the bare one, as for the shared ESP.
+- A failed install's error on the final screen is wrapped by character, so a
+  message with a non-ASCII path is no longer cut inside a character.
 - A failing `cryptsetup` is now reported by the step that failed
   (`luks: luksFormat: …`, `luksOpen`, `luksAddKey`); the message used to name a
   flag (`luks: --batch-mode: exit status 1`).

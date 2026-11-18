@@ -220,12 +220,6 @@ func cryptHash(pass string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func prompt(in *bufio.Reader, w io.Writer, label string) string {
-	fmt.Fprintf(w, "%s: ", label)
-	line, _ := in.ReadString('\n')
-	return strings.TrimSpace(line)
-}
-
 func promptDefault(in *bufio.Reader, w io.Writer, label, def string) string {
 	fmt.Fprintf(w, "%s [%s]: ", label, def)
 	line, _ := in.ReadString('\n')
