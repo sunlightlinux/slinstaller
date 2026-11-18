@@ -12,6 +12,11 @@ for what will and will not be allowed to change once releases begin.
 
 ### Fixed
 
+- The config's proxy now applies to the reachability check made before
+  the install. It used only the environment, so on a proxied network a config
+  that set the proxy was refused for having no network.
+- A device given as a path where a name is expected (`name: /dev/sda`) is
+  refused by validation; it was planned as `/dev//dev/sda`.
 - Safe Installation from the full-screen installer named its new root
   partition `/dev/sdX3` where the config wants `sdX3`, so the install cut the
   partition and then failed making a filesystem on `/dev//dev/sdX3`. The name
@@ -52,6 +57,27 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- Config extensions, all optional — a clr-installer config runs unchanged:
+  - `match` on a disk names it by serial, WWN, model or a `/dev/disk/by-*`
+    path instead of its kernel name; exactly one disk has to fit. A
+    `block-devices` alias may point at such a path too.
+  - `mount-options` sets a filesystem's (or swap's) fstab options, and
+    `subvolumes` splits a btrfs filesystem into subvolumes with their own
+    mountpoints.
+  - `bootloader`: `terminal: serial` (boot menu on the kernel's serial
+    console), `removable` (also install at the removable-media path),
+    `update-nvram: false`, `probe-other-os`.
+  - `write-files` writes files into the installed system; `power-state`
+    reboots, powers off or halts when the install ends; `httpProxy` and
+    `noProxy` complete `httpsProxy`.
+  - `size: auto` for swap (and `swapFileSize: auto`) sizes it from the
+    machine's memory; `spare: true` makes a RAID member a hot spare; `wipe`
+    on a disk erases all of it (`zero`, `random`, `discard`).
+- `--system-check` runs the pre-install checks against a config and exits,
+  changing nothing and needing no root.
+- A failed install leaves a diagnostics archive (error, log, disks, config
+  without password hashes); `--diagnostics` names the file.
+- `--apply` takes a lock, so two installs cannot run at once.
 - A saved config is now portable between Intel and AMD as well. When
   `kernel-profile` names any wizard profile, `--apply` rewrites the
   vendor-specific arguments for the CPU it runs on — `intel_iommu`↔`amd_iommu`,

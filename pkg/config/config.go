@@ -234,6 +234,17 @@ type Media struct {
 	Create bool   `yaml:"create,omitempty"`
 	Start  string `yaml:"start,omitempty"`
 
+	// Spare makes a `type: raid` partition a hot spare of its array: it
+	// holds no data until a member fails, when the array rebuilds onto it.
+	Spare bool `yaml:"spare,omitempty"`
+
+	// Wipe, on a disk, is how much of what is on it is erased before it is
+	// partitioned: "superblock" (the default: old signatures, enough for the
+	// install), "zero" (zeros over the whole disk), "random" (random data
+	// over the whole disk) or "discard" (the whole disk discarded, as for
+	// an SSD). The last three take as long as the disk is large.
+	Wipe string `yaml:"wipe,omitempty"`
+
 	// MountOptions are the fstab options for this filesystem (or swap),
 	// comma-separated as in fstab, e.g. "noatime,compress=zstd". Without
 	// them the entry says "defaults".
@@ -247,6 +258,85 @@ type Media struct {
 	// its serial number, WWN, model or a /dev/disk/by-* path — instead of
 	// by its kernel name, which can. ResolveDisks turns it into the name.
 	Match *DiskMatch `yaml:"match,omitempty"`
+}
+
+// autoSize is the swap size that means "work it out from the memory".
+const autoSize = "auto"
+
+// swapEntries calls f on every swap partition and swap logical volume.
+func (c *Config) swapEntries(f func(*Media)) {
+	for _, d := range c.TargetMedia {
+		if d == nil {
+			continue
+		}
+		for _, ch := range d.Children {
+			if ch == nil {
+				continue
+			}
+			if ch.FsType == "swap" {
+				f(ch)
+			}
+			for _, lv := range ch.Children {
+				if lv != nil && lv.FsType == "swap" {
+					f(lv)
+				}
+			}
+		}
+	}
+}
+
+// autoSwap reports whether any swap is still sized "auto".
+func (c *Config) autoSwap() bool {
+	auto := strings.EqualFold(strings.TrimSpace(c.SwapFileSize), autoSize)
+	c.swapEntries(func(m *Media) {
+		if strings.EqualFold(strings.TrimSpace(m.Size), autoSize) {
+			auto = true
+		}
+	})
+	return auto
+}
+
+// ResolveAutoSwap gives every swap sized "auto" — the swap file, a swap
+// partition, a swap logical volume — the size SuggestedSwap works out for a
+// machine with mem bytes of memory.
+func (c *Config) ResolveAutoSwap(mem uint64) {
+	size := fmt.Sprintf("%dM", SuggestedSwap(mem)>>20)
+	if strings.EqualFold(strings.TrimSpace(c.SwapFileSize), autoSize) {
+		c.SwapFileSize = size
+	}
+	c.swapEntries(func(m *Media) {
+		if strings.EqualFold(strings.TrimSpace(m.Size), autoSize) {
+			m.Size = size
+		}
+	})
+}
+
+// SuggestedSwap is a swap size for a machine with mem bytes of memory: twice
+// the memory on a very small machine, about as much as the memory up to
+// 4 GiB, then a fixed 4 GiB, and 8 GiB from 64 GiB up. Swap this size is for
+// riding out memory pressure, not for hibernating; it is never more than
+// 8 GiB, nor less than 1 GiB (which is also the answer when the memory
+// could not be read).
+func SuggestedSwap(mem uint64) uint64 {
+	const gib = uint64(1) << 30
+	var size uint64
+	switch {
+	case mem == 0:
+		size = gib
+	case mem < gib:
+		size = 2 * mem
+	case mem < 2*gib:
+		size = 2 * gib
+	case mem < 4*gib:
+		size = mem
+	case mem < 64*gib:
+		size = 4 * gib
+	default:
+		size = 8 * gib
+	}
+	// Whole mebibytes, as a partition is cut.
+	size = (size + (1<<20 - 1)) >> 20 << 20
+	return min(max(size, gib), 8*gib)
 }
 
 // WriteFile is a file to write into the installed system.
@@ -789,6 +879,24 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, m := range c.TargetMedia {
+		if m == nil {
+			continue
+		}
+		switch m.Wipe {
+		case "", "superblock":
+		case "zero", "random", "discard":
+			if c.ReusePartitions {
+				add("%s: wipe: %s would erase the partitions reusePartitions keeps", m.Name, m.Wipe)
+			}
+		default:
+			add("%s: wipe %q is not superblock, zero, random or discard", m.Name, m.Wipe)
+		}
+	}
+	if c.autoSwap() {
+		add("a swap size of \"auto\" has to be worked out from this machine's memory first (ResolveAutoSwap)")
+	}
+
 	switch c.PowerState {
 	case "", "reboot", "poweroff", "halt":
 	default:
@@ -877,6 +985,7 @@ func (c *Config) Validate() error {
 	roots, esps := 0, 0
 	seen := map[string]bool{}
 	raidMembers := map[string]int{} // members declared per array name
+	raidSpares := map[string]int{}
 
 	// checkFS validates a filesystem-bearing entry (a plain partition, a
 	// logical volume or a RAID array): the filesystem is known, the
@@ -1019,7 +1128,11 @@ func (c *Config) Validate() error {
 				if ch.Raid == "" {
 					add("%s: raid member names no array (raid:)", where)
 				} else {
-					raidMembers[ch.Raid]++
+					if ch.Spare {
+						raidSpares[ch.Raid]++
+					} else {
+						raidMembers[ch.Raid]++
+					}
 				}
 				continue
 			}
@@ -1059,6 +1172,9 @@ func (c *Config) Validate() error {
 		} else if n := raidMembers[a.Name]; n < mdadm.MinMembers(a.Level) {
 			add("raid %s: level %s needs at least %d members, has %d",
 				where, a.Level, mdadm.MinMembers(a.Level), n)
+		}
+		if raidSpares[a.Name] > 0 && strings.TrimPrefix(a.Level, "raid") == "0" {
+			add("raid %s: level 0 has no redundancy to rebuild onto a spare", where)
 		}
 		if a.FsType == "vfat" && (a.Mountpoint == "/boot" || a.Mountpoint == "/boot/efi") {
 			add("raid %s: the EFI System Partition cannot be on RAID", where)
@@ -1173,6 +1289,12 @@ func (c *Config) Plan() (*storage.Plan, error) {
 	pl := &storage.Plan{Wipe: true}
 	for _, d := range disks {
 		pl.Disks = append(pl.Disks, "/dev/"+d.Name)
+		if d.Wipe != "" && d.Wipe != "superblock" {
+			if pl.DiskWipe == nil {
+				pl.DiskWipe = map[string]string{}
+			}
+			pl.DiskWipe["/dev/"+d.Name] = d.Wipe
+		}
 	}
 
 	for _, disk := range disks {
@@ -1232,6 +1354,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 			}
 			if raidMember {
 				p.IsRaidMember = true
+				p.RaidSpare = ch.Spare
 				p.RaidName = ch.Raid
 				p.Mountpoint, p.Filesystem = "", "" // the array carries those
 			}
@@ -1246,9 +1369,13 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		if a == nil {
 			continue
 		}
-		var members []string
+		var members, spares []string
 		for _, p := range pl.Parts {
-			if p.IsRaidMember && p.RaidName == a.Name {
+			switch {
+			case !p.IsRaidMember || p.RaidName != a.Name:
+			case p.RaidSpare:
+				spares = append(spares, p.Device)
+			default:
 				members = append(members, p.Device)
 			}
 		}
@@ -1257,6 +1384,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 			RaidName:    a.Name,
 			RaidLevel:   a.Level,
 			RaidMembers: members,
+			RaidSpares:  spares,
 			Mountpoint:  a.Mountpoint,
 			Filesystem:  a.FsType,
 		}

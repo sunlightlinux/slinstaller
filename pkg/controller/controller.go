@@ -244,6 +244,10 @@ func (in *installer) partition() error {
 	if err := in.releaseDisks(); err != nil {
 		return err
 	}
+	// A disk asked to be erased whole is, now that nothing holds it.
+	if err := storage.RunCommands(in.plan.WipeCommands(), in.opts.Runner); err != nil {
+		return err
+	}
 	// The partition table first; then, on an encrypted disk, LUKS on each
 	// crypt partition before any filesystem is made — mkfs targets the
 	// mapper, not the raw partition.

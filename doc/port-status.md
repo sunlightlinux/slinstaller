@@ -37,6 +37,20 @@ _Snapshot: 2026-11-14. Update as the port proceeds._
 | telemetry | 414 | Clear telemetry | ⛔ | — |
 | kernel | 89 | Clear kernel bundles | 🔁 | clr's bundle names map to Sunlight's `linux` / `linux-lts` packages; any other value is a package name |
 
+## Beyond clr-installer
+
+slinstaller's own additions, as optional config keys (see the README): disks
+named by serial, WWN, model or stable path; fstab mount options and btrfs
+subvolumes; bootloader options (serial menu, removable-media path, no NVRAM,
+other systems); `write-files`, `power-state`, the http and no-proxy settings;
+swap sized from memory, RAID hot spares, whole-disk wipe modes. On the
+command line: `--system-check`, a diagnostics archive on failure, and an
+install lock.
+
+Not done, and would be next: resizing an existing partition for an install
+into free space, writing a config from the layout already on a disk, and
+installing from an image instead of packages.
+
 ## What's left
 
 **Portable, not done:**

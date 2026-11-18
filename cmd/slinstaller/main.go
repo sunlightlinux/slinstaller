@@ -317,6 +317,9 @@ restart:
 		os.Setenv(strings.ToUpper(k), v)
 	}
 
+	// A swap sized "auto" is sized for this machine's memory.
+	cfg.ResolveAutoSwap(system.MemTotalBytes())
+
 	// Validate before anything else: this is the last point at which
 	// nothing has been touched.
 	if err := cfg.Validate(); err != nil {

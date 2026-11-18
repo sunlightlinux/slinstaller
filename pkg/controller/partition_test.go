@@ -294,3 +294,35 @@ func TestInstallOptions(t *testing.T) {
 		t.Error("output() should default to stderr")
 	}
 }
+
+func TestPartitionWipesAndBuildsSpares(t *testing.T) {
+	// A disk asked to be zeroed is, before its table is written.
+	cfg := twoPartConfig()
+	cfg.TargetMedia[0].Wipe = "zero"
+	var r recorder
+	if err := Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices}); err != nil {
+		t.Fatal(err)
+	}
+	flat := r.flat()
+	if i, j := strings.Index(flat, "blkdiscard -f -z /dev/sda"), strings.Index(flat, "mklabel"); i < 0 || i > j {
+		t.Errorf("the disk was not zeroed before partitioning:\n%s", flat)
+	}
+	// The wipe failing stops the install with the old table still there.
+	r = recorder{}
+	err := Install(cfg, Options{Through: "partition", Runner: r.failOn("blkdiscard"), Devices: noDevices})
+	if err == nil || strings.Contains(r.flat(), "mklabel") {
+		t.Errorf("a failed wipe went on to partition: %v\n%s", err, r.flat())
+	}
+
+	// A hot spare is handed to mdadm as one, after the members.
+	raid := raidConfig()
+	raid.TargetMedia = append(raid.TargetMedia, &config.Media{Name: "sdc", Type: "disk", Children: []*config.Media{
+		{Name: "sdc1", Type: "raid", Raid: "md0", Spare: true}}})
+	r = recorder{}
+	if err := Install(raid, Options{Through: "partition", Runner: r.run, Devices: noDevices}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.flat(), "--raid-devices=2 --spare-devices=1 /dev/sda2 /dev/sdb1 /dev/sdc1") {
+		t.Errorf("mdadm:\n%s", r.flat())
+	}
+}

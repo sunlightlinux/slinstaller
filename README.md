@@ -100,6 +100,52 @@ Mark a partition `type: crypt` to encrypt it. `Validate` reports every
 problem at once before any disk is touched. See [`demo/uefi-basic.yaml`](demo/uefi-basic.yaml)
 and [`doc/architecture.md`](doc/architecture.md).
 
+### Beyond clr-installer's format
+
+These keys are slinstaller's own. All are optional, and a config that uses
+none of them is a plain clr-installer config.
+
+```yaml
+targetMedia:
+- type: disk
+  match: { serial: S5GXNX0T123456 }     # or wwn, model, path: /dev/disk/by-id/...
+  wipe: discard                          # superblock (default), zero, random, discard
+  children:
+  - { type: part, fstype: vfat, mountpoint: /boot, size: 512M }
+  - { type: part, fstype: swap, size: auto, mount-options: discard }
+  - type: part
+    fstype: btrfs
+    mountpoint: /
+    mount-options: noatime,compress=zstd
+    subvolumes:
+    - { name: "@",     mountpoint: / }
+    - { name: "@home", mountpoint: /home }
+bootloader:
+  terminal: serial        # the boot menu on the kernel's serial console too
+  removable: true         # also install at EFI/BOOT/BOOTX64.EFI
+  update-nvram: true      # false leaves the firmware's boot entries alone
+  probe-other-os: false   # true lists other systems in the menu
+httpProxy: http://proxy:3128
+noProxy: localhost,10.0.0.0/8
+power-state: poweroff     # reboot, poweroff or halt when the install ends
+write-files:
+- { path: /etc/motd, content: "Welcome.\n", permissions: "0644" }
+```
+
+- **`match`** names the disk by what does not change between boots. Exactly
+  one disk has to fit; none, or several, stops the install.
+- **`size: auto`** (a swap partition or volume, or `swapFileSize`) is sized
+  from the machine's memory, between 1 and 8 GiB.
+- **`spare: true`** on a `type: raid` partition makes it a hot spare.
+- **`wipe`** other than `superblock` goes over the whole disk and takes as
+  long as the disk is large.
+
+On the command line, `--system-check config.yaml` runs every pre-install
+check and stops without changing anything. A failed install leaves a
+diagnostics archive in `/tmp` (`--diagnostics` names it): the error, the log,
+the disks, and the config without its password hashes. Only one `--apply`
+runs at a time.
+
 ## Kernel settings
 
 The wizard's kernel sections all end up as ordinary config, so a saved

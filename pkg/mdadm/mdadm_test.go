@@ -29,7 +29,12 @@ func TestLevels(t *testing.T) {
 }
 
 func TestCreate(t *testing.T) {
-	got := strings.Join(Create("/dev/md/root", "raid1", []string{"/dev/vda2", "/dev/vdb1"}), " ")
+	// Spares come after the members and are counted on their own.
+	spared := strings.Join(Create("/dev/md0", "5", []string{"/dev/a1", "/dev/b1", "/dev/c1"}, []string{"/dev/d1"}), " ")
+	if !strings.HasSuffix(spared, "--level=5 --raid-devices=3 --spare-devices=1 /dev/a1 /dev/b1 /dev/c1 /dev/d1") {
+		t.Errorf("Create with a spare = %s", spared)
+	}
+	got := strings.Join(Create("/dev/md/root", "raid1", []string{"/dev/vda2", "/dev/vdb1"}, nil), " ")
 	want := "mdadm --create /dev/md/root --run --force --metadata=1.2 --level=1 --raid-devices=2 /dev/vda2 /dev/vdb1"
 	if got != want {
 		t.Errorf("Create =\n  %s\nwant\n  %s", got, want)

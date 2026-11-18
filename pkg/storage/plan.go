@@ -82,6 +82,10 @@ type Partition struct {
 	RaidName     string
 	RaidLevel    string
 	RaidMembers  []string
+	// RaidSpare marks a member that is a hot spare; RaidSpares are an
+	// array's spares, which hold no data until a member fails.
+	RaidSpare  bool
+	RaidSpares []string
 }
 
 // EffectiveDevice is where the filesystem lives: the array device for a
@@ -130,6 +134,28 @@ type Plan struct {
 	Disks []string // every disk to partition (defaults to [Disk])
 	Wipe  bool
 	Parts []Partition
+
+	// DiskWipe is how a disk is erased before it is partitioned, when that
+	// is more than removing old signatures: "zero", "random" or "discard".
+	DiskWipe map[string]string
+}
+
+// WipeCommands returns the commands that erase the whole of each disk that
+// asks for it, before its partition table is written. Each takes as long as
+// the disk is large.
+func (pl *Plan) WipeCommands() [][]string {
+	var cmds [][]string
+	for _, disk := range pl.DiskList() {
+		switch pl.DiskWipe[disk] {
+		case "zero":
+			cmds = append(cmds, []string{"blkdiscard", "-f", "-z", disk})
+		case "discard":
+			cmds = append(cmds, []string{"blkdiscard", "-f", disk})
+		case "random":
+			cmds = append(cmds, []string{"shred", "-n", "1", disk})
+		}
+	}
+	return cmds
 }
 
 // DiskList is every disk the plan partitions: Disks when set, else the

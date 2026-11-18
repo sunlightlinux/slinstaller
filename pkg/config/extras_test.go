@@ -78,3 +78,118 @@ func TestWriteFilesValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSuggestedSwap(t *testing.T) {
+	const gib = uint64(1) << 30
+	for _, tc := range []struct{ mem, want uint64 }{
+		{0, gib},                           // memory unknown
+		{256 << 20, gib},                   // twice a tiny memory is still under the floor
+		{768 << 20, 1536 << 20},            // twice the memory
+		{gib + gib/2, 2 * gib},             // under 2 GiB
+		{3 * gib, 3 * gib},                 // as much as the memory
+		{8 * gib, 4 * gib},                 // a fixed 4 GiB
+		{63 * gib, 4 * gib},                //
+		{64 * gib, 8 * gib},                // large machines
+		{1024 * gib, 8 * gib},              // never more
+		{3*gib + 12345, 3*gib + (1 << 20)}, // whole mebibytes
+	} {
+		if got := SuggestedSwap(tc.mem); got != tc.want {
+			t.Errorf("SuggestedSwap(%d MiB) = %d MiB, want %d MiB", tc.mem>>20, got>>20, tc.want>>20)
+		}
+	}
+}
+
+func TestAutoSwapIsResolvedForTheMachine(t *testing.T) {
+	c := btrfsConfig()
+	c.TargetMedia[0].Children[1].Size = "Auto"
+	c.SwapFileSize = "auto"
+	// Until it is resolved the config cannot be planned, and says why.
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), `swap size of "auto"`) {
+		t.Errorf("unresolved auto: %v", err)
+	}
+	c.ResolveAutoSwap(16 << 30)
+	if got := c.TargetMedia[0].Children[1].Size; got != "4096M" || c.SwapFileSize != "4096M" {
+		t.Errorf("resolved to %q and %q, want 4096M", got, c.SwapFileSize)
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("resolved config: %v", err)
+	}
+	// A size that was given is left alone; so is everything that is not swap.
+	c = btrfsConfig()
+	c.ResolveAutoSwap(16 << 30)
+	if c.TargetMedia[0].Children[1].Size != "2G" || c.SwapFileSize != "" || c.TargetMedia[0].Children[0].Size != "512M" {
+		t.Error("a given size was changed")
+	}
+	// A swap logical volume, likewise.
+	lv := &Config{TargetMedia: []*Media{nil, {Name: "sda", Type: "disk", Children: []*Media{nil,
+		{Name: "sda2", Type: "lvm", VolumeGroup: "vg0", Children: []*Media{nil, {Name: "swap", FsType: "swap", Size: "auto"}}}}}}}
+	lv.ResolveAutoSwap(2 << 30)
+	if got := lv.TargetMedia[1].Children[1].Children[1].Size; got != "2048M" {
+		t.Errorf("swap LV = %q", got)
+	}
+}
+
+func raidWithSpare(level string, active int) *Config {
+	c := &Config{Raid: []*RaidArray{{Name: "md0", Level: level, FsType: "ext4", Mountpoint: "/"}}}
+	for i := 0; i < active+1; i++ {
+		name := "sd" + string(rune('a'+i))
+		d := &Media{Name: name, Type: "disk"}
+		if i == 0 {
+			d.Children = append(d.Children, &Media{Name: name + "1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"})
+		}
+		d.Children = append(d.Children, &Media{Name: name + "2", Type: "raid", Raid: "md0", Spare: i == active})
+		c.TargetMedia = append(c.TargetMedia, d)
+	}
+	return c
+}
+
+func TestRaidSpares(t *testing.T) {
+	c := raidWithSpare("1", 2)
+	if err := c.Validate(); err != nil {
+		t.Fatalf("RAID 1 with a spare: %v", err)
+	}
+	plan, err := c.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	arr := plan.Parts[len(plan.Parts)-1]
+	if strings.Join(arr.RaidMembers, ",") != "/dev/sda2,/dev/sdb2" || strings.Join(arr.RaidSpares, ",") != "/dev/sdc2" {
+		t.Errorf("members %v spares %v", arr.RaidMembers, arr.RaidSpares)
+	}
+	// A spare does not count towards what the level needs …
+	if err := raidWithSpare("5", 2).Validate(); err == nil || !strings.Contains(err.Error(), "level 5 needs at least 3 members, has 2") {
+		t.Errorf("RAID 5 with two members and a spare: %v", err)
+	}
+	// … and a level with nothing to rebuild from cannot use one.
+	for _, level := range []string{"0", "raid0"} {
+		if err := raidWithSpare(level, 2).Validate(); err == nil || !strings.Contains(err.Error(), "no redundancy to rebuild onto a spare") {
+			t.Errorf("level %s with a spare: %v", level, err)
+		}
+	}
+}
+
+func TestDiskWipeModes(t *testing.T) {
+	for mode, want := range map[string]string{"": "", "superblock": "", "zero": "zero", "random": "random", "discard": "discard"} {
+		c := btrfsConfig()
+		c.TargetMedia[0].Wipe = mode
+		if err := c.Validate(); err != nil {
+			t.Errorf("wipe %q: %v", mode, err)
+		}
+		plan, _ := c.Plan()
+		if plan.DiskWipe["/dev/sda"] != want {
+			t.Errorf("wipe %q planned as %q", mode, plan.DiskWipe["/dev/sda"])
+		}
+	}
+	c := btrfsConfig()
+	c.TargetMedia[0].Wipe = "everything"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), `wipe "everything" is not superblock, zero, random or discard`) {
+		t.Errorf("unknown wipe: %v", err)
+	}
+	// Reusing partitions and erasing the disk contradict each other.
+	c = btrfsConfig()
+	c.TargetMedia[0].Children[2].Subvolumes = nil
+	c.ReusePartitions, c.TargetMedia[0].Wipe = true, "zero"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "would erase the partitions reusePartitions keeps") {
+		t.Errorf("wipe with reuse: %v", err)
+	}
+}

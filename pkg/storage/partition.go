@@ -10,8 +10,9 @@ import (
 	"strings"
 )
 
-// Commands returns the full partition-then-format command list — the
-// table commands followed by the mkfs commands. It is the dry run for a
+// Commands returns the full partition-then-format command list — a whole-disk
+// wipe where one is asked for, the table commands, the mkfs commands and the
+// btrfs subvolumes. It is the dry run for a
 // plain install; an encrypted install runs the two halves with
 // cryptsetup in between, so the controller uses TableCommands and
 // MkfsCommands directly.
@@ -20,7 +21,19 @@ func (pl *Plan) Commands() ([][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(pl.TableCommands(), mkfs...), nil
+	cmds := append(pl.WipeCommands(), pl.TableCommands()...)
+	cmds = append(cmds, mkfs...)
+	// Subvolumes are made inside the filesystem, mounted for the purpose;
+	// shown here by the device they are made on.
+	for _, p := range pl.Parts {
+		if p.Preserve {
+			continue
+		}
+		for _, sv := range p.Subvolumes {
+			cmds = append(cmds, []string{"btrfs", "subvolume", "create", "[" + p.EffectiveDevice() + "]/" + sv.Name})
+		}
+	}
+	return cmds, nil
 }
 
 // TableCommands returns the commands that lay down the partition tables:

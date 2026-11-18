@@ -124,6 +124,9 @@ func parseMemSize(s string) uint64 {
 
 // memTotalBytes is the machine's memory from /proc/meminfo, or 0 when it
 // cannot be read.
+// MemTotalBytes is the machine's memory in bytes, or 0 when it cannot be read.
+func MemTotalBytes() uint64 { return memTotalBytes() }
+
 func memTotalBytes() uint64 {
 	data, err := os.ReadFile(meminfoFile)
 	if err != nil {

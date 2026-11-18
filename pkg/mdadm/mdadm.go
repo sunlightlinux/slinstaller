@@ -61,14 +61,20 @@ func KnownLevel(level string) bool { return MinMembers(level) > 0 }
 // level from members. --run --force let it assemble non-interactively on a
 // fresh set of partitions during an install; metadata 1.2 is the default
 // for a data array (the ESP is kept off RAID, so 1.0 is not needed).
-func Create(device, level string, members []string) []string {
+//
+// spares are hot spares: listed after the members, they hold no data until
+// a member fails and the array rebuilds onto one.
+func Create(device, level string, members, spares []string) []string {
 	cmd := []string{
 		"mdadm", "--create", device, "--run", "--force",
 		"--metadata=1.2",
 		"--level=" + normalizeLevel(level),
 		fmt.Sprintf("--raid-devices=%d", len(members)),
 	}
-	return append(cmd, members...)
+	if len(spares) > 0 {
+		cmd = append(cmd, fmt.Sprintf("--spare-devices=%d", len(spares)))
+	}
+	return append(append(cmd, members...), spares...)
 }
 
 // Commands returns the array-creation commands for a plan, in the order
@@ -77,7 +83,7 @@ func Commands(pl *storage.Plan) [][]string {
 	var cmds [][]string
 	for _, p := range pl.Parts {
 		if p.Raid {
-			cmds = append(cmds, Create(p.EffectiveDevice(), p.RaidLevel, p.RaidMembers))
+			cmds = append(cmds, Create(p.EffectiveDevice(), p.RaidLevel, p.RaidMembers, p.RaidSpares))
 		}
 	}
 	return cmds

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -440,4 +441,21 @@ func TestDryRunResolvesADiskBySerial(t *testing.T) {
 	os.Remove(filepath.Join(bin, "lsblk.json"))
 	_, _, err = runWith(t, "", path)
 	wantRunErr(t, "no listing", err, "cannot list the disks")
+}
+
+// A swap sized "auto" is given a size for this machine before the plan is
+// shown, so what a dry run prints is what --apply would do.
+func TestDryRunSizesAutoSwap(t *testing.T) {
+	dir := t.TempDir()
+	onlyTools(t, dir)
+	cfg := plainConfig()
+	cfg.TargetMedia[0].Children[1].Size = "auto"
+	out, _, err := runWith(t, "", writeConfig(t, dir, cfg))
+	if err != nil {
+		t.Fatalf("dry run with an auto swap: %v", err)
+	}
+	want := config.SuggestedSwap(system.MemTotalBytes()) >> 20
+	if !strings.Contains(out, fmt.Sprintf("mkpart linux-swap 512MiB %dMiB", 512+want)) {
+		t.Errorf("swap partition not sized for this machine (%d MiB):\n%s", want, out)
+	}
 }

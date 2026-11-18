@@ -96,3 +96,54 @@ func TestCreateSubvolumesSkipsWhatHasNone(t *testing.T) {
 		t.Error("no temporary directory, but no error")
 	}
 }
+
+func TestWipeCommands(t *testing.T) {
+	pl := &Plan{Disks: []string{"/dev/sda", "/dev/sdb", "/dev/sdc", "/dev/sdd"},
+		DiskWipe: map[string]string{"/dev/sda": "zero", "/dev/sdb": "random", "/dev/sdc": "discard"}}
+	var got []string
+	for _, c := range pl.WipeCommands() {
+		got = append(got, strings.Join(c, " "))
+	}
+	// Each names its own disk; the disk that asked for nothing gets nothing.
+	want := "blkdiscard -f -z /dev/sda|shred -n 1 /dev/sdb|blkdiscard -f /dev/sdc"
+	if strings.Join(got, "|") != want {
+		t.Errorf("wipe commands = %v", got)
+	}
+	if tools := " " + strings.Join(pl.RequiredTools(), " ") + " "; !strings.Contains(tools, " blkdiscard ") || !strings.Contains(tools, " shred ") || strings.Count(tools, "blkdiscard") != 1 {
+		t.Errorf("required tools = %s", tools)
+	}
+	if cmds := (&Plan{Disk: "/dev/sda"}).WipeCommands(); len(cmds) != 0 {
+		t.Errorf("a plan that asks for no wipe has %v", cmds)
+	}
+}
+
+// A dry run shows everything the install will do to the disk, the whole-disk
+// wipe and the subvolumes included.
+func TestCommandsShowWipeAndSubvolumes(t *testing.T) {
+	pl := btrfsPlan()
+	pl.Disk, pl.Wipe = "/dev/sda", true
+	pl.DiskWipe = map[string]string{"/dev/sda": "discard"}
+	for i := range pl.Parts {
+		pl.Parts[i].Number, pl.Parts[i].Size = i+1, "1G"
+	}
+	cmds, err := pl.Commands()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, c := range cmds {
+		lines = append(lines, strings.Join(c, " "))
+	}
+	all := strings.Join(lines, "\n")
+	if lines[0] != "blkdiscard -f /dev/sda" {
+		t.Errorf("the wipe is not first:\n%s", all)
+	}
+	for _, want := range []string{"btrfs subvolume create [/dev/sda3]/@", "btrfs subvolume create [/dev/sda3]/@home"} {
+		if !strings.Contains(all, want+"\n") && !strings.HasSuffix(all, want) {
+			t.Errorf("missing %q:\n%s", want, all)
+		}
+	}
+	if strings.Index(all, "btrfs subvolume create") < strings.Index(all, "mkfs.btrfs") {
+		t.Errorf("subvolumes before their filesystem:\n%s", all)
+	}
+}
