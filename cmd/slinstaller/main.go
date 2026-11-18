@@ -309,6 +309,14 @@ restart:
 		cfg.SwapFileSize = swapFileSize
 	}
 
+	// The config's proxy is for everything this run fetches, the
+	// reachability check before the install included.
+	for _, kv := range cfg.ProxyEnv() {
+		k, v, _ := strings.Cut(kv, "=")
+		os.Setenv(k, v)
+		os.Setenv(strings.ToUpper(k), v)
+	}
+
 	// Validate before anything else: this is the last point at which
 	// nothing has been touched.
 	if err := cfg.Validate(); err != nil {
@@ -741,9 +749,9 @@ restart:
 	}
 	// postReboot: an unattended install that should come up into the new
 	// system reboots once the full run has finished (not a staged --through).
-	if cfg.PostReboot {
-		fmt.Fprintln(os.Stderr, "postReboot: rebooting into the installed system...")
-		return rebootSystem()
+	if action := cfg.PowerAction(); action != "" {
+		fmt.Fprintf(os.Stderr, "install finished: %s...\n", action)
+		return powerCommand(action)
 	}
 	return nil
 }
@@ -767,12 +775,13 @@ func checkLocale(tz, keymap string) error {
 	return nil
 }
 
-// rebootSystem reboots the machine, for config's postReboot.
-func rebootSystem() error {
-	cmd := exec.Command("reboot")
+// powerCommand reboots, powers off or halts the machine, for the config's
+// postReboot and power-state. The action is the command's name.
+func powerCommand(action string) error {
+	cmd := exec.Command(action)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("postReboot: %w", err)
+		return fmt.Errorf("%s: %w", action, err)
 	}
 	return nil
 }

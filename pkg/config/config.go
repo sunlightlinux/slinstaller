@@ -137,6 +137,20 @@ type Config struct {
 	// come up into the new system without an operator at the console.
 	PostReboot bool `yaml:"postReboot,omitempty"`
 
+	// PowerState is what the machine does when a full install finishes:
+	// "reboot" (the same as postReboot), "poweroff" or "halt". Empty leaves
+	// it running.
+	PowerState string `yaml:"power-state,omitempty"`
+
+	// HTTPProxy and NoProxy complete httpsProxy: the proxy for plain-http
+	// repositories (httpsProxy when unset) and the hosts reached directly.
+	HTTPProxy string `yaml:"httpProxy,omitempty"`
+	NoProxy   string `yaml:"noProxy,omitempty"`
+
+	// WriteFiles are files written into the installed system once it is
+	// configured, before the post-install hooks run.
+	WriteFiles []*WriteFile `yaml:"write-files,omitempty"`
+
 	// ReusePartitions installs into the disk's existing partitions instead
 	// of repartitioning it (clr-installer's advanced/manual mode): the
 	// partition table is left untouched, each declared partition is matched
@@ -233,6 +247,76 @@ type Media struct {
 	// its serial number, WWN, model or a /dev/disk/by-* path — instead of
 	// by its kernel name, which can. ResolveDisks turns it into the name.
 	Match *DiskMatch `yaml:"match,omitempty"`
+}
+
+// WriteFile is a file to write into the installed system.
+type WriteFile struct {
+	// Path is the file's absolute path in the installed system.
+	Path string `yaml:"path"`
+	// Content is what the file holds.
+	Content string `yaml:"content"`
+	// Permissions is its mode in octal, e.g. "0600". Empty means 0644.
+	Permissions string `yaml:"permissions,omitempty"`
+}
+
+// Mode is the file's permission bits.
+func (w *WriteFile) Mode() (os.FileMode, error) {
+	if w.Permissions == "" {
+		return 0o644, nil
+	}
+	n, err := strconv.ParseUint(w.Permissions, 8, 32)
+	if err != nil || n > 0o7777 {
+		return 0, fmt.Errorf("permissions %q are not an octal mode such as 0644", w.Permissions)
+	}
+	return os.FileMode(n&0o777) | modeBits(n), nil
+}
+
+// modeBits maps the octal setuid, setgid and sticky digits to Go's bits.
+func modeBits(n uint64) os.FileMode {
+	var m os.FileMode
+	if n&0o4000 != 0 {
+		m |= os.ModeSetuid
+	}
+	if n&0o2000 != 0 {
+		m |= os.ModeSetgid
+	}
+	if n&0o1000 != 0 {
+		m |= os.ModeSticky
+	}
+	return m
+}
+
+// ProxyEnv is the proxy settings as environment assignments, for the
+// commands that download: the https proxy, the http proxy (the https one
+// when no other is given, as before there were two) and the direct hosts.
+func (c *Config) ProxyEnv() []string {
+	var env []string
+	httpProxy := c.HTTPProxy
+	if httpProxy == "" {
+		httpProxy = c.HTTPSProxy
+	}
+	if c.HTTPSProxy != "" {
+		env = append(env, "https_proxy="+c.HTTPSProxy)
+	}
+	if httpProxy != "" {
+		env = append(env, "http_proxy="+httpProxy)
+	}
+	if c.NoProxy != "" && len(env) > 0 {
+		env = append(env, "no_proxy="+c.NoProxy)
+	}
+	return env
+}
+
+// PowerAction is what to do with the machine after a full install:
+// "reboot", "poweroff", "halt" or "" — power-state, or postReboot.
+func (c *Config) PowerAction() string {
+	if c.PowerState != "" {
+		return c.PowerState
+	}
+	if c.PostReboot {
+		return "reboot"
+	}
+	return ""
 }
 
 // Bootloader is how GRUB is installed.
@@ -702,6 +786,29 @@ func (c *Config) Validate() error {
 	for _, al := range c.BlockDevices {
 		if al != nil && al.File != "" && !strings.HasPrefix(al.File, "/dev/") {
 			add("block-devices: %s points at %s, an image file; installing into an image is not supported (name a device such as /dev/sda)", al.Name, al.File)
+		}
+	}
+
+	switch c.PowerState {
+	case "", "reboot", "poweroff", "halt":
+	default:
+		add("power-state: %q is not reboot, poweroff or halt", c.PowerState)
+	}
+	wrote := map[string]bool{}
+	for _, w := range c.WriteFiles {
+		if w == nil {
+			continue
+		}
+		clean := filepath.Clean(w.Path)
+		switch {
+		case !strings.HasPrefix(w.Path, "/") || clean == "/":
+			add("write-files: %q is not an absolute file path", w.Path)
+		case wrote[clean]:
+			add("write-files: %s is written twice", clean)
+		}
+		wrote[clean] = true
+		if _, err := w.Mode(); err != nil {
+			add("write-files: %s: %v", w.Path, err)
 		}
 	}
 

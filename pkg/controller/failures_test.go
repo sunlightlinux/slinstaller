@@ -652,3 +652,75 @@ func TestBootloaderOptions(t *testing.T) {
 		t.Errorf("default grub-install:\n%s", r.flat())
 	}
 }
+
+func TestWriteFiles(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.WriteFiles = []*config.WriteFile{
+		nil,
+		{Path: "/etc/motd", Content: "Welcome.\n"},
+		{Path: "/etc/app/secret.conf", Content: "token\n", Permissions: "0600"},
+		{Path: "/usr/local/bin/tool", Content: "#!/bin/sh\n", Permissions: "4755"},
+		{Path: "/etc/resolv.conf", Content: "nameserver 10.0.0.1\n"},
+	}
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	// In the installed system resolv.conf is a link to a place that, from
+	// the installer, is on the live system. It is replaced, not followed.
+	outside := filepath.Join(t.TempDir(), "live-resolv.conf")
+	os.WriteFile(outside, []byte("live\n"), 0o644)
+	etc := mkTarget(t, in, "etc")
+	os.Symlink(outside, filepath.Join(etc, "resolv.conf"))
+	// An existing file keeps nothing of its old mode.
+	os.WriteFile(filepath.Join(etc, "motd"), []byte("old\n"), 0o600)
+
+	if err := in.writeFiles(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readTarget(t, in, "etc", "motd"); got != "Welcome.\n" {
+		t.Errorf("motd = %q", got)
+	}
+	for rel, want := range map[string]os.FileMode{
+		"etc/motd": 0o644, "etc/app/secret.conf": 0o600, "usr/local/bin/tool": 0o755 | os.ModeSetuid,
+	} {
+		st, err := os.Stat(filepath.Join(in.opts.Root, rel))
+		if err != nil || st.Mode()&(os.ModePerm|os.ModeSetuid) != want {
+			t.Errorf("%s: %v, mode %v, want %v", rel, err, st.Mode(), want)
+		}
+	}
+	if live, _ := os.ReadFile(outside); string(live) != "live\n" {
+		t.Errorf("a file outside the target was written through a link: %q", live)
+	}
+	if fi, _ := os.Lstat(filepath.Join(etc, "resolv.conf")); fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("the link was left in place")
+	}
+
+	// A directory that is a link out of the target is refused outright.
+	in = stagedInstaller(t, cfg, &r)
+	away := t.TempDir()
+	os.Symlink(away, filepath.Join(in.opts.Root, "etc"))
+	err := in.writeFiles()
+	wantErr(t, err, "leads outside the installed system")
+	if left, _ := os.ReadDir(away); len(left) != 0 {
+		t.Errorf("files were written outside the target: %d", len(left))
+	}
+
+	// What cannot be written is reported, with the stage failing.
+	one := func(path, perm string) *config.Config {
+		c := twoPartConfig()
+		c.WriteFiles = []*config.WriteFile{{Path: path, Content: "x", Permissions: perm}}
+		return c
+	}
+	in = stagedInstaller(t, one("/etc/motd", ""), &r)
+	blockDir(t, in, "etc")
+	wantErr(t, in.writeFiles(), "write-files")
+	// They are written as the last step of configuring the system.
+	in = stagedInstaller(t, one("/etc/motd", ""), &r)
+	if err := in.firstBoot(); err != nil || readTarget(t, in, "etc", "motd") != "x" {
+		t.Errorf("first-boot did not write the files: %v", err)
+	}
+	in = stagedInstaller(t, one("/etc/motd", ""), &r)
+	blockWithDir(t, in, "etc", "motd")
+	wantErr(t, in.writeFiles(), "write-files")
+	in = stagedInstaller(t, one("/etc/motd", "rwx"), &r)
+	wantErr(t, in.writeFiles(), "not an octal mode")
+}

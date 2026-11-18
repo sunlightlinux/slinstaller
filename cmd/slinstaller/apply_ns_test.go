@@ -210,6 +210,18 @@ func applyChild(t *testing.T) {
 	_, err = e.run("", plainConfig(), "--system-check", "--through", "partition")
 	e.refused("--system-check with --through", err, "drop --through")
 
+	// The config's proxy is in force for the run itself.
+	e = newApplyEnv(t)
+	proxied := plainConfig()
+	proxied.HTTPSProxy, proxied.NoProxy = "http://proxy.example:3128", "localhost"
+	_, _ = e.run("", proxied, "--system-check")
+	if os.Getenv("https_proxy") != "http://proxy.example:3128" || os.Getenv("HTTP_PROXY") != "http://proxy.example:3128" || os.Getenv("no_proxy") != "localhost" {
+		t.Errorf("proxy environment: https_proxy=%q HTTP_PROXY=%q no_proxy=%q", os.Getenv("https_proxy"), os.Getenv("HTTP_PROXY"), os.Getenv("no_proxy"))
+	}
+	for _, k := range []string{"https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "no_proxy", "NO_PROXY"} {
+		os.Unsetenv(k)
+	}
+
 	// A staged run stops where asked and says the target is left mounted.
 	e = newApplyEnv(t)
 	errOut, err = e.run(confirmed, plainConfig(), "--through", "partition")

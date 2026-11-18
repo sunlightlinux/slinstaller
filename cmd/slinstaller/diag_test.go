@@ -166,3 +166,20 @@ func TestSystemCheckNeedsNoRoot(t *testing.T) {
 	_, _, err = runWith(t, "", args...)
 	wantRunErr(t, "missing parted", err, "missing tools on the live system: parted")
 }
+
+func TestPowerCommand(t *testing.T) {
+	// Stand-ins: nothing here may reach the real reboot or poweroff.
+	bin := onlyTools(t, t.TempDir(), "reboot", "poweroff")
+	for _, action := range []string{"reboot", "poweroff"} {
+		if err := powerCommand(action); err != nil {
+			t.Errorf("%s: %v", action, err)
+		}
+		if _, err := os.Stat(filepath.Join(bin, action+".args")); err != nil {
+			t.Errorf("%s was not run", action)
+		}
+	}
+	// A machine without the command says which one failed.
+	if err := powerCommand("halt"); err == nil || !strings.HasPrefix(err.Error(), "halt:") {
+		t.Errorf("missing halt: %v", err)
+	}
+}

@@ -403,7 +403,7 @@ func (in *installer) baseInstall() error {
 		ExtraRepos: in.opts.ExtraRepos,
 		KeysDir:    in.opts.KeysDir,
 		Arch:       in.opts.Arch,
-		Proxy:      in.cfg.HTTPSProxy,
+		ProxyEnv:   in.cfg.ProxyEnv(),
 		Packages:   in.opts.Packages,
 	}.Commands()
 	if err != nil {
@@ -939,6 +939,53 @@ func (in *installer) firstBoot() error {
 		}
 		if err := storage.RunCommands(system.LockRootCommands(root, time.Now()), in.opts.Runner); err != nil {
 			return err
+		}
+	}
+	return in.writeFiles()
+}
+
+// writeFiles writes the config's write-files into the target. A path is
+// taken inside the target whatever links it crosses: the directory it lands
+// in must itself be in the target, and a link at the file's own name is
+// replaced, not followed — an installed /etc/resolv.conf is often a link to
+// somewhere that, from here, is the live system.
+func (in *installer) writeFiles() error {
+	root, err := filepath.EvalSymlinks(in.opts.Root)
+	if err != nil {
+		root = in.opts.Root
+	}
+	for _, w := range in.cfg.WriteFiles {
+		if w == nil {
+			continue
+		}
+		mode, err := w.Mode()
+		if err != nil {
+			return fmt.Errorf("write-files: %s: %w", w.Path, err)
+		}
+		dst := filepath.Join(root, filepath.Clean("/"+w.Path))
+		dir := filepath.Dir(dst)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("write-files: %w", err)
+		}
+		real, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			return fmt.Errorf("write-files: %w", err)
+		}
+		if real != root && !strings.HasPrefix(real, root+string(os.PathSeparator)) {
+			return fmt.Errorf("write-files: %s leads outside the installed system (to %s)", w.Path, real)
+		}
+		if fi, err := os.Lstat(dst); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(dst); err != nil {
+				return fmt.Errorf("write-files: %w", err)
+			}
+		}
+		if err := os.WriteFile(dst, []byte(w.Content), mode.Perm()); err != nil {
+			return fmt.Errorf("write-files: %w", err)
+		}
+		// WriteFile's mode passes through the umask and only applies to a
+		// new file; set it outright, with any setuid/setgid/sticky bit.
+		if err := os.Chmod(dst, mode); err != nil {
+			return fmt.Errorf("write-files: %w", err)
 		}
 	}
 	return nil

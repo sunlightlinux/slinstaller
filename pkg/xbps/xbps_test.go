@@ -63,14 +63,15 @@ func TestCommandsValidation(t *testing.T) {
 }
 
 func TestCommandsProxy(t *testing.T) {
-	cmds, err := Options{Root: "/mnt", Repo: "r", Proxy: "http://p:3128", Packages: []string{"base-system"}}.Commands()
+	cmds, err := Options{Root: "/mnt", Repo: "r", ProxyEnv: []string{"https_proxy=http://p:3128", "http_proxy=http://p:3128", "no_proxy=localhost"}, Packages: []string{"base-system"}}.Commands()
 	if err != nil {
 		t.Fatalf("Commands: %v", err)
 	}
 	install := strings.Join(cmds[0], " ")
 	if !strings.Contains(install, "env") ||
 		!strings.Contains(install, "https_proxy=http://p:3128") ||
-		!strings.Contains(install, "http_proxy=http://p:3128") {
+		!strings.Contains(install, "http_proxy=http://p:3128") ||
+		!strings.Contains(install, "no_proxy=localhost xbps-install") {
 		t.Errorf("install command missing proxy env: %s", install)
 	}
 }

@@ -50,8 +50,9 @@ type Options struct {
 	// installs the host's architecture.
 	Arch string
 
-	// Proxy, if set, is used for the download — the config's httpsProxy.
-	Proxy string
+	// ProxyEnv are the proxy settings for the download, as environment
+	// assignments (https_proxy=…, http_proxy=…, no_proxy=…).
+	ProxyEnv []string
 
 	// Packages is the set to install — the Sunlight base plus whatever
 	// the install adds.
@@ -93,9 +94,7 @@ func (o Options) Commands() ([][]string, error) {
 	if o.Arch != "" {
 		envs = append(envs, "XBPS_TARGET_ARCH="+o.Arch)
 	}
-	if o.Proxy != "" {
-		envs = append(envs, "https_proxy="+o.Proxy, "http_proxy="+o.Proxy)
-	}
+	envs = append(envs, o.ProxyEnv...)
 
 	install := []string{}
 	if len(envs) > 0 {
