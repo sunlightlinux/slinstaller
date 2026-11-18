@@ -166,6 +166,13 @@ type Config struct {
 	// one cannot be: the base install is tried once more with it.
 	KernelFallback string `yaml:"kernel-fallback,omitempty"`
 
+	// MessageURL is where an installer message is looked for, as
+	// clr-installer fetches one from its distribution: pre-install-msg.yaml
+	// under it is shown before the install is confirmed and
+	// post-install-msg.yaml after it succeeds. A message that is not there
+	// is simply not shown.
+	MessageURL string `yaml:"message-url,omitempty"`
+
 	// StageHooks are commands run after a named stage of the install
 	// (partition, mount, meta-fs, base-install, fstab, swapfile, bootloader,
 	// first-boot, network, save-config), in the shape of pre-install and
@@ -839,14 +846,15 @@ func (c *Config) KernelPackage() string {
 }
 
 // aliasPartSuffix returns the partition-name suffix the kernel uses for a
-// device file: "p" for nvme/loop/mmcblk (nvme0n1 -> nvme0n1p1), "" for the
-// sd*/vd* family (sda -> sda1). This mirrors clr-installer's prefix table.
+// device file: "p" after a name that ends in a digit (nvme0n1 -> nvme0n1p1),
+// "" otherwise (sda -> sda1). clr-installer keeps a table of prefixes for
+// this (nvme, loop, mmcblk); the kernel's rule covers those and the rest.
 func aliasPartSuffix(file string) string {
+	// The kernel's own rule: a disk whose name ends in a digit (nvme0n1,
+	// loop0, mmcblk0, md0) has its partitions set off by a "p".
 	base := filepath.Base(file)
-	for _, p := range []string{"nvme", "loop", "mmcblk"} {
-		if strings.HasPrefix(base, p) {
-			return "p"
-		}
+	if base != "" && base[len(base)-1] >= '0' && base[len(base)-1] <= '9' {
+		return "p"
 	}
 	return ""
 }
@@ -1130,6 +1138,9 @@ func (c *Config) Validate() error {
 				add("%s: resize %q is not a size", ch.Name, ch.Resize)
 			}
 		}
+	}
+	if c.MessageURL != "" && !strings.HasPrefix(c.MessageURL, "http://") && !strings.HasPrefix(c.MessageURL, "https://") {
+		add("message-url: %s is not an http or https URL", c.MessageURL)
 	}
 	if c.ReportURL != "" && !strings.HasPrefix(c.ReportURL, "http://") && !strings.HasPrefix(c.ReportURL, "https://") {
 		add("report-url: %s is not an http or https URL", c.ReportURL)

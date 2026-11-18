@@ -12,6 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
+	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
@@ -153,6 +156,93 @@ func inTarget(root, command string) error {
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("in the target: %w", err)
+	}
+	return nil
+}
+
+// The installer messages, by clr-installer's file names.
+const (
+	preInstallMessage  = "pre-install-msg.yaml"
+	postInstallMessage = "post-install-msg.yaml"
+)
+
+// installerMessage fetches a message for the operator from under base: a
+// small YAML file, in clr-installer's shape, whose install-msg entries each
+// carry a line of text under "default". It returns "" when there is no
+// base, no such file, nothing readable in it, or no text — a message is a
+// courtesy, and its absence is never an error.
+func installerMessage(base, name string) string {
+	if base == "" {
+		return ""
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(strings.TrimSuffix(base, "/") + "/" + name)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		Messages []struct {
+			Default string `yaml:"default"`
+		} `yaml:"install-msg"`
+	}
+	if yaml.Unmarshal(data, &doc) != nil {
+		return ""
+	}
+	var lines []string
+	text := false
+	for _, m := range doc.Messages {
+		line := strings.TrimSuffix(m.Default, "\n")
+		text = text || strings.TrimSpace(line) != ""
+		// What a server sends is shown on a terminal: nothing but text.
+		lines = append(lines, strings.Map(func(r rune) rune {
+			if r < 0x20 && r != '\t' || r == 0x7f {
+				return -1
+			}
+			return r
+		}, line))
+	}
+	if !text {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
+// showMessage prints an installer message, if there is one.
+func showMessage(base, name string) {
+	if msg := installerMessage(base, name); msg != "" {
+		fmt.Fprintf(os.Stderr, "\n%s\n", msg)
+	}
+}
+
+// convertDescriptor writes the config an old JSON descriptor converts to
+// beside it, under the same name with .yaml, as clr-installer's --json-yaml
+// does. An existing file is not overwritten.
+func convertDescriptor(path string) error {
+	if filepath.Ext(path) != ".json" {
+		return fmt.Errorf("--json-yaml: %s must end in .json", path)
+	}
+	out := strings.TrimSuffix(path, ".json") + ".yaml"
+	if _, err := os.Stat(out); err == nil {
+		return fmt.Errorf("%s exists; not overwriting it", out)
+	}
+	cfg, notes, err := config.FromJSONDescriptor(path)
+	if err != nil {
+		return err
+	}
+	if err := config.Save(out, cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Wrote %s.\n", out)
+	for _, n := range notes {
+		fmt.Fprintln(os.Stderr, "note:", n)
 	}
 	return nil
 }

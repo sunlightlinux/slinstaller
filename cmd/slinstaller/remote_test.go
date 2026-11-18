@@ -165,3 +165,65 @@ func TestUnmountAndInTargetFlags(t *testing.T) {
 	_, _, err = runWith(t, "", "--report-url", "ftp://example.org/x", writeConfig(t, dir, plainConfig()))
 	wantRunErr(t, "bad report URL", err, "is not an http or https URL")
 }
+
+func TestJSONYAMLFlag(t *testing.T) {
+	dir := t.TempDir()
+	onlyTools(t, dir)
+	src := filepath.Join(dir, "old.json")
+	os.WriteFile(src, []byte(`{"DestinationType": "physical", "LegacyBios": true,
+		"PartitionLayout": [{"disk": "slitest0", "partition": 1, "size": "512M"}, {"disk": "slitest0", "partition": 2, "size": "rest"}],
+		"FilesystemTypes": [{"disk": "slitest0", "partition": 1, "type": "vfat"}, {"disk": "slitest0", "partition": 2, "type": "ext4"}],
+		"PartitionMountPoints": [{"disk": "slitest0", "partition": 1, "mount": "/boot"}, {"disk": "slitest0", "partition": 2, "mount": "/"}]}`), 0o644)
+	_, errOut, err := runWith(t, "", "--json-yaml", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "old.yaml")
+	if !strings.Contains(errOut, "Wrote "+out) || !strings.Contains(errOut, "note: LegacyBios is set") {
+		t.Errorf("output:\n%s", errOut)
+	}
+	// What it wrote is a config slinstaller plans.
+	plan, _, err := runWith(t, "", out)
+	if err != nil || !strings.Contains(plan, "mkfs.ext4") || !strings.Contains(plan, testDisk+"p2") {
+		t.Errorf("dry run of the converted config: %v\n%s", err, plan)
+	}
+	// It does not write over a file, takes only .json, and not with --template.
+	_, _, err = runWith(t, "", "-j", src)
+	wantRunErr(t, "existing output", err, "exists; not overwriting it")
+	_, _, err = runWith(t, "", "--json-yaml", out)
+	wantRunErr(t, "not .json", err, "must end in .json")
+	_, _, err = runWith(t, "", "--json-yaml", src, "--template", filepath.Join(dir, "t.yaml"))
+	wantRunErr(t, "with --template", err, "mutually exclusive")
+	os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{"), 0o644)
+	_, _, err = runWith(t, "", "--json-yaml", filepath.Join(dir, "bad.json"))
+	wantRunErr(t, "bad JSON", err, "parsing")
+}
+
+func TestInstallerMessage(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/msg/pre-install-msg.yaml", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "install-msg:\n- default: \"Maintenance on Friday.\\n\"\n- default: \"\"\n- default: \"Ask \\x1b[31mops\\x07 first.\"\n  en_US: ignored\n")
+	})
+	mux.HandleFunc("/msg/blank-msg.yaml", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "install-msg:\n- default: \"  \"\n") })
+	mux.HandleFunc("/msg/broken-msg.yaml", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "install-msg: [") })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// The lines as written, a blank one kept between them; what a terminal
+	// would act on is taken out.
+	if got := installerMessage(srv.URL+"/msg/", preInstallMessage); got != "Maintenance on Friday.\n\nAsk [31mops first." {
+		t.Errorf("message = %q", got)
+	}
+	// No base, no such file, no text, not YAML, nobody listening: no
+	// message, and never an error.
+	for _, tc := range [][2]string{{"", preInstallMessage}, {srv.URL + "/msg", postInstallMessage},
+		{srv.URL + "/msg", "blank-msg.yaml"}, {srv.URL + "/msg", "broken-msg.yaml"}, {"http://127.0.0.1:1", preInstallMessage}} {
+		if got := installerMessage(tc[0], tc[1]); got != "" {
+			t.Errorf("installerMessage(%q, %q) = %q", tc[0], tc[1], got)
+		}
+	}
+	dir := t.TempDir()
+	onlyTools(t, dir)
+	_, _, err := runWith(t, "", "--message-url", "ftp://example.org", writeConfig(t, dir, plainConfig()))
+	wantRunErr(t, "bad message URL", err, "message-url: ftp://example.org is not an http or https URL")
+}

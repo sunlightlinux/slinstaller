@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -234,6 +237,21 @@ func applyChild(t *testing.T) {
 	}
 
 	applyDiskImage(t, confirmed)
+
+	// An installer message is shown before the operator confirms.
+	msgs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, preInstallMessage) {
+			io.WriteString(w, "install-msg:\n- default: Read the release notes first.\n")
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	e = newApplyEnv(t)
+	errOut, _ = e.run("no\n", plainConfig(), "--message-url", msgs.URL)
+	msgs.Close()
+	if i, j := strings.Index(errOut, "Read the release notes first."), strings.Index(errOut, "Type the disk path"); i < 0 || i > j {
+		t.Errorf("the message is not shown before the confirmation:\n%s", errOut)
+	}
 
 	// --log-level 2: the terminal keeps the stages; the commands and what
 	// they print go to the log file alone, which still has everything.

@@ -159,6 +159,13 @@ func run(args []string) error {
 	var resume bool
 	fs.BoolVar(&resume, "resume", false,
 		"with --apply, continue an install that failed while installing the base system: nothing is partitioned or formatted again (same boot of the live system only)")
+	var jsonYAML string
+	fs.StringVar(&jsonYAML, "json-yaml", "",
+		"convert this old JSON install descriptor (.json) into a config written beside it (.yaml), and exit (clr-installer's option)")
+	fs.StringVar(&jsonYAML, "j", "", "short for --json-yaml")
+	var messageURL string
+	fs.StringVar(&messageURL, "message-url", "",
+		"look for installer messages (pre-install-msg.yaml, post-install-msg.yaml) under this URL and show them (the config's message-url)")
 	var unmount bool
 	fs.BoolVar(&unmount, "unmount", false,
 		"unmount everything under --root - what a staged install (--through) leaves mounted - and exit")
@@ -217,6 +224,9 @@ func run(args []string) error {
 		return nil
 	}
 
+	if template != "" && jsonYAML != "" {
+		return fmt.Errorf("--json-yaml and --template are mutually exclusive")
+	}
 	if template != "" {
 		return writeTemplate(template)
 	}
@@ -225,6 +235,9 @@ func run(args []string) error {
 		return printDiscovered(os.Stdout, os.Stderr, discover)
 	}
 
+	if jsonYAML != "" {
+		return convertDescriptor(jsonYAML)
+	}
 	if unmount {
 		return unmountTarget(root)
 	}
@@ -359,6 +372,9 @@ restart:
 	}
 	if reportURL != "" {
 		cfg.ReportURL = reportURL
+	}
+	if messageURL != "" {
+		cfg.MessageURL = messageURL
 	}
 
 	// The config's proxy is for everything this run fetches, the
@@ -875,6 +891,7 @@ restart:
 
 	// A resumed install erases nothing: it mounts what the first attempt
 	// made and carries on, so there is nothing to confirm by retyping.
+	showMessage(cfg.MessageURL, preInstallMessage)
 	if resume {
 		fmt.Fprintf(os.Stderr, "\nResuming on %s: nothing is partitioned or formatted; the base system is installed again.\n",
 			strings.Join(plan.DiskList(), ", "))
@@ -888,6 +905,9 @@ restart:
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "\nInstall complete.")
+	if through == "" {
+		showMessage(cfg.MessageURL, postInstallMessage)
+	}
 	if through != "" {
 		fmt.Fprintf(os.Stderr, "(stopped after stage %q; target left mounted at %s)\n", through, root)
 		return nil
