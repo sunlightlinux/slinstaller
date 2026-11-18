@@ -72,6 +72,9 @@ func writeConfig(t *testing.T, dir string, cfg *config.Config) string {
 
 var catPath string
 
+// (The stand-ins record with printf, not echo: an argument such as -e has to
+// be recorded, not taken as echo's own option.)
+//
 // onlyTools makes PATH a directory holding nothing but stand-ins: each named
 // tool records its arguments in <dir>/<name>.args and succeeds. lsblk and
 // pvs print <dir>/lsblk.json and <dir>/pvs.out. No real tool is reachable.
@@ -91,7 +94,7 @@ func onlyTools(t *testing.T, dir string, names ...string) string {
 		t.Fatal(err)
 	}
 	for _, n := range append(names, "lsblk", "pvs") {
-		body := "#!/bin/sh\necho \"$@\" >> \"" + bin + "/" + n + ".args\"\n"
+		body := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"" + bin + "/" + n + ".args\"\n"
 		switch n {
 		case "lsblk":
 			body += "exec " + cat + " \"" + bin + "/lsblk.json\"\n"

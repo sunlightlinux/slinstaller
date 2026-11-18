@@ -691,6 +691,9 @@ restart:
 		}
 
 		required := append(plan.RequiredTools(), "chroot")
+		if cfg.PowerAction() == "kexec" {
+			required = append(required, "kexec")
+		}
 		if fromImage {
 			required = append(required, controller.ImageTools(cfg.Image)...)
 		} else {
@@ -969,6 +972,12 @@ func checkLocale(tz, keymap string) error {
 // postReboot and power-state. The action is the command's name.
 func powerCommand(action string) error {
 	cmd := exec.Command(action)
+	if action == "kexec" {
+		// Start the kernel the install loaded. What is on disk is synced
+		// first: kexec does not go through a shutdown.
+		unix.Sync()
+		cmd = exec.Command("kexec", "-e")
+	}
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s: %w", action, err)

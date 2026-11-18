@@ -127,7 +127,7 @@ bootloader:
   probe-other-os: false   # true lists other systems in the menu
 httpProxy: http://proxy:3128
 noProxy: localhost,10.0.0.0/8
-power-state: poweroff     # reboot, poweroff or halt when the install ends
+power-state: poweroff     # reboot, poweroff, halt or kexec when the install ends
 write-files:
 - { path: /etc/motd, content: "Welcome.\n", permissions: "0644" }
 ```
@@ -232,9 +232,13 @@ saying what goes where.
 | `install-type: server` / `desktop` | the config | a larger smallest root (4 GB / 20 GB) |
 | `kernel-fallback: linux-lts` | the config | the kernel to try when the configured one cannot be installed |
 | `power-state-delay: 30` | the config | seconds before the machine reboots or powers off |
+| `system-upgrade: true` | the config | the installed system brought up to date before the bootloader is set up |
 | `kernel-remove: [linux6.18]` | the config | kernel packages removed once the base system is in |
 | `partitions: [...]` | a `raid` entry | a partition table on the array itself (`/dev/md0p1`, …) |
 | `message-url` | the config | where installer messages are looked for and shown |
+
+`power-state: kexec` loads the installed kernel and starts it directly,
+without going back through the firmware.
 
 `image` and `disk-image` may be `https://` URLs: the image is unpacked or
 written as it downloads, so it only has to fit on the target. `resize` also

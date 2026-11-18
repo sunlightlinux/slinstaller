@@ -74,11 +74,15 @@ And the last of both lists: `--resume-from` any stage, partitioned RAID
 arrays, `kernel-remove`, `--json-yaml` and installer messages
 (`message-url`).
 
+Then `power-state: kexec` and `system-upgrade`.
+
+For later, by decision: zfs, bcache, erofs, iSCSI, multipath and NVMe over
+TCP.
+
 Not done, because it cannot be: shrinking xfs, which the filesystem does not
 allow. Everything else left out is another distribution's own (its package
-manager, its boot manager, its telemetry, its image builder) or hardware and
-storage this installer does not target (zfs, bcache, iSCSI, multipath,
-NVMe over TCP, s390, BIOS/MBR).
+manager, its boot manager, its telemetry, its image builder) or a platform this installer does not
+target (s390, BIOS/MBR, extlinux).
 
 ## What's left
 

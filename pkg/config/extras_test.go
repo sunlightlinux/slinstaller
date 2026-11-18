@@ -42,7 +42,7 @@ func TestPowerAction(t *testing.T) {
 	}
 	c := btrfsConfig()
 	c.PowerState = "suspend"
-	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), `power-state: "suspend" is not reboot, poweroff or halt`) {
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), `power-state: "suspend" is not reboot, poweroff, halt or kexec`) {
 		t.Errorf("unknown power state: %v", err)
 	}
 }
@@ -191,5 +191,17 @@ func TestDiskWipeModes(t *testing.T) {
 	c.ReusePartitions, c.TargetMedia[0].Wipe = true, "zero"
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "would erase the partitions reusePartitions keeps") {
 		t.Errorf("wipe with reuse: %v", err)
+	}
+}
+
+func TestSystemUpgradeAndKexecValidation(t *testing.T) {
+	c := btrfsConfig()
+	c.SystemUpgrade, c.PowerState = true, "kexec"
+	if err := c.Validate(); err != nil || c.PowerAction() != "kexec" {
+		t.Errorf("system-upgrade with kexec: %v, action %q", err, c.PowerAction())
+	}
+	c.Offline = true
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "cannot be done offline") {
+		t.Errorf("an offline system upgrade: %v", err)
 	}
 }

@@ -253,6 +253,13 @@ func applyChild(t *testing.T) {
 		t.Errorf("the message is not shown before the confirmation:\n%s", errOut)
 	}
 
+	// power-state: kexec needs kexec on the live system, checked up front.
+	kx := plainConfig()
+	kx.PowerState = "kexec"
+	e = newApplyEnv(t)
+	_, err = e.run(confirmed, kx)
+	e.refused("no kexec", err, "missing tools on the live system: kexec")
+
 	// --log-level 2: the terminal keeps the stages; the commands and what
 	// they print go to the log file alone, which still has everything.
 	e = newApplyEnv(t)

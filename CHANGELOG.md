@@ -63,6 +63,9 @@ for what will and will not be allowed to change once releases begin.
 
 ### Added
 
+- `power-state: kexec` starts the installed system's kernel directly when
+  the install ends; `system-upgrade` brings the installed system up to date
+  from its repositories before the bootloader is set up.
 - `--resume-from <stage>` resumes an install at any stage after
   partitioning; the stages are now safe to run a second time.
 - A `raid` entry may carry `partitions`: a partition table on the array.

@@ -179,6 +179,14 @@ func TestPowerCommand(t *testing.T) {
 			t.Errorf("%s was not run", action)
 		}
 	}
+	// kexec starts the kernel the install loaded.
+	kbin := onlyTools(t, t.TempDir(), "kexec")
+	if err := powerCommand("kexec"); err != nil {
+		t.Errorf("kexec: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(kbin, "kexec.args")); strings.TrimSpace(string(got)) != "-e" {
+		t.Errorf("kexec was run with %q", got)
+	}
 	// A machine without the command says which one failed.
 	if err := powerCommand("halt"); err == nil || !strings.HasPrefix(err.Error(), "halt:") {
 		t.Errorf("missing halt: %v", err)

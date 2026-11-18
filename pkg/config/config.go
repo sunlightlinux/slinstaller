@@ -138,8 +138,9 @@ type Config struct {
 	PostReboot bool `yaml:"postReboot,omitempty"`
 
 	// PowerState is what the machine does when a full install finishes:
-	// "reboot" (the same as postReboot), "poweroff" or "halt". Empty leaves
-	// it running.
+	// "reboot" (the same as postReboot), "poweroff", "halt", or "kexec" —
+	// the installed kernel is loaded and started directly, without going
+	// back through the firmware. Empty leaves it running.
 	PowerState string `yaml:"power-state,omitempty"`
 
 	// HTTPProxy and NoProxy complete httpsProxy: the proxy for plain-http
@@ -161,6 +162,11 @@ type Config struct {
 	// kernel, GRUB, and whatever the layout needs to boot (cryptsetup, lvm2,
 	// mdadm). A relative path is taken from the config file's directory.
 	Image string `yaml:"image,omitempty"`
+
+	// SystemUpgrade brings the installed system up to date from its
+	// repositories before the bootloader is set up — for an install from
+	// an image or a local repository that has aged.
+	SystemUpgrade bool `yaml:"system-upgrade,omitempty"`
 
 	// KernelRemove lists kernel packages to remove once the base system is
 	// in place — the kernel an image came with, when the config installs or
@@ -1210,9 +1216,12 @@ func (c *Config) Validate() error {
 		}
 	}
 	switch c.PowerState {
-	case "", "reboot", "poweroff", "halt":
+	case "", "reboot", "poweroff", "halt", "kexec":
 	default:
-		add("power-state: %q is not reboot, poweroff or halt", c.PowerState)
+		add("power-state: %q is not reboot, poweroff, halt or kexec", c.PowerState)
+	}
+	if c.SystemUpgrade && c.Offline {
+		add("system-upgrade needs the repositories; it cannot be done offline")
 	}
 	wrote := map[string]bool{}
 	for _, w := range c.WriteFiles {

@@ -112,3 +112,80 @@ func TestResumeFromValidation(t *testing.T) {
 		t.Errorf("ResumableStages = %s", got)
 	}
 }
+
+const targetGrubCfg = `set default="0"
+menuentry 'Sunlight OS GNU/Linux' {
+	linux	/boot/vmlinuz-6.18 root=UUID=abcd ro quiet
+	initrd	/boot/initramfs-6.18.img
+}
+`
+
+// With power-state: kexec the installed kernel is loaded while the target
+// is still there to read it from. The install stands whatever comes of it.
+func TestFinishLoadsTheKernelForKexec(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.PowerState = "kexec"
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	boot := mkTarget(t, in, "boot", "grub")
+	os.WriteFile(filepath.Join(boot, "grub.cfg"), []byte(targetGrubCfg), 0o644)
+	os.WriteFile(filepath.Join(in.opts.Root, "boot", "vmlinuz-6.18"), nil, 0o644)
+	os.WriteFile(filepath.Join(in.opts.Root, "boot", "initramfs-6.18.img"), nil, 0o644)
+	if err := in.finish(); err != nil {
+		t.Fatal(err)
+	}
+	want := "kexec -l " + in.opts.Root + "/boot/vmlinuz-6.18 --initrd=" + in.opts.Root + "/boot/initramfs-6.18.img --append=root=UUID=abcd ro quiet\n"
+	if r.flat() != want {
+		t.Errorf("kexec load:\n%s\nwant:\n%s", r.flat(), want)
+	}
+	// A kernel that cannot be loaded: said as what it is — the system is
+	// installed, and a normal reboot will start it.
+	in.opts.Runner = r.failOn("kexec")
+	wantErr(t, in.finish(), "the system is installed, but its kernel could not be loaded for kexec")
+	in = stagedInstaller(t, cfg, &r) // no grub.cfg at all
+	wantErr(t, in.finish(), "reboot instead")
+	// Any other ending loads nothing.
+	cfg.PowerState = "reboot"
+	r = recorder{}
+	in = stagedInstaller(t, cfg, &r)
+	if err := in.finish(); err != nil || len(r.cmds) != 0 {
+		t.Errorf("finish with a reboot: %v, ran %s", err, r.flat())
+	}
+}
+
+// system-upgrade brings the target up to date once the base system is in:
+// xbps first, then everything, through the config's proxy, and before any
+// kernel is removed.
+func TestSystemUpgrade(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.SystemUpgrade, cfg.HTTPSProxy, cfg.KernelRemove = true, "http://proxy:3128", []string{"linux6.18"}
+	cfg.Image = "/img/base.tar"
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	bin := mkTarget(t, in, "usr", "bin")
+	os.WriteFile(filepath.Join(bin, "grub-install"), nil, 0o755)
+	if err := in.baseInstall(); err != nil {
+		t.Fatal(err)
+	}
+	flat := r.flat()
+	env := "chroot " + in.opts.Root + " env https_proxy=http://proxy:3128 http_proxy=http://proxy:3128 "
+	steps := []string{"tar -xpf /img/base.tar", env + "xbps-install -Syu xbps\n", env + "xbps-install -Syu\n", "xbps-remove -Ry linux6.18"}
+	last := -1
+	for _, s := range steps {
+		i := strings.Index(flat, s)
+		if i < 0 || i < last {
+			t.Fatalf("step %q missing or out of order:\n%s", s, flat)
+		}
+		last = i
+	}
+	in.opts.Runner = r.failOn("-Syu xbps")
+	wantErr(t, in.baseInstall(), "boom")
+	// Not asked for: not done.
+	cfg.SystemUpgrade = false
+	r = recorder{}
+	in = stagedInstaller(t, cfg, &r)
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "bin"), "grub-install"), nil, 0o755)
+	if err := in.baseInstall(); err != nil || strings.Contains(r.flat(), "-Syu") {
+		t.Errorf("without system-upgrade: %v\n%s", err, r.flat())
+	}
+}

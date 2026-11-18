@@ -281,7 +281,23 @@ func (in *installer) finish() error {
 	if err := in.archiveLog(); err != nil && in.opts.Log != nil {
 		fmt.Fprintf(in.opts.Log, "warning: the install log was not saved on the target: %v\n", err)
 	}
-	return in.mnt.UnmountAll()
+	// To go straight into the installed system, its kernel is loaded now,
+	// while its files can still be read. The system is installed whatever
+	// comes of this, so the target is unmounted either way.
+	var kexecErr error
+	if in.cfg.PowerAction() == "kexec" {
+		cmd, err := grub.KexecCommand(in.opts.Root)
+		if err == nil {
+			err = storage.RunCommands([][]string{cmd}, in.opts.Runner)
+		}
+		if err != nil {
+			kexecErr = fmt.Errorf("the system is installed, but its kernel could not be loaded for kexec (reboot instead): %w", err)
+		}
+	}
+	if err := in.mnt.UnmountAll(); err != nil {
+		return err
+	}
+	return kexecErr
 }
 
 func (in *installer) partition() error {
@@ -647,6 +663,19 @@ func (in *installer) unpackImage() error {
 func (in *installer) writeTargetRepos() error {
 	// The base system is in place: the kernels the config asked to be rid
 	// of go now, before the bootloader lists what is there.
+	// Brought up to date first, as the installed system's own update does:
+	// xbps itself, which refuses a system update while a newer xbps is
+	// available, then everything.
+	if in.cfg.SystemUpgrade {
+		env := append([]string{"chroot", in.opts.Root, "env"}, in.cfg.ProxyEnv()...)
+		upgrade := [][]string{
+			append(append([]string{}, env...), "xbps-install", "-Syu", "xbps"),
+			append(append([]string{}, env...), "xbps-install", "-Syu"),
+		}
+		if err := storage.RunCommands(upgrade, in.opts.Runner); err != nil {
+			return err
+		}
+	}
 	if len(in.cfg.KernelRemove) > 0 {
 		remove := append([]string{"chroot", in.opts.Root, "xbps-remove", "-Ry"}, in.cfg.KernelRemove...)
 		if err := storage.RunCommands([][]string{remove}, in.opts.Runner); err != nil {

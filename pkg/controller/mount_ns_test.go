@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
@@ -63,6 +64,7 @@ func TestMountStagesInAUserNamespace(t *testing.T) {
 // nsInstaller is an installer over dir whose "disk" is two tmpfs mounts.
 func nsInstaller(dir string) *installer {
 	return &installer{
+		cfg: &config.Config{},
 		plan: &storage.Plan{Parts: []storage.Partition{
 			{Device: "tmpfs", Filesystem: "tmpfs", Mountpoint: "/"},
 			{Device: "tmpfs", Filesystem: "tmpfs", Mountpoint: "/boot"},
