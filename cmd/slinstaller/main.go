@@ -152,6 +152,9 @@ func run(args []string) error {
 	fs.BoolVar(&allowInsecure, "allow-insecure-http", false, "allow a plain http:// repository (the config's allowInsecureHTTP)")
 	var swapFileSize string
 	fs.StringVar(&swapFileSize, "swap-file-size", "", "create a swap file of this size, e.g. 2G (the config's swapFileSize)")
+	var discover string
+	fs.StringVar(&discover, "discover", "",
+		"print a config describing the layout already on this disk (e.g. /dev/sda), as a starting point for an install into its partitions, and exit")
 	var systemCheck bool
 	fs.BoolVar(&systemCheck, "system-check", false,
 		"check that this machine can install the config - tools, disks, repository - and exit without touching anything")
@@ -197,6 +200,10 @@ func run(args []string) error {
 
 	if template != "" {
 		return writeTemplate(template)
+	}
+
+	if discover != "" {
+		return printDiscovered(os.Stdout, os.Stderr, discover)
 	}
 
 	// One reader for all terminal input, so the interactive front-end and
