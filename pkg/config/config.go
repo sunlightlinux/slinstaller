@@ -253,6 +253,27 @@ type Media struct {
 	Create bool   `yaml:"create,omitempty"`
 	Start  string `yaml:"start,omitempty"`
 
+	// CryptOptions are extra /etc/crypttab options for an encrypted volume,
+	// comma-separated (e.g. "discard"); for the root volume, which the
+	// initramfs opens, they go on the kernel command line instead.
+	CryptOptions string `yaml:"crypt-options,omitempty"`
+
+	// PartitionType, PartitionUUID and PartitionName set the partition's
+	// entry in the GPT: its type GUID, its own GUID, and its name. Without
+	// them the type follows the partition's use and the rest is generated.
+	PartitionType string `yaml:"partition-type,omitempty"`
+	PartitionUUID string `yaml:"partition-uuid,omitempty"`
+	PartitionName string `yaml:"partition-name,omitempty"`
+
+	// UUID is the filesystem's UUID (for vfat, a volume id such as
+	// 1A2B-3C4D), for a layout that has to be reproducible.
+	UUID string `yaml:"uuid,omitempty"`
+
+	// Passno and Freq are the fstab entry's fsck pass and dump frequency.
+	// Without Passno the root is checked first (1) and the rest after (2).
+	Passno *int `yaml:"passno,omitempty"`
+	Freq   int  `yaml:"freq,omitempty"`
+
 	// ESP marks a vfat partition with no mountpoint as a spare EFI System
 	// Partition: on a second disk, it is given a copy of the bootloader, so
 	// a machine whose root is on RAID still boots when the disk holding the
@@ -462,6 +483,18 @@ type Bootloader struct {
 	ProbeOtherOS bool `yaml:"probe-other-os,omitempty"`
 }
 
+var (
+	uuidRe   = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	vfatIDRe = regexp.MustCompile(`^[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}$`)
+)
+
+// details carries a partition's optional particulars into the plan.
+func details(p *storage.Partition, m *Media) {
+	p.CryptOptions = strings.TrimSpace(m.CryptOptions)
+	p.PartType, p.PartUUID, p.PartName = m.PartitionType, m.PartitionUUID, m.PartitionName
+	p.FsUUID, p.Passno, p.Freq = m.UUID, m.Passno, m.Freq
+}
+
 // Subvolume is one btrfs subvolume and where it is mounted.
 type Subvolume struct {
 	Name       string `yaml:"name"`
@@ -602,6 +635,16 @@ type RaidArray struct {
 	// Encrypted puts a LUKS container on the array: its filesystem, or its
 	// volume group, is then on the mapper.
 	Encrypted bool `yaml:"encrypted,omitempty"`
+
+	// As on a partition (see Media).
+	CryptOptions string `yaml:"crypt-options,omitempty"`
+	UUID         string `yaml:"uuid,omitempty"`
+	Passno       *int   `yaml:"passno,omitempty"`
+	Freq         int    `yaml:"freq,omitempty"`
+
+	// Metadata is the array's superblock format: 1.2 (the default), 1.1,
+	// 1.0 or 0.90.
+	Metadata string `yaml:"metadata,omitempty"`
 
 	// VolumeGroup makes the array an LVM physical volume of that group, in
 	// place of a filesystem; Children are then the group's logical volumes
@@ -957,6 +1000,68 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	checkDetails := func(where string, m *Media, physical bool) {
+		if strings.ContainsAny(m.CryptOptions, " \t") {
+			add("%s: crypt-options %q must be comma-separated, without spaces", where, m.CryptOptions)
+		}
+		if m.CryptOptions != "" && m.Type != "crypt" && !m.Encrypted {
+			add("%s: crypt-options on a volume that is not encrypted", where)
+		}
+		if !physical && (m.PartitionType != "" || m.PartitionUUID != "" || m.PartitionName != "") {
+			add("%s: partition-type, partition-uuid and partition-name are for partitions, not logical volumes", where)
+		}
+		for what, v := range map[string]string{"partition-type": m.PartitionType, "partition-uuid": m.PartitionUUID} {
+			if v != "" && !uuidRe.MatchString(v) {
+				add("%s: %s %q is not a GUID", where, what, v)
+			}
+		}
+		if strings.ContainsAny(m.PartitionName, "\"'\n") || len(m.PartitionName) > 36 {
+			add("%s: partition-name %q is not a name a GPT entry can carry (36 characters, no quotes)", where, m.PartitionName)
+		}
+		switch {
+		case m.UUID == "":
+		case m.FsType == "vfat" && !vfatIDRe.MatchString(m.UUID):
+			add("%s: uuid %q is not a vfat volume id (e.g. 1A2B-3C4D)", where, m.UUID)
+		case m.FsType != "vfat" && !uuidRe.MatchString(m.UUID):
+			add("%s: uuid %q is not a UUID", where, m.UUID)
+		}
+		if m.Passno != nil && (*m.Passno < 0 || *m.Passno > 2) || m.Freq < 0 || m.Freq > 9 {
+			add("%s: passno is 0, 1 or 2 and freq 0 to 9", where)
+		}
+	}
+	for _, d := range c.TargetMedia {
+		if d == nil {
+			continue
+		}
+		for _, ch := range d.Children {
+			if ch == nil {
+				continue
+			}
+			checkDetails(ch.Name, ch, true)
+			for _, lv := range ch.Children {
+				if lv != nil {
+					checkDetails(ch.Name+"/"+lv.Name, lv, false)
+				}
+			}
+		}
+	}
+	for _, a := range c.Raid {
+		if a == nil {
+			continue
+		}
+		switch a.Metadata {
+		case "", "1.2", "1.1", "1.0", "0.90":
+		default:
+			add("raid %s: metadata %q is not 1.2, 1.1, 1.0 or 0.90", a.Name, a.Metadata)
+		}
+		checkDetails("raid "+a.Name, &Media{FsType: a.FsType, UUID: a.UUID, Passno: a.Passno, Freq: a.Freq,
+			CryptOptions: a.CryptOptions, Encrypted: a.Encrypted}, true)
+		for _, lv := range a.Children {
+			if lv != nil {
+				checkDetails("raid "+a.Name+"/"+lv.Name, lv, false)
+			}
+		}
+	}
 	for _, d := range c.TargetMedia {
 		if d == nil {
 			continue
@@ -1571,6 +1676,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 				Encrypted:  encrypted,
 			}
 			p.MountOptions, p.Subvol, p.Subvolumes = mountExtras(ch.Mountpoint, ch.MountOptions, ch.Subvolumes)
+			details(&p, ch)
 			if encrypted {
 				p.MapName = cryptMapName(ch)
 			}
@@ -1612,6 +1718,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 			Filesystem:  a.FsType,
 		}
 		rp.MountOptions, rp.Subvol, rp.Subvolumes = mountExtras(a.Mountpoint, a.MountOptions, a.Subvolumes)
+		rp.CryptOptions, rp.FsUUID, rp.Passno, rp.Freq, rp.RaidMetadata = strings.TrimSpace(a.CryptOptions), a.UUID, a.Passno, a.Freq, a.Metadata
 		if a.Encrypted {
 			// LUKS on the array: the array device is what is formatted and
 			// opened, and everything above it is on the mapper.
@@ -1696,6 +1803,7 @@ func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 				Preserve:   ch.Preserve,
 			}
 			p.MountOptions, p.Subvol, p.Subvolumes = mountExtras(ch.Mountpoint, ch.MountOptions, ch.Subvolumes)
+			details(&p, ch)
 			// A Create child is cut fresh in unallocated space (Safe install):
 			// Start is the MiB offset, Size the length, so End = Start + Size.
 			if ch.Resize != "" {
@@ -1809,6 +1917,7 @@ func lvmParts(disk string, i int, ch *Media) (storage.Partition, []storage.Parti
 	if ch.Encrypted {
 		pv.Encrypted = true
 		pv.MapName = cryptMapName(ch)
+		pv.CryptOptions = strings.TrimSpace(ch.CryptOptions)
 	}
 
 	return pv, lvParts(ch.VolumeGroup, ch.Children), nil
@@ -1831,6 +1940,7 @@ func lvParts(vg string, children []*Media) []storage.Partition {
 			Label: lv.Label, Options: strings.Fields(lv.Options),
 		}
 		lp.MountOptions, lp.Subvol, lp.Subvolumes = mountExtras(lv.Mountpoint, lv.MountOptions, lv.Subvolumes)
+		details(&lp, lv)
 		lvs = append(lvs, lp)
 	}
 	return lvs

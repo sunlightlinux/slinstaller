@@ -588,7 +588,7 @@ func (in *installer) crypttab() error {
 		if err != nil {
 			return err
 		}
-		tab.WriteString(luks.CrypttabLine(p.MapName, uuid, in.keyfile))
+		tab.WriteString(luks.CrypttabLineWith(p.MapName, uuid, in.keyfile, p.CryptOptions))
 	}
 	path := filepath.Join(in.opts.Root, "etc", "crypttab")
 	if err := os.WriteFile(path, []byte(tab.String()), 0o600); err != nil {
@@ -766,6 +766,11 @@ func (in *installer) bootloader() error {
 					return err
 				}
 				kargs = append(kargs, "rd.luks.uuid="+uuid)
+				// The initramfs opens the root volume, so its options go
+				// where the initramfs reads them.
+				if p.CryptOptions != "" {
+					kargs = append(kargs, "rd.luks.options="+p.CryptOptions)
+				}
 			}
 		}
 		if p.LV && p.Mountpoint == "/" {

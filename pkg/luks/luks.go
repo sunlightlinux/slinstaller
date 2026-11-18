@@ -105,9 +105,19 @@ func UUID(device string) (string, error) {
 // unlocks it (an encrypted /boot, so the initramfs does not re-prompt), or
 // empty for "none" (the passphrase is entered at boot).
 func CrypttabLine(name, uuid, keyfile string) string {
+	return CrypttabLineWith(name, uuid, keyfile, "")
+}
+
+// CrypttabLineWith is CrypttabLine with extra options (comma-separated,
+// e.g. "discard") after "luks".
+func CrypttabLineWith(name, uuid, keyfile, options string) string {
 	key := "none"
 	if keyfile != "" {
 		key = keyfile
 	}
-	return fmt.Sprintf("%s UUID=%s %s luks\n", name, uuid, key)
+	opts := "luks"
+	if options != "" {
+		opts += "," + options
+	}
+	return fmt.Sprintf("%s UUID=%s %s %s\n", name, uuid, key, opts)
 }

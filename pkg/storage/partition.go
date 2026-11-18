@@ -74,6 +74,7 @@ func (pl *Plan) diskTableCommands(disk string) [][]string {
 			}
 		}
 		if len(cmds) > 0 {
+			cmds = append(cmds, pl.entryCommands(disk, true)...)
 			cmds = append(cmds, []string{"partprobe", disk})
 		}
 		return cmds
@@ -128,6 +129,7 @@ func (pl *Plan) diskTableCommands(disk string) [][]string {
 		}
 	}
 
+	cmds = append(cmds, pl.entryCommands(disk, false)...)
 	return append(cmds, []string{"partprobe", disk})
 }
 
@@ -295,4 +297,28 @@ func FormatCommands(cmds [][]string) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// entryCommands returns the commands that set what a config asked of a
+// partition's GPT entry — its type, its GUID, its name — on the partitions
+// this install makes on disk (onlyCreated: the ones cut into free space,
+// when the rest of the table is not ours to touch).
+func (pl *Plan) entryCommands(disk string, onlyCreated bool) [][]string {
+	var cmds [][]string
+	for _, p := range pl.physOn(disk) {
+		if onlyCreated && !p.Create {
+			continue
+		}
+		n := fmt.Sprintf("%d", p.Number)
+		if p.PartType != "" {
+			cmds = append(cmds, []string{"sfdisk", "--part-type", disk, n, p.PartType})
+		}
+		if p.PartUUID != "" {
+			cmds = append(cmds, []string{"sfdisk", "--part-uuid", disk, n, p.PartUUID})
+		}
+		if p.PartName != "" {
+			cmds = append(cmds, []string{"sfdisk", "--part-label", disk, n, p.PartName})
+		}
+	}
+	return cmds
 }

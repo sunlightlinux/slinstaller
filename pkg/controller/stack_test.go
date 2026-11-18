@@ -201,3 +201,40 @@ func fillSpareESPsOnTmpfs(t *testing.T, base string) {
 		}
 	}
 }
+
+// Options for an encrypted volume go where it is opened from: crypttab for
+// one opened after boot, the kernel command line for the root, which the
+// initramfs opens.
+func TestCryptOptions(t *testing.T) {
+	fakeCryptsetup(t)
+	home := &config.Media{Name: "sda3", Type: "crypt", FsType: "ext4", Mountpoint: "/home", CryptOptions: "discard"}
+	cfg := cryptConfig("/boot", home)
+	cfg.TargetMedia[0].Children[1].CryptOptions = "discard"
+	var r recorder
+	in, _ := cryptInstaller(t, cfg, &r)
+	if err := in.crypttab(); err != nil {
+		t.Fatal(err)
+	}
+	tab := readTarget(t, in, "etc", "crypttab")
+	if !strings.Contains(tab, " luks,discard\n") || strings.Count(tab, "\n") != 1 {
+		t.Errorf("crypttab:\n%s", tab)
+	}
+	mkTarget(t, in, "etc", "default")
+	if err := in.bootloader(); err != nil {
+		t.Fatal(err)
+	}
+	if args := cmdlineArgs(t, in); !contains(args, "rd.luks.options=discard") {
+		t.Errorf("kernel arguments: %v", args)
+	}
+	// Without the option nothing of the kind is written.
+	in, _ = cryptInstaller(t, cryptConfig("/boot"), &r)
+	mkTarget(t, in, "etc", "default")
+	if err := in.bootloader(); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range cmdlineArgs(t, in) {
+		if strings.HasPrefix(a, "rd.luks.options") {
+			t.Errorf("unexpected %s", a)
+		}
+	}
+}

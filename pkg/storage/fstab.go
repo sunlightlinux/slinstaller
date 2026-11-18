@@ -60,8 +60,11 @@ func (pl *Plan) Fstab(uuid map[string]string) string {
 		if p.Mountpoint == "/" {
 			pass = "1"
 		}
-		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t0 %s\n",
-			fstabSource(p, uuid), p.Mountpoint, p.Filesystem, p.fstabOptions(), pass)
+		if p.Passno != nil {
+			pass = fmt.Sprintf("%d", *p.Passno)
+		}
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d %s\n",
+			fstabSource(p, uuid), p.Mountpoint, p.Filesystem, p.fstabOptions(), p.Freq, pass)
 	}
 
 	for _, p := range pl.Parts {

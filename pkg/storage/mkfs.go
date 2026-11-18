@@ -1,5 +1,7 @@
 package storage
 
+import "strings"
+
 import "fmt"
 
 // mkfsArgs are the filesystem-specific flags each mkfs gets, ported
@@ -34,6 +36,7 @@ func mkfsCommand(p Partition) ([]string, error) {
 	if p.Filesystem == "swap" {
 		cmd := []string{"mkswap"}
 		cmd = append(cmd, labelArgs(p)...)
+		cmd = append(cmd, uuidArgs(p)...)
 		cmd = append(cmd, p.Options...)
 		return append(cmd, p.EffectiveDevice()), nil
 	}
@@ -45,6 +48,7 @@ func mkfsCommand(p Partition) ([]string, error) {
 
 	cmd := []string{"mkfs." + p.Filesystem}
 	cmd = append(cmd, labelArgs(p)...)
+	cmd = append(cmd, uuidArgs(p)...)
 	cmd = append(cmd, args...)
 	cmd = append(cmd, p.Options...)
 	return append(cmd, p.EffectiveDevice()), nil
@@ -71,4 +75,20 @@ func labelArgs(p Partition) []string {
 		label = label[:max]
 	}
 	return []string{flag, label}
+}
+
+// uuidArgs returns the option that gives the filesystem the UUID the config
+// asked for, in each mkfs's own spelling, or nothing.
+func uuidArgs(p Partition) []string {
+	if p.FsUUID == "" {
+		return nil
+	}
+	switch p.Filesystem {
+	case "vfat":
+		return []string{"-i", strings.ReplaceAll(p.FsUUID, "-", "")}
+	case "xfs":
+		return []string{"-m", "uuid=" + p.FsUUID}
+	default: // ext2/3/4, btrfs, f2fs, swap
+		return []string{"-U", p.FsUUID}
+	}
 }

@@ -54,6 +54,19 @@ type Partition struct {
 	Create           bool
 	StartMiB, EndMiB uint64
 
+	// Optional particulars: extra crypttab options for an encrypted
+	// volume; the GPT entry's type GUID, GUID and name; the filesystem's
+	// UUID; and the fstab entry's fsck pass (nil: 1 for the root, 2
+	// otherwise) and dump frequency.
+	CryptOptions                 string
+	PartType, PartUUID, PartName string
+	FsUUID                       string
+	Passno                       *int
+	Freq                         int
+
+	// RaidMetadata is an array's superblock format; "" means 1.2.
+	RaidMetadata string
+
 	// SpareESP marks a second EFI System Partition, on another disk than
 	// the one that is mounted: flagged and formatted like it, never mounted,
 	// and given a copy of the bootloader so the machine still boots when the

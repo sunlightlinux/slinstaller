@@ -65,9 +65,17 @@ func KnownLevel(level string) bool { return MinMembers(level) > 0 }
 // spares are hot spares: listed after the members, they hold no data until
 // a member fails and the array rebuilds onto one.
 func Create(device, level string, members, spares []string) []string {
+	return CreateWith(device, level, "", members, spares)
+}
+
+// CreateWith is Create with the superblock format chosen ("" for 1.2).
+func CreateWith(device, level, metadata string, members, spares []string) []string {
+	if metadata == "" {
+		metadata = "1.2"
+	}
 	cmd := []string{
 		"mdadm", "--create", device, "--run", "--force",
-		"--metadata=1.2",
+		"--metadata=" + metadata,
 		"--level=" + normalizeLevel(level),
 		fmt.Sprintf("--raid-devices=%d", len(members)),
 	}
@@ -83,7 +91,7 @@ func Commands(pl *storage.Plan) [][]string {
 	var cmds [][]string
 	for _, p := range pl.Parts {
 		if p.Raid {
-			cmds = append(cmds, Create(storage.RaidDevice(p.RaidName), p.RaidLevel, p.RaidMembers, p.RaidSpares))
+			cmds = append(cmds, CreateWith(storage.RaidDevice(p.RaidName), p.RaidLevel, p.RaidMetadata, p.RaidMembers, p.RaidSpares))
 		}
 	}
 	return cmds
