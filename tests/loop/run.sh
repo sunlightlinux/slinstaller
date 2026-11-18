@@ -85,7 +85,9 @@ pass "plain install: table, ESP flag, vfat + swap + ext4"
 # --- 2. --discover describes it, keeping everything -------------------------
 "$BIN" --discover "$disk" > "$WORK/found.yaml" 2> "$WORK/found.notes"
 grep -q 'reusePartitions: true' "$WORK/found.yaml" || fail "discover: not a reuse config"
-[ "$(grep -c 'preserve: true' "$WORK/found.yaml")" = 3 ] || fail "discover: not every partition is preserved"
+# Counted on the entries themselves: the file's own header mentions
+# "preserve: true" too.
+[ "$(grep -c '^ *preserve: true' "$WORK/found.yaml")" = 3 ] || { cat "$WORK/found.yaml" >&2; fail "discover: not every partition is preserved"; }
 grep -q "name: ${name}p3" "$WORK/found.yaml" && grep -q 'fstype: ext4' "$WORK/found.yaml" || fail "discover: the root is not described"
 pass "discover: the layout just made, all of it preserved"
 
