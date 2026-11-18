@@ -181,24 +181,33 @@ func CreateSubvolumes(pl *Plan, run func([]string) error) error {
 	return nil
 }
 
-func createSubvolumes(p Partition, run func([]string) error) (err error) {
-	top, err := os.MkdirTemp("", "slinstaller-btrfs-")
+func createSubvolumes(p Partition, run func([]string) error) error {
+	return WithMounted(p.EffectiveDevice(), p.Filesystem, func(top string) error {
+		for _, sv := range p.Subvolumes {
+			if err := run([]string{"btrfs", "subvolume", "create", filepath.Join(top, sv.Name)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// WithMounted mounts a filesystem on a directory of its own for as long as
+// f runs, and unmounts it after — for work that has to be done inside a
+// filesystem the install does not otherwise mount.
+func WithMounted(device, fstype string, f func(dir string) error) (err error) {
+	top, err := os.MkdirTemp("", "slinstaller-mnt-")
 	if err != nil {
 		return fmt.Errorf("storage: %w", err)
 	}
 	defer os.Remove(top)
-	if err := syscall.Mount(p.EffectiveDevice(), top, p.Filesystem, 0, ""); err != nil {
-		return fmt.Errorf("storage: mount %s to make its subvolumes: %w", p.EffectiveDevice(), err)
+	if err := syscall.Mount(device, top, fstype, 0, ""); err != nil {
+		return fmt.Errorf("storage: mount %s to work inside it: %w", device, err)
 	}
 	defer func() {
 		if uerr := syscall.Unmount(top, 0); uerr != nil && err == nil {
 			err = fmt.Errorf("storage: unmount %s: %w", top, uerr)
 		}
 	}()
-	for _, sv := range p.Subvolumes {
-		if err := run([]string{"btrfs", "subvolume", "create", filepath.Join(top, sv.Name)}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return f(top)
 }

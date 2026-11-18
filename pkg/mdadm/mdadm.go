@@ -83,7 +83,7 @@ func Commands(pl *storage.Plan) [][]string {
 	var cmds [][]string
 	for _, p := range pl.Parts {
 		if p.Raid {
-			cmds = append(cmds, Create(p.EffectiveDevice(), p.RaidLevel, p.RaidMembers, p.RaidSpares))
+			cmds = append(cmds, Create(storage.RaidDevice(p.RaidName), p.RaidLevel, p.RaidMembers, p.RaidSpares))
 		}
 	}
 	return cmds

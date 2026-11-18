@@ -68,7 +68,7 @@ func (pl *Plan) diskTableCommands(disk string) [][]string {
 				start, end = "<start of the largest free region>", "<its end>"
 			}
 			cmds = append(cmds, partedMkpart(disk, p, start, end))
-			if p.isESP() {
+			if p.isESP() || p.SpareESP {
 				cmds = append(cmds, []string{"parted", "-s", disk, "set",
 					fmt.Sprintf("%d", p.Number), "esp", "on"})
 			}
@@ -119,7 +119,7 @@ func (pl *Plan) diskTableCommands(disk string) [][]string {
 	// keeps the whole partition step on one tool, no sgdisk needed.
 	for _, p := range parts {
 		switch {
-		case p.isESP():
+		case (p.isESP() || p.SpareESP):
 			cmds = append(cmds, []string{"parted", "-s", disk, "set",
 				fmt.Sprintf("%d", p.Number), "esp", "on"})
 		case p.IsRaidMember:
@@ -186,7 +186,7 @@ const SizeRest = "rest"
 func partedMkpart(disk string, p Partition, start, end string) []string {
 	cmd := []string{"parted", "-a", "optimal", "--script", disk, "mkpart"}
 	switch {
-	case p.isESP():
+	case (p.isESP() || p.SpareESP):
 		cmd = append(cmd, "EFI", "fat32")
 	case p.IsRaidMember:
 		cmd = append(cmd, "raid")

@@ -120,8 +120,10 @@ func TestEffectiveDevice(t *testing.T) {
 		{Partition{LV: true, VGName: "vg0", LVName: "root"}, "/dev/vg0/root"},
 		{Partition{Raid: true, RaidName: "md0"}, "/dev/md0"},
 		{Partition{Raid: true, RaidName: "data"}, "/dev/md/data"},
-		// An array is the array even if a member's fields are also set.
-		{Partition{Raid: true, RaidName: "md1", Device: "/dev/sda1", Encrypted: true, MapName: "x"}, "/dev/md1"},
+		// An encrypted array: what is on it is on the mapper, not the array.
+		{Partition{Raid: true, RaidName: "md1", Device: "/dev/md1", Encrypted: true, MapName: "cryptmd1"}, "/dev/mapper/cryptmd1"},
+		// A volume is the volume, whatever it sits on.
+		{Partition{LV: true, VGName: "vg0", LVName: "root", Encrypted: true, MapName: "x"}, "/dev/vg0/root"},
 	} {
 		if got := c.p.EffectiveDevice(); got != c.want {
 			t.Errorf("EffectiveDevice(%+v) = %q, want %q", c.p, got, c.want)

@@ -275,20 +275,29 @@ func (in *installer) partition() error {
 	// with a GRUB-readable key derivation; the rest keep cryptsetup's
 	// stronger argon2id default.
 	grubBoot := in.bootCryptDevice()
-	for _, p := range in.plan.Parts {
-		if !p.Encrypted {
-			continue
+	// encrypt sets up LUKS on the partitions (onArrays false) or on the
+	// arrays (true): an array has to exist before it can be encrypted, and
+	// a partition has to be encrypted before it joins anything above it.
+	encrypt := func(onArrays bool) error {
+		for _, p := range in.plan.Parts {
+			if !p.Encrypted || p.Raid != onArrays {
+				continue
+			}
+			if in.opts.Passphrase == "" {
+				return fmt.Errorf("%s is encrypted but no passphrase was given", p.Device)
+			}
+			if err := luks.Format(p.Device, in.opts.Passphrase, in.output(), p.Device == grubBoot); err != nil {
+				return err
+			}
+			if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase, in.output()); err != nil {
+				return err
+			}
+			in.settle()
 		}
-		if in.opts.Passphrase == "" {
-			return fmt.Errorf("%s is encrypted but no passphrase was given", p.Device)
-		}
-		if err := luks.Format(p.Device, in.opts.Passphrase, in.output(), p.Device == grubBoot); err != nil {
-			return err
-		}
-		if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase, in.output()); err != nil {
-			return err
-		}
-		in.settle()
+		return nil
+	}
+	if err := encrypt(false); err != nil {
+		return err
 	}
 
 	// RAID, on top of the (partitioned, possibly encrypted) members, so the
@@ -298,6 +307,9 @@ func (in *installer) partition() error {
 			return err
 		}
 		in.settle()
+	}
+	if err := encrypt(true); err != nil {
+		return err
 	}
 
 	// LVM, on top of the (possibly encrypted) physical volumes, before
@@ -756,8 +768,10 @@ func (in *installer) bootloader() error {
 	// before it can be mounted — rd.md.uuid points dracut at it (alongside
 	// the /etc/mdadm.conf written below).
 	for _, p := range in.plan.Parts {
-		if p.Raid && p.Mountpoint == "/" {
-			uuid, err := mdadm.UUID(p.EffectiveDevice())
+		// … whether the root is on it directly, or on a volume group or a
+		// LUKS container that is.
+		if p.Raid && (p.Mountpoint == "/" || in.isRootCrypt(p) || (p.IsPV && p.VGName != "" && p.VGName == in.rootVGName())) {
+			uuid, err := mdadm.UUID(storage.RaidDevice(p.RaidName))
 			if err != nil {
 				return err
 			}
@@ -813,6 +827,9 @@ func (in *installer) bootloader() error {
 	if err := storage.RunCommands(cmds, in.opts.Runner); err != nil {
 		return err
 	}
+	if err := in.fillSpareESPs(esp, g.NoNVRAM); err != nil {
+		return err
+	}
 
 	// On a RAID install, record the arrays in /etc/mdadm.conf so the
 	// initramfs (and the booted system) assemble them by UUID, and force
@@ -837,6 +854,41 @@ func (in *installer) bootloader() error {
 		return storage.RunCommands(
 			[][]string{{"chroot", in.opts.Root, "xbps-reconfigure", "-fa"}},
 			in.opts.Runner)
+	}
+	return nil
+}
+
+// fillSpareESPs gives each spare EFI System Partition what the firmware
+// needs to boot from it: a copy of the ESP's EFI directory (GRUB, which
+// finds /boot by its filesystem UUID, so the copy works from any disk), the
+// loader at the removable-media path as well, and — unless the firmware's
+// entries are to be left alone — a boot entry of its own. efibootmgr puts a
+// new entry first in the boot order, so the spares end up ahead of the entry
+// grub-install made; every one of them starts the same GRUB, so which is
+// tried first makes no difference while the disks are all there.
+func (in *installer) fillSpareESPs(esp string, noNVRAM bool) error {
+	src := filepath.Join(in.opts.Root, esp, "EFI")
+	for _, p := range in.plan.SpareESPs() {
+		err := storage.WithMounted(p.Device, p.Filesystem, func(dir string) error {
+			return storage.RunCommands([][]string{
+				{"cp", "-a", src, dir + "/"},
+				{"mkdir", "-p", filepath.Join(dir, "EFI", "BOOT")},
+				{"cp", filepath.Join(src, grub.DefaultID, "grubx64.efi"), filepath.Join(dir, "EFI", "BOOT", "BOOTX64.EFI")},
+			}, in.opts.Runner)
+		})
+		if err != nil {
+			return fmt.Errorf("spare ESP %s: %w", p.Device, err)
+		}
+		if noNVRAM {
+			continue
+		}
+		entry := []string{"chroot", in.opts.Root, "efibootmgr", "--create",
+			"--disk", p.Disk, "--part", fmt.Sprintf("%d", p.Number),
+			"--label", grub.DefaultID + " (" + filepath.Base(p.Disk) + ")",
+			"--loader", `\EFI\` + grub.DefaultID + `\grubx64.efi`}
+		if err := storage.RunCommands([][]string{entry}, in.opts.Runner); err != nil {
+			return err
+		}
 	}
 	return nil
 }

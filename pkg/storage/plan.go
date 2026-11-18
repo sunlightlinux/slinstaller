@@ -54,6 +54,12 @@ type Partition struct {
 	Create           bool
 	StartMiB, EndMiB uint64
 
+	// SpareESP marks a second EFI System Partition, on another disk than
+	// the one that is mounted: flagged and formatted like it, never mounted,
+	// and given a copy of the bootloader so the machine still boots when the
+	// first disk is gone.
+	SpareESP bool
+
 	// CreateInFree marks a Create partition whose place is not known yet:
 	// it goes in the disk's largest unallocated region, found by
 	// PlaceInFree during the install. Until then EndMiB holds the largest
@@ -103,12 +109,12 @@ type Partition struct {
 // encrypted partition, the raw partition otherwise.
 func (p Partition) EffectiveDevice() string {
 	switch {
-	case p.Raid:
-		return RaidDevice(p.RaidName)
 	case p.LV:
 		return "/dev/" + p.VGName + "/" + p.LVName
-	case p.Encrypted:
+	case p.Encrypted: // also an encrypted array: what is on it is on the mapper
 		return "/dev/mapper/" + p.MapName
+	case p.Raid:
+		return RaidDevice(p.RaidName)
 	default:
 		return p.Device
 	}
@@ -238,4 +244,15 @@ func (pl *Plan) ESPMountpoint() string {
 		}
 	}
 	return ""
+}
+
+// SpareESPs returns the plan's spare EFI System Partitions.
+func (pl *Plan) SpareESPs() []Partition {
+	var out []Partition
+	for _, p := range pl.Parts {
+		if p.SpareESP {
+			out = append(out, p)
+		}
+	}
+	return out
 }

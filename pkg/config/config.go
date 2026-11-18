@@ -241,6 +241,12 @@ type Media struct {
 	Create bool   `yaml:"create,omitempty"`
 	Start  string `yaml:"start,omitempty"`
 
+	// ESP marks a vfat partition with no mountpoint as a spare EFI System
+	// Partition: on a second disk, it is given a copy of the bootloader, so
+	// a machine whose root is on RAID still boots when the disk holding the
+	// mounted ESP has failed.
+	ESP bool `yaml:"esp,omitempty"`
+
 	// Resize, in a reusePartitions install, shrinks this existing ext2/3/4
 	// partition to the given size, filesystem first, keeping what is on it
 	// (it has to be preserve: true). The space it gives up can take a
@@ -580,6 +586,16 @@ type RaidArray struct {
 	// As on a partition (see Media).
 	MountOptions string       `yaml:"mount-options,omitempty"`
 	Subvolumes   []*Subvolume `yaml:"subvolumes,omitempty"`
+
+	// Encrypted puts a LUKS container on the array: its filesystem, or its
+	// volume group, is then on the mapper.
+	Encrypted bool `yaml:"encrypted,omitempty"`
+
+	// VolumeGroup makes the array an LVM physical volume of that group, in
+	// place of a filesystem; Children are then the group's logical volumes
+	// (which may also be declared on another physical volume of the group).
+	VolumeGroup string   `yaml:"volumeGroup,omitempty"`
+	Children    []*Media `yaml:"children,omitempty"`
 }
 
 // User is an account to create, in clr-installer's shape.
@@ -1030,6 +1046,7 @@ func (c *Config) Validate() error {
 
 	roots, esps := 0, 0
 	seen := map[string]bool{}
+	spareESPs, espAtBoot := 0, false
 	raidMembers := map[string]int{} // members declared per array name
 	raidSpares := map[string]int{}
 
@@ -1056,6 +1073,13 @@ func (c *Config) Validate() error {
 			roots++
 		}
 	}
+
+	// checkLVs checks the logical volumes declared on one physical volume of
+	// a group. A group can have several physical volumes; its volumes may be
+	// declared on any of them, so names and "fill" are counted per group.
+	lvNames := map[string]bool{}
+	lvFills := map[string]int{}
+	var checkLVs func(where, vg string, children []*Media)
 
 	// checkMount checks a filesystem's fstab options and btrfs subvolumes.
 	// The subvolume at the filesystem's own mountpoint was counted by
@@ -1108,6 +1132,32 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	checkLVs = func(where, vg string, children []*Media) {
+		for j, lv := range children {
+			if lv == nil {
+				continue
+			}
+			lvWhere := fmt.Sprintf("%s/%s", where, lv.Name)
+			if lv.Name == "" {
+				lvWhere = fmt.Sprintf("%s/lv%d", where, j+1)
+			} else if lvNames[vg+"/"+lv.Name] {
+				add("%s: logical volume %q is declared twice in group %s", where, lv.Name, vg)
+			}
+			lvNames[vg+"/"+lv.Name] = true
+			checkFS(lvWhere, lv.FsType, lv.Mountpoint)
+			checkMount(lvWhere, lv.FsType, lv.Mountpoint, lv.MountOptions, lv.Subvolumes, false)
+			checkMin(lvWhere, lv.Size, storage.MinPartitionSize, "1 MiB", "size")
+			if lv.Mountpoint == "/" {
+				checkMin(lvWhere, lv.Size, storage.MinRootSize, "2 GB", "root size")
+			}
+			if s := strings.TrimSpace(lv.Size); s == "" || s == "0" || strings.EqualFold(s, "rest") {
+				if lvFills[vg]++; lvFills[vg] == 2 {
+					add("%s: more than one logical volume fills the group", where)
+				}
+			}
+		}
+	}
+
 	for _, disk := range disks {
 		for i, ch := range disk.Children {
 			if ch == nil {
@@ -1143,28 +1193,7 @@ func (c *Config) Validate() error {
 					add("%s: lvm partition has no volumeGroup", where)
 				}
 				checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "physical-volume size")
-				fills := 0
-				for j, lv := range ch.Children {
-					if lv == nil {
-						continue
-					}
-					lvWhere := fmt.Sprintf("%s/%s", where, lv.Name)
-					if lv.Name == "" {
-						lvWhere = fmt.Sprintf("%s/lv%d", where, j+1)
-					}
-					checkFS(lvWhere, lv.FsType, lv.Mountpoint)
-					checkMount(lvWhere, lv.FsType, lv.Mountpoint, lv.MountOptions, lv.Subvolumes, false)
-					checkMin(lvWhere, lv.Size, storage.MinPartitionSize, "1 MiB", "size")
-					if lv.Mountpoint == "/" {
-						checkMin(lvWhere, lv.Size, storage.MinRootSize, "2 GB", "root size")
-					}
-					if s := strings.TrimSpace(lv.Size); s == "" || s == "0" || strings.EqualFold(s, "rest") {
-						fills++
-					}
-				}
-				if fills > 1 {
-					add("%s: more than one logical volume fills the group", where)
-				}
+				checkLVs(where, ch.VolumeGroup, ch.Children)
 				continue
 			}
 
@@ -1183,6 +1212,14 @@ func (c *Config) Validate() error {
 				continue
 			}
 
+			if ch.ESP {
+				spareESPs++
+				if ch.FsType != "vfat" || ch.Mountpoint != "" || ch.Type == "crypt" {
+					add("%s: a spare ESP (esp: true) is a plain vfat partition with no mountpoint", where)
+				}
+				checkMin(where, ch.Size, storage.MinESPSize, "100 MB", "ESP size")
+				continue
+			}
 			checkFS(where, ch.FsType, ch.Mountpoint)
 			checkMount(where, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, ch.Preserve)
 			checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "size")
@@ -1192,6 +1229,7 @@ func (c *Config) Validate() error {
 
 			if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
 				esps++
+				espAtBoot = espAtBoot || ch.Mountpoint == "/boot"
 				checkMin(where, ch.Size, storage.MinESPSize, "100 MB", "ESP size")
 				if ch.Type == "crypt" {
 					add("%s: the EFI System Partition cannot be encrypted", where)
@@ -1222,13 +1260,31 @@ func (c *Config) Validate() error {
 		if raidSpares[a.Name] > 0 && strings.TrimPrefix(a.Level, "raid") == "0" {
 			add("raid %s: level 0 has no redundancy to rebuild onto a spare", where)
 		}
-		if a.FsType == "vfat" && (a.Mountpoint == "/boot" || a.Mountpoint == "/boot/efi") {
+		if a.VolumeGroup != "" {
+			if a.FsType != "" || a.Mountpoint != "" {
+				add("raid %s: an array that is a physical volume (volumeGroup) carries no filesystem of its own; put it on a logical volume", where)
+			}
+			checkLVs("raid "+where, a.VolumeGroup, a.Children)
+		} else if len(a.Children) > 0 {
+			add("raid %s: children are logical volumes and need a volumeGroup", where)
+		} else if a.FsType == "vfat" && (a.Mountpoint == "/boot" || a.Mountpoint == "/boot/efi") {
 			add("raid %s: the EFI System Partition cannot be on RAID", where)
 		} else {
 			checkFS("raid "+where, a.FsType, a.Mountpoint)
 			checkMount("raid "+where, a.FsType, a.Mountpoint, a.MountOptions, a.Subvolumes, false)
 		}
 	}
+	// A spare ESP gets a copy of the bootloader, not of the kernels. With
+	// the ESP at /boot the kernels live on it and a copy would go stale at
+	// the first kernel update; at /boot/efi it holds GRUB alone, and /boot
+	// is on the (redundant) root.
+	if spareESPs > 0 && c.ReusePartitions {
+		add("spare ESPs (esp: true) are for an install that partitions the disks, not reusePartitions")
+	}
+	if spareESPs > 0 && espAtBoot {
+		add("spare ESPs (esp: true) need the main ESP at /boot/efi, not /boot: at /boot the kernels would be on one disk only")
+	}
+
 	for name := range raidMembers {
 		if !declared[name] {
 			add("raid member references undeclared array %q", name)
@@ -1398,6 +1454,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 			if encrypted {
 				p.MapName = cryptMapName(ch)
 			}
+			p.SpareESP = ch.ESP
 			if raidMember {
 				p.IsRaidMember = true
 				p.RaidSpare = ch.Spare
@@ -1435,6 +1492,20 @@ func (c *Config) Plan() (*storage.Plan, error) {
 			Filesystem:  a.FsType,
 		}
 		rp.MountOptions, rp.Subvol, rp.Subvolumes = mountExtras(a.Mountpoint, a.MountOptions, a.Subvolumes)
+		if a.Encrypted {
+			// LUKS on the array: the array device is what is formatted and
+			// opened, and everything above it is on the mapper.
+			rp.Encrypted, rp.Device, rp.MapName = true, storage.RaidDevice(a.Name), "crypt"+a.Name
+		}
+		if a.VolumeGroup != "" {
+			// LVM on the array: it is a physical volume and carries no
+			// filesystem of its own.
+			rp.IsPV, rp.VGName = true, a.VolumeGroup
+			rp.Mountpoint, rp.Filesystem = "", ""
+			pl.Parts = append(pl.Parts, rp)
+			pl.Parts = append(pl.Parts, lvParts(a.VolumeGroup, a.Children)...)
+			continue
+		}
 		pl.Parts = append(pl.Parts, rp)
 	}
 
@@ -1620,8 +1691,13 @@ func lvmParts(disk string, i int, ch *Media) (storage.Partition, []storage.Parti
 		pv.MapName = cryptMapName(ch)
 	}
 
+	return pv, lvParts(ch.VolumeGroup, ch.Children), nil
+}
+
+// lvParts turns a group's declared children into its logical volumes.
+func lvParts(vg string, children []*Media) []storage.Partition {
 	var lvs []storage.Partition
-	for _, lv := range ch.Children {
+	for _, lv := range children {
 		if lv == nil {
 			continue
 		}
@@ -1630,14 +1706,14 @@ func lvmParts(disk string, i int, ch *Media) (storage.Partition, []storage.Parti
 			lvSize = storage.SizeRest
 		}
 		lp := storage.Partition{
-			LV: true, VGName: ch.VolumeGroup, LVName: lv.Name,
+			LV: true, VGName: vg, LVName: lv.Name,
 			Mountpoint: lv.Mountpoint, Filesystem: lv.FsType, Size: lvSize,
 			Label: lv.Label, Options: strings.Fields(lv.Options),
 		}
 		lp.MountOptions, lp.Subvol, lp.Subvolumes = mountExtras(lv.Mountpoint, lv.MountOptions, lv.Subvolumes)
 		lvs = append(lvs, lp)
 	}
-	return pv, lvs, nil
+	return lvs
 }
 
 // cryptMapName is the LUKS mapper name for an encrypted partition,

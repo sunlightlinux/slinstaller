@@ -88,7 +88,7 @@ func TestCreateSubvolumesSkipsWhatHasNone(t *testing.T) {
 	}
 	// A filesystem that cannot be mounted is an error, with nothing run.
 	pl = &Plan{Parts: []Partition{{Device: "/dev/slinstaller-no-such-device", Filesystem: "btrfs", Mountpoint: "/", Subvolumes: []Subvolume{{"@", "/"}}}}}
-	if err := CreateSubvolumes(pl, run); err == nil || !strings.Contains(err.Error(), "to make its subvolumes") || ran != 0 {
+	if err := CreateSubvolumes(pl, run); err == nil || !strings.Contains(err.Error(), "to work inside it") || ran != 0 {
 		t.Errorf("unmountable filesystem: %v, ran %d", err, ran)
 	}
 	t.Setenv("TMPDIR", "/no/such/dir")

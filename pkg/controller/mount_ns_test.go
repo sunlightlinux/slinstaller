@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,6 +119,8 @@ func mountStagesChild(t *testing.T) {
 		t.Error("the target is still mounted after finish")
 	}
 
+	fillSpareESPsOnTmpfs(t, base)
+
 	if liveErr != nil {
 		return // nothing to copy, so the copy cannot be made to fail
 	}
@@ -198,4 +201,14 @@ func TestFinish(t *testing.T) {
 	in.resolvCopy = filepath.Join(mkTarget(t, in, "etc"), "resolv.conf")
 	os.MkdirAll(filepath.Join(in.resolvCopy, "occupied"), 0o755)
 	wantErr(t, in.finish(), "remove")
+}
+
+// realRun runs a command for real; for the harmless ones (cp, mkdir) a test
+// needs done inside its namespace.
+func realRun(args []string) error {
+	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %v: %s", strings.Join(args, " "), err, out)
+	}
+	return nil
 }

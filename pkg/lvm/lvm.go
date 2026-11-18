@@ -22,9 +22,9 @@ func PVCreate(device string) []string {
 	return []string{"pvcreate", "-ff", "-y", device}
 }
 
-// VGCreate creates the volume group on the physical volume.
-func VGCreate(vg, device string) []string {
-	return []string{"vgcreate", vg, device}
+// VGCreate creates the volume group on its physical volumes.
+func VGCreate(vg string, devices ...string) []string {
+	return append([]string{"vgcreate", vg}, devices...)
 }
 
 // LVCreate creates a logical volume. A size of FillSize takes all the
@@ -36,19 +36,31 @@ func LVCreate(vg, name, size string) []string {
 	return []string{"lvcreate", "-y", "-L", size, "-n", name, vg}
 }
 
-// Commands returns the full LVM setup for a plan: pvcreate and vgcreate
-// for each physical volume, then lvcreate for every logical volume in
+// Commands returns the full LVM setup for a plan: pvcreate for each
+// physical volume, vgcreate for each group, then lvcreate for every logical volume in
 // its group, in the order the plan lists them.
 func Commands(pl *storage.Plan) [][]string {
 	var cmds [][]string
+	// A group may span several physical volumes — partitions, on one disk
+	// or several, or a RAID array — so they are all initialised first and
+	// each group is created once, on all of its own.
+	var groups []string
+	pvs := map[string][]string{}
 	for _, p := range pl.Parts {
 		if p.IsPV {
 			// EffectiveDevice is the mapper for an encrypted PV
-			// (LVM-on-LUKS) and the raw partition otherwise, so pvcreate
-			// targets the LUKS container when there is one.
+			// (LVM-on-LUKS), the array for one on RAID, and the raw
+			// partition otherwise.
 			dev := p.EffectiveDevice()
-			cmds = append(cmds, PVCreate(dev), VGCreate(p.VGName, dev))
+			cmds = append(cmds, PVCreate(dev))
+			if _, seen := pvs[p.VGName]; !seen {
+				groups = append(groups, p.VGName)
+			}
+			pvs[p.VGName] = append(pvs[p.VGName], dev)
 		}
+	}
+	for _, vg := range groups {
+		cmds = append(cmds, VGCreate(vg, pvs[vg]...))
 	}
 	for _, p := range pl.Parts {
 		if p.LV {
