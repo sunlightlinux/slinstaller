@@ -2208,6 +2208,12 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		if a == nil {
 			continue
 		}
+		// Here as well as in Validate: skipValidationAll turns that off,
+		// and a name that leaves /dev/md (../sdz) points mdadm, parted
+		// and mkfs at a disk the confirmation never named.
+		if !raidNameRe.MatchString(a.Name) {
+			return nil, fmt.Errorf("config: raid %q: an array name is letters, digits and . _ - (not starting with . or -)", a.Name)
+		}
 		var members, spares []string
 		for _, p := range pl.Parts {
 			switch {

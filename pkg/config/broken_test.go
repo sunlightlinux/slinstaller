@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -638,6 +639,19 @@ func TestRaidNamePath(t *testing.T) {
 		err := c.Validate()
 		if bad := err != nil && strings.Contains(err.Error(), "an array name is"); bad == ok {
 			t.Errorf("%q: %v", name, err)
+		}
+		// skipValidationAll turns Validate off, not this: the plan
+		// itself refuses a name that leaves /dev/md.
+		c.SkipValidationAll = true
+		pl, err := c.Plan()
+		if bad := err != nil && strings.Contains(err.Error(), "an array name is"); bad == ok {
+			t.Errorf("%q, skipValidationAll: %v", name, err)
+		}
+		if pl != nil {
+			cmds, _ := pl.MkfsCommands()
+			if s := fmt.Sprint(cmds, pl.TableCommands()); strings.Contains(s, "sdz") {
+				t.Errorf("%q, skipValidationAll: planned %s", name, s)
+			}
 		}
 	}
 }
