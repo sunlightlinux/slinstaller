@@ -112,14 +112,21 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 // disk still mounted after the program had exited. It signals the
 // installer's process group, which its commands share — only when the
 // installer leads that group, so nothing it did not start is touched —
-// with the installer itself ignoring the signal.
+// with the installer itself catching the signal.
 var abandonChildren = func() {
 	if syscall.Getpgrp() != os.Getpid() {
 		return
 	}
-	signal.Ignore(syscall.SIGTERM)
+	// Caught, not ignored: an ignored signal stays ignored in every command
+	// started afterwards (the next step's xbps-install would no longer stop
+	// on SIGTERM), while a caught one is back to its default across exec.
+	// The installer's own copy lands in sigSink and is left there.
+	signal.Notify(sigSink, syscall.SIGTERM)
 	_ = syscall.Kill(0, syscall.SIGTERM)
 }
+
+// sigSink takes the SIGTERM abandonChildren sends its own process group.
+var sigSink = make(chan os.Signal, 1)
 
 // awaitAbandoned waits, for a while, for an install the operator left
 // mid-step to wind down — its commands were ended (abandonChildren), so
@@ -133,7 +140,7 @@ func awaitAbandoned(ch chan tea.Msg, result chan error) error {
 		select {
 		case err := <-result:
 			if err == nil {
-				return fmt.Errorf("left by the operator during the install")
+				return nil // it had finished, and well, before the operator left
 			}
 			return fmt.Errorf("left by the operator during the install: %w", err)
 		case <-ch:

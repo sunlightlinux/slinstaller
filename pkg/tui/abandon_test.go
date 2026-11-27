@@ -62,3 +62,36 @@ func TestAwaitAbandoned(t *testing.T) {
 		t.Errorf("awaitAbandoned = %v", err)
 	}
 }
+
+// What the installer starts after leaving mid-step still stops on SIGTERM:
+// the disposition it set to spare itself is not passed on.
+func TestAbandonLeavesSIGTERMToChildren(t *testing.T) {
+	if os.Getenv("SLINSTALLER_ABANDON_CHILD2") == "1" {
+		abandonChildren()
+		later := exec.Command("sleep", "30")
+		if err := later.Start(); err != nil {
+			t.Fatal(err)
+		}
+		later.Process.Signal(syscall.SIGTERM)
+		done := make(chan error, 1)
+		go func() { done <- later.Wait() }()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatal("finished on its own")
+			}
+			os.Stdout.WriteString("STOPPED\n")
+		case <-time.After(5 * time.Second):
+			later.Process.Kill()
+			t.Fatal("a command started afterwards ignored SIGTERM")
+		}
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestAbandonLeavesSIGTERMToChildren$", "-test.v")
+	cmd.Env = append(os.Environ(), "SLINSTALLER_ABANDON_CHILD2=1")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "STOPPED") {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+}
