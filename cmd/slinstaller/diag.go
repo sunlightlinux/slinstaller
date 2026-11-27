@@ -48,6 +48,9 @@ var diagnosticsDir = "/tmp"
 var diagnosticCommands = map[string][]string{
 	"lsblk.txt":      {"lsblk", "-o", "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,SERIAL"},
 	"efibootmgr.txt": {"efibootmgr", "-v"},
+	// What still holds a disk when releasing it fails.
+	"dmsetup.txt":   {"dmsetup", "ls", "--tree"},
+	"lsblk-all.txt": {"lsblk", "-a", "-o", "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT"},
 }
 
 // diagnosticFiles are read as they are.
@@ -55,6 +58,9 @@ var diagnosticFiles = map[string]string{
 	"cmdline.txt": "/proc/cmdline",
 	"version.txt": "/proc/version",
 	"meminfo.txt": "/proc/meminfo",
+	// Arrays and mounts: what a re-run would find busy.
+	"mdstat.txt": "/proc/mdstat",
+	"mounts.txt": "/proc/self/mounts",
 }
 
 // writeDiagnostics gathers what is needed to understand a failed install
