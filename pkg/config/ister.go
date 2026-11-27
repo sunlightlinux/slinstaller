@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -31,8 +32,10 @@ type isterConfig struct {
 		Partition int    `json:"partition"`
 		Mount     string `json:"mount"`
 	} `json:"PartitionMountPoints"`
-	Version json.Number `json:"Version"`
-	Bundles []string    `json:"Bundles"`
+	// A number, or "" / "latest" (clr-installer's own fixtures use the
+	// latter; its UintString takes both as 0): raw, read by isterVersion.
+	Version json.RawMessage `json:"Version"`
+	Bundles []string        `json:"Bundles"`
 	Users   []struct {
 		Username string `json:"username"`
 		Key      string `json:"key"`
@@ -138,8 +141,8 @@ func FromJSONDescriptor(path string) (*Config, []string, error) {
 		}
 	}
 
-	if v, err := ic.Version.Int64(); err == nil && v > 0 {
-		c.Version = uint(v)
+	if v := isterVersion(ic.Version); v > 0 {
+		c.Version = v
 	}
 	// The descriptor lists its kernel among the bundles; a config names it
 	// apart. The rest are carried as they are (and, being another
@@ -154,7 +157,31 @@ func FromJSONDescriptor(path string) (*Config, []string, error) {
 	for _, u := range ic.Users {
 		usr := &User{Login: u.Username, Admin: u.Sudo, Password: u.Password}
 		if u.Key != "" {
-			usr.SSHKeys = []string{u.Key}
+			// ister's key is the path of a public-key file, beside the
+			// descriptor when relative: taken as the key itself, the file
+			// name went into authorized_keys.
+			// (A value that is itself a public key line is taken as one.)
+			kp := u.Key
+			if looksLikeSSHKey(kp) {
+				usr.SSHKeys = []string{kp}
+				kp = ""
+			} else if !filepath.IsAbs(kp) {
+				kp = filepath.Join(filepath.Dir(path), kp)
+			}
+			if kp == "" {
+				// taken above
+			} else if data, err := os.ReadFile(kp); err == nil && strings.TrimSpace(string(data)) != "" {
+				for _, l := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+					if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+						usr.SSHKeys = append(usr.SSHKeys, l)
+					}
+				}
+			} else {
+				notes = append(notes, fmt.Sprintf("user %s: key file %s could not be read, so no SSH key is set - add it under ssh-keys", u.Username, kp))
+			}
+		}
+		if u.Sudo && u.Password == "" {
+			notes = append(notes, fmt.Sprintf("user %s is an administrator without a password: give it one (--genpass), or the config is refused", u.Username))
 		}
 		c.Users = append(c.Users, usr)
 	}
@@ -182,4 +209,34 @@ func FromJSONDescriptor(path string) (*Config, []string, error) {
 		notes = append(notes, "VersionURL has no counterpart in a config and is left out")
 	}
 	return c, notes, nil
+}
+
+// isterVersion reads ister's Version: a number, a numeric string, or ""
+// and "latest" (0, as clr-installer reads them).
+func isterVersion(raw json.RawMessage) uint {
+	var n json.Number
+	if json.Unmarshal(raw, &n) == nil {
+		if v, err := n.Int64(); err == nil && v > 0 {
+			return uint(v)
+		}
+		return 0
+	}
+	var str string
+	if json.Unmarshal(raw, &str) == nil {
+		if v, err := strconv.ParseUint(str, 10, 32); err == nil {
+			return uint(v)
+		}
+	}
+	return 0
+}
+
+// looksLikeSSHKey reports whether s is an OpenSSH public key line rather than
+// a file name.
+func looksLikeSSHKey(s string) bool {
+	for _, p := range []string{"ssh-", "ecdsa-sha2-", "sk-ssh-", "sk-ecdsa-"} {
+		if strings.HasPrefix(s, p) && strings.Contains(s, " ") {
+			return true
+		}
+	}
+	return false
 }

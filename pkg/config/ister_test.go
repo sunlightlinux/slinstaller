@@ -137,3 +137,27 @@ func TestFromJSONDescriptorRefusals(t *testing.T) {
 		t.Errorf("notes = %v", notes)
 	}
 }
+
+// clr-installer's own fixtures write Version as "latest"; a user's key is
+// the path of a public-key file, read from beside the descriptor.
+func TestFromJSONDescriptorLatestAndKeyFile(t *testing.T) {
+	text := strings.Replace(descriptor, `"Version": 31000`, `"Version": "latest"`, 1)
+	text = strings.Replace(text, `"key": "ssh-ed25519 AAAA"`, `"key": "key.pub"`, 1)
+	path := writeDescriptor(t, text)
+	os.WriteFile(filepath.Join(filepath.Dir(path), "key.pub"), []byte("ssh-ed25519 AAAAkey ion@box\n"), 0o644)
+	c, _, err := FromJSONDescriptor(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Version != 0 || len(c.Users[0].SSHKeys) != 1 || c.Users[0].SSHKeys[0] != "ssh-ed25519 AAAAkey ion@box" {
+		t.Errorf("version %d keys %q", c.Version, c.Users[0].SSHKeys)
+	}
+	os.Remove(filepath.Join(filepath.Dir(path), "key.pub"))
+	c, notes, err := FromJSONDescriptor(path)
+	if err != nil || len(c.Users[0].SSHKeys) != 0 || !strings.Contains(strings.Join(notes, "\n"), "key file") {
+		t.Errorf("missing key file: %v %q %v", err, c.Users[0].SSHKeys, notes)
+	}
+	if isterVersion([]byte(`"42"`)) != 42 || isterVersion([]byte(`""`)) != 0 || isterVersion([]byte(`7`)) != 7 {
+		t.Error("isterVersion")
+	}
+}
