@@ -24,11 +24,12 @@ change.
   password and stayed out of `wheel` while root was locked for there
   being an administrator. It is given the config's group, name and
   password with `usermod`.
-- **Packages, kernels and env names that are not names are refused**,
-  with `skipValidationAll` too. `packages: [-r, /]` reached
-  `xbps-install` as options and installed into the live system's root;
-  an empty env name replaced every `$` in the hooks, and one beginning
-  with `-` was an option to `env`.
+- **Packages and kernels that are not package names are refused**, and
+  env names that break a hook (empty, with `=`, a leading `-`, a space or
+  a control character), with `skipValidationAll` too. `packages: [-r, /]`
+  reached `xbps-install` as options and installed into the live system's
+  root; an empty env name replaced every `$` in the hooks, and one
+  beginning with `-` was an option to `env`.
 - **Revert, Cancel and Esc on Manage User** go back to the accounts the
   table was opened with, as clr-installer's do. Revert deleted every
   account, those confirmed on an earlier visit too, and Cancel kept the
