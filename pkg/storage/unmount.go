@@ -68,8 +68,19 @@ func UnmountTree(root string) ([]string, error) {
 		return nil, fmt.Errorf("storage: %w", err)
 	}
 	var done, failed []string
-	for _, target := range mountsUnder(root, string(data)) {
-		if err := syscall.Unmount(target, syscall.MNT_DETACH); err != nil {
+	targets := mountsUnder(root, string(data))
+	if len(targets) > 0 {
+		syscall.Sync()
+	}
+	for _, target := range targets {
+		// Unmounted properly where it can be, so the data is on the disk;
+		// detached only when something holds it (or its submounts, as a
+		// recursive bind of /dev has).
+		err := syscall.Unmount(target, 0)
+		if err == syscall.EBUSY {
+			err = syscall.Unmount(target, syscall.MNT_DETACH)
+		}
+		if err != nil {
 			failed = append(failed, fmt.Sprintf("%s (%v)", target, err))
 			continue
 		}

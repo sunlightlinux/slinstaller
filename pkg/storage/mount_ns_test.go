@@ -206,6 +206,35 @@ func mountChild(t *testing.T) {
 	if len(m.mounted) != 0 {
 		t.Errorf("mounted list not cleared: %v", m.mounted)
 	}
+	// Nothing held the target: it was unmounted, not detached.
+	if len(m.Lazy) != 0 {
+		t.Errorf("an idle target was only detached: %v", m.Lazy)
+	}
+
+	// A filesystem something still holds open cannot be unmounted; it is
+	// detached instead, said so in Lazy, and that is not a failure.
+	busy := filepath.Join(root, "busy")
+	if err := os.MkdirAll(busy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := NewMounter(busy)
+	if err := b.MountAll(&Plan{Parts: []Partition{{Device: "tmpfs", Filesystem: "tmpfs", Mountpoint: "/"}}}); err != nil {
+		t.Fatalf("MountAll busy: %v", err)
+	}
+	held, err := os.Create(filepath.Join(busy, "held"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	if err := b.UnmountAll(); err != nil {
+		t.Fatalf("UnmountAll with a file held open: %v", err)
+	}
+	if len(b.Lazy) != 1 || b.Lazy[0] != busy {
+		t.Errorf("Lazy = %v, want [%s]", b.Lazy, busy)
+	}
+	if dev(busy) != dev(root) {
+		t.Error("the held filesystem is still attached")
+	}
 }
 
 func TestMountFailuresAreReported(t *testing.T) {

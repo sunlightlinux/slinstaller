@@ -15,6 +15,11 @@ change.
 - `system-upgrade` ran the target's `xbps-install -Syu` before the Sunlight
   mirror was written to its `/etc/xbps.d`, so the upgrade resolved every
   package against Void alone. The mirror is recorded first now.
+- The end of an install (and `--unmount`) only detached the target's
+  filesystems lazily, with no sync: "Install complete." could print while
+  the data was still in the page cache, and a machine switched off then
+  booted a dirty ESP. Everything is synced and unmounted properly now; a
+  filesystem still held open is detached, and the log says which.
 
 ## [2.1.1] - 2026-11-18
 

@@ -54,6 +54,14 @@ func (pl *Plan) MountOrder() []Partition {
 type Mounter struct {
 	root    string
 	mounted []string
+	// meta are the bind mounts of the live system's /proc, /sys and /dev:
+	// they hold no data of the install and carry submounts, so they are
+	// detached rather than unmounted.
+	meta map[string]bool
+	// Lazy lists the filesystems the last UnmountAll could only detach
+	// because something still held them open. They come off once the
+	// last user lets go; the data was synced before.
+	Lazy []string
 }
 
 // NewMounter returns a Mounter that mounts under root (the target tree,
@@ -104,6 +112,10 @@ func (m *Mounter) MountMeta() error {
 			return fmt.Errorf("storage: bind %s to %s: %w", src, target, err)
 		}
 		m.mounted = append(m.mounted, target)
+		if m.meta == nil {
+			m.meta = map[string]bool{}
+		}
+		m.meta[target] = true
 	}
 	return nil
 }
@@ -111,14 +123,39 @@ func (m *Mounter) MountMeta() error {
 // UnmountAll unmounts everything this Mounter mounted, in reverse order
 // so children come off before their parents. It reports the mounts it
 // could not release rather than stopping at the first.
+//
+// Everything is synced first, and each filesystem of the install is
+// unmounted properly, so its data is on the disk when this returns. A
+// lazy detach alone returned at once and left the writeback for later:
+// "Install complete." printed while the ESP was still dirty, and a
+// machine switched off then booted into a damaged one. Only a filesystem
+// something still holds (EBUSY) falls back to a detach, and is listed in
+// Lazy so the caller can say so.
 func (m *Mounter) UnmountAll() error {
 	var failed []string
+	m.Lazy = nil
+	if len(m.mounted) > 0 {
+		syscall.Sync()
+	}
 	for i := len(m.mounted) - 1; i >= 0; i-- {
-		if err := syscall.Unmount(m.mounted[i], syscall.MNT_DETACH); err != nil {
-			failed = append(failed, m.mounted[i])
+		target := m.mounted[i]
+		if m.meta[target] {
+			if err := syscall.Unmount(target, syscall.MNT_DETACH); err != nil {
+				failed = append(failed, fmt.Sprintf("%s (%v)", target, err))
+			}
+			continue
+		}
+		err := syscall.Unmount(target, 0)
+		if err == syscall.EBUSY {
+			if err = syscall.Unmount(target, syscall.MNT_DETACH); err == nil {
+				m.Lazy = append(m.Lazy, target)
+			}
+		}
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("%s (%v)", target, err))
 		}
 	}
-	m.mounted = nil
+	m.mounted, m.meta = nil, nil
 	if len(failed) > 0 {
 		return fmt.Errorf("storage: failed to unmount: %s", strings.Join(failed, ", "))
 	}

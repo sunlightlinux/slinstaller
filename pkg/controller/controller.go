@@ -297,6 +297,9 @@ func (in *installer) finish() error {
 	if err := in.mnt.UnmountAll(); err != nil {
 		return err
 	}
+	if len(in.mnt.Lazy) > 0 && in.opts.Log != nil {
+		fmt.Fprintf(in.opts.Log, "warning: still in use, detached instead of unmounted (synced first): %s\n", strings.Join(in.mnt.Lazy, ", "))
+	}
 	return kexecErr
 }
 
