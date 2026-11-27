@@ -1563,6 +1563,13 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// checkFSMin checks a size against what its filesystem's mkfs takes.
+	checkFSMin := func(where, fsType, sizeStr string) {
+		if min, label := storage.MinFilesystemSize(fsType); min > 0 {
+			checkMin(where, sizeStr, min, label, fsType+" size")
+		}
+	}
+
 	roots, esps := 0, 0
 	seen := map[string]bool{}
 	spareESPs, espAtBoot := 0, false
@@ -1702,6 +1709,7 @@ func (c *Config) Validate() error {
 				}
 			}
 			checkMin(lvWhere, lv.Size, storage.MinPartitionSize, "1 MiB", "size")
+			checkFSMin(lvWhere, lv.FsType, lv.Size)
 			if lv.Mountpoint == "/" {
 				checkMin(lvWhere, lv.Size, rootMin, rootMinLabel, "root size")
 			}
@@ -1786,6 +1794,7 @@ func (c *Config) Validate() error {
 			checkFS(where, ch.FsType, ch.Mountpoint)
 			checkMount(where, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, ch.Preserve)
 			checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "size")
+			checkFSMin(where, ch.FsType, ch.Size)
 			if ch.Mountpoint == "/" {
 				checkMin(where, ch.Size, rootMin, rootMinLabel, "root size")
 			}
@@ -1848,6 +1857,7 @@ func (c *Config) Validate() error {
 				checkFS(pw, ch.FsType, ch.Mountpoint)
 				checkMount(pw, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, false)
 				checkMin(pw, ch.Size, storage.MinPartitionSize, "1 MiB", "size")
+				checkFSMin(pw, ch.FsType, ch.Size)
 				if ch.Mountpoint == "/" {
 					checkMin(pw, ch.Size, rootMin, rootMinLabel, "root size")
 				}

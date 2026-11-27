@@ -52,3 +52,30 @@ func TestStageHooksAndPowerDelayValidation(t *testing.T) {
 		t.Errorf("negative delay: %v", err)
 	}
 }
+
+// mkfs.xfs (xfsprogs 5.19 and later) refuses a filesystem under 300 MiB:
+// accepted here, the install failed at mkfs, after the disk was wiped.
+func TestXFSBelowItsMinimumIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		size string
+		ok   bool
+	}{{"200M", false}, {"299M", false}, {"300M", true}, {"1G", true}, {"0", true}} {
+		c := btrfsConfig()
+		c.TargetMedia[0].Children = append(c.TargetMedia[0].Children,
+			&Media{Name: "sda4", Type: "part", FsType: "xfs", Mountpoint: "/data", Size: tc.size})
+		c.TargetMedia[0].Children[2].Size = "20G"
+		err := c.Validate()
+		if tc.ok != (err == nil) {
+			t.Errorf("xfs partition of %s: %v", tc.size, err)
+		}
+		// A logical volume likewise.
+		c = btrfsConfig()
+		c.TargetMedia[0].Children[2].Size = "20G"
+		c.TargetMedia[0].Children = append(c.TargetMedia[0].Children,
+			&Media{Name: "sda4", Type: "lvm", VolumeGroup: "vg0", Children: []*Media{
+				{Name: "data", FsType: "xfs", Mountpoint: "/data", Size: tc.size}}})
+		if err := c.Validate(); tc.ok != (err == nil) {
+			t.Errorf("xfs volume of %s: %v", tc.size, err)
+		}
+	}
+}

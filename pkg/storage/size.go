@@ -65,6 +65,16 @@ const (
 	MinRootSize = uint64(2) * 1000 * 1000 * 1000
 )
 
+// MinFilesystemSize is the smallest device the filesystem's mkfs makes it
+// on, and how to say it; 0 where the partition minimum is the only floor.
+// mkfs.xfs has refused anything under 300 MiB since xfsprogs 5.19.
+func MinFilesystemSize(fs string) (uint64, string) {
+	if fs == "xfs" {
+		return 300 << 20, "300 MiB"
+	}
+	return 0, ""
+}
+
 // GPTReserveBytes is the space a GPT layout needs beyond the partitions
 // themselves: the primary and backup partition tables plus the 1 MiB
 // alignment gap parted leaves at the start. Used by the disk-fit check so a
