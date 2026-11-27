@@ -628,4 +628,28 @@ func TestReassembleChecksWhatIsThere(t *testing.T) {
 	if got, _ := os.ReadFile(filepath.Join(args, "args")); len(got) != 0 || len(r.cmds) != 0 {
 		t.Errorf("ran before refusing: %s %s", got, r.flat())
 	}
+	// What lsblk reports for what this install made passes: LUKS, a RAID
+	// member, an LVM PV.
+	in.opts.Devices = func() ([]blockdev.Device, error) {
+		return []blockdev.Device{{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []blockdev.Device{
+			{Name: "sda2", Path: "/dev/sda2", Type: "part", FsType: "crypto_LUKS"}}}}, nil
+	}
+	if err := in.reassemble(); err != nil {
+		t.Errorf("a LUKS partition: %v", err)
+	}
+	r = recorder{}
+	raid := stagedInstaller(t, raidConfig(), &r)
+	raid.opts.ResumeFrom = "bootloader"
+	raid.opts.Devices = func() ([]blockdev.Device, error) {
+		var parts []blockdev.Device
+		for _, p := range raid.plan.Parts {
+			if p.IsRaidMember {
+				parts = append(parts, blockdev.Device{Name: filepath.Base(p.Device), Path: p.Device, Type: "part", FsType: "linux_raid_member"})
+			}
+		}
+		return []blockdev.Device{{Name: "sda", Path: "/dev/sda", Type: "disk", Children: parts}}, nil
+	}
+	if err := raid.reassemble(); err != nil {
+		t.Errorf("RAID members: %v", err)
+	}
 }
