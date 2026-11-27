@@ -1119,6 +1119,9 @@ var hostnameRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
 // loginRe is what useradd accepts for a login name.
 var loginRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 
+// envNameRe is a shell variable name, what a hook refers to an env entry by.
+var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // Limits on accounts, clr-installer's: a login of at most 31 characters,
 // and a password of 8 to 255.
 const (
@@ -1384,6 +1387,18 @@ func (c *Config) Validate() error {
 			if mib, err := offsetMiB(ch.Resize); err != nil || mib == 0 {
 				add("%s: resize %q is not a size", ch.Name, ch.Resize)
 			}
+		}
+	}
+	// The env is substituted into the hooks as $name and set by env(1) as
+	// name=value: an empty name replaced every "$" in the hooks.
+	var envNames []string
+	for k := range c.Environment {
+		envNames = append(envNames, k)
+	}
+	sort.Strings(envNames)
+	for _, k := range envNames {
+		if !envNameRe.MatchString(k) {
+			add("env: %q is not a variable name (letters, digits and _, not starting with a digit)", k)
 		}
 	}
 	if c.MessageURL != "" && !strings.HasPrefix(c.MessageURL, "http://") && !strings.HasPrefix(c.MessageURL, "https://") {

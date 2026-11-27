@@ -226,3 +226,21 @@ func TestClrImageKeysAreQuiet(t *testing.T) {
 		t.Error("postArchive: false not read")
 	}
 }
+
+// The env's names are substituted into the hooks as $name and passed to
+// env(1) as name=value: an empty name replaced every "$" in every hook with
+// its value, one with "=" split elsewhere, and one beginning with "-" was
+// an option to env.
+func TestEnvNamesValidation(t *testing.T) {
+	c := btrfsConfig()
+	c.Environment = map[string]string{"MIRROR": "x", "_a1": "y"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	for _, bad := range []string{"", "A=B", "-i", "1A", "A B", "A-B"} {
+		c.Environment = map[string]string{bad: "v"}
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "env:") {
+			t.Errorf("env name %q: %v", bad, err)
+		}
+	}
+}
