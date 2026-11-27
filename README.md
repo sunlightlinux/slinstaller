@@ -71,6 +71,12 @@ sudo ./slinstaller --apply config.yaml      # retype the disk path to confirm
 sudo ./slinstaller
 ```
 
+The plan is every command the partition stage runs — `parted`,
+`cryptsetup`, `mdadm`, `pvcreate`/`vgcreate`/`lvcreate`, `mkfs` — in the
+order `--apply` runs them; what the live system still holds on those
+disks (arrays, volume groups, old signatures) is listed after it, as
+what is released first.
+
 Useful flags: `--repo`/`--keys`/`--arch`/`--packages` for the base
 install, `--root` for the target mount tree, and `--through <stage>` to run
 only up to a stage (for VM testing). An encrypted layout takes its
