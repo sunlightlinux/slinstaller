@@ -261,6 +261,12 @@ func (m model) updateNetForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.formErr = "not an IP address"
 				return m, nil
 			}
+			// As config.Validate refuses it: taken here, it was put in
+			// force on the live system and then refused at Install.
+			if v != "" && (net.ParseIP(v).To4() == nil || strings.Contains(v, ":")) {
+				m.formErr = "the gateway has to be IPv4 (an IPv6 default route comes from router advertisements)"
+				return m, nil
+			}
 			ni.Gateway = v
 		case 3:
 			for _, d := range strings.Fields(v) {

@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // staticEth0 is a model on the interface list with eth0 already static.
 func staticEth0() model {
@@ -28,5 +31,19 @@ func TestNetFormEscKeepsTheInterface(t *testing.T) {
 	}
 	if v := m.sectionValue(secNetwork); v != "eth0: 10.0.0.5/24" {
 		t.Errorf("hub shows %q", v)
+	}
+}
+
+// TestNetFormRefusesAnIPv6Gateway: config.Validate refuses an IPv6
+// gateway (dhcpcd's static routers are IPv4 only); the form took it,
+// applied it to the live system, and the install was refused at Install.
+func TestNetFormRefusesAnIPv6Gateway(t *testing.T) {
+	m := send(send(staticEth0(), enter), enter)
+	m = send(typeText(m, "10.0.0.5/24"), enter)
+	for _, gw := range []string{"fe80::1", "::ffff:10.0.0.1"} {
+		got := send(typeText(m, gw), enter)
+		if got.formStep != 2 || !strings.Contains(got.formErr, "IPv4") {
+			t.Errorf("IPv6 gateway %s went through: step %d err %q", gw, got.formStep, got.formErr)
+		}
 	}
 }
