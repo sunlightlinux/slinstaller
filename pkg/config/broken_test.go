@@ -724,6 +724,33 @@ func TestPlanDiskNameSkipValidationAll(t *testing.T) {
 	}
 }
 
+// A disk's name goes into a resize's sh -c (sfdisk reads its input on
+// stdin) unquoted: "sda;reboot" passed Validate, and the plan, so the
+// shell would have run reboot as root. A name is the kernel's: letters,
+// digits and . _ : + -, checked or not.
+func TestPlanDiskNameIsAKernelName(t *testing.T) {
+	for _, skip := range []bool{false, true} {
+		for _, name := range []string{"sda;reboot", "sda b", "sd$(id)", "sda\n", "-sda", "sda`x`"} {
+			c := &Config{SkipValidationAll: skip, ReusePartitions: true, TargetMedia: []*Media{{Name: name, Type: "disk", Children: []*Media{
+				{Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+				{Type: "part", FsType: "ext4", Mountpoint: "/", Preserve: true, Resize: "20G"},
+			}}}}
+			if _, err := c.Plan(); err == nil || !strings.Contains(err.Error(), "not a path") {
+				t.Errorf("skip %v, disk %q: %v", skip, name, err)
+			}
+		}
+	}
+	for _, name := range []string{"sda", "nvme0n1", "mmcblk0", "dm-0", "md127", "xvda", "loop0"} {
+		c := &Config{TargetMedia: []*Media{{Name: name, Type: "disk", Children: []*Media{
+			{Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
+			{Type: "part", FsType: "ext4", Mountpoint: "/"},
+		}}}}
+		if _, err := c.Plan(); err != nil {
+			t.Errorf("disk %q: %v", name, err)
+		}
+	}
+}
+
 // skipValidationAll does not let a value reach a file the installed
 // system runs as code: an interface name or bond mode goes unquoted into
 // /etc/rc.local, a line break in a network field starts a new dhcpcd.conf

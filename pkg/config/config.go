@@ -2287,9 +2287,11 @@ func (c *Config) Plan() (*storage.Plan, error) {
 	}
 	// Here as well as in Validate, which skipValidationAll turns off: the
 	// disk is /dev/<name>, and "../sdz" (with partitions "../sdz1") is
-	// /dev/sdz, which nothing has checked; "" is /dev/ itself.
+	// /dev/sdz, which nothing has checked; "" is /dev/ itself. And a name
+	// is the kernel's (sda, nvme0n1, dm-0): a resize gives it to sh -c
+	// unquoted, where "sda;reboot" ran reboot.
 	for _, d := range disks {
-		if d.Name == "" || d.Name == "." || d.Name == ".." || strings.Contains(d.Name, "/") {
+		if d.Name == "" || d.Name == "." || d.Name == ".." || !diskNameRe.MatchString(d.Name) {
 			return nil, fmt.Errorf("config: disk %q: give the device's name (e.g. sda), not a path", d.Name)
 		}
 	}
@@ -3020,6 +3022,10 @@ func partNumber(name string, fallback int) int {
 	}
 	return n
 }
+
+// diskNameRe is what a disk's name may be: a kernel block device name,
+// one path component under /dev with nothing a shell reads.
+var diskNameRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._:+-]*$`)
 
 // raidNameRe is what an array's name may be: one path component under
 // /dev/md, never "." or "..".
