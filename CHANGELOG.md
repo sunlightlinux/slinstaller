@@ -38,6 +38,12 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
   holds no filesystem, as clr-installer does.
 - A dry run says when `--apply` would refuse (a disk in use), rather
   than inviting it.
+- **The install log is appended to**, after a "==== slinstaller, a new
+  run ====" line, not emptied: a run its checks refused, or a second one
+  beside a running install (the lock is taken first now), emptied the log
+  a failed install left for its post-mortem. A resume past base-install
+  no longer needs (or waits a minute for) the network; a foreign `--arch`
+  is refused for the wizard's install and by `--system-check` too.
 
 **Files written into the target**
 
