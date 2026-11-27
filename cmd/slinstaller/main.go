@@ -984,14 +984,27 @@ restart:
 			// A partition formatted here that is one member of an array or
 			// group with members elsewhere breaks it (Shared is for wiped
 			// disks; this is the reuse install's own).
+			// A shrunk one too: a btrfs resize without a devid resizes devid
+			// 1 — on another disk, for a filesystem spanning one — and the
+			// partition was then cut under its data.
 			var formatted []string
 			for _, p := range plan.Parts {
-				if !p.LV && !p.Raid && !p.Create && !p.Preserve {
+				if !p.LV && !p.Raid && !p.Create && (!p.Preserve || p.ResizeMiB > 0) {
 					formatted = append(formatted, p.Device)
 				}
 			}
-			if shared := blockdev.SharedMembers(devs, formatted); len(shared) > 0 && !forceDestructive {
-				return fmt.Errorf("formatting %s would break what it is a member of:\n  %s\npass --force-destructive to format it anyway",
+			shared := blockdev.SharedMembers(devs, formatted)
+			// And an LVM physical volume whose group has others (lsblk's
+			// UUID for a PV is its own; pvs knows the groups).
+			for vg, pvs := range blockdev.VolumeGroups() {
+				for _, f := range formatted {
+					if slices.Contains(pvs, f) && len(pvs) > 1 {
+						shared = append(shared, fmt.Sprintf("%s is a physical volume of %s, which also has %s", f, vg, strings.Join(slices.DeleteFunc(slices.Clone(pvs), func(x string) bool { return x == f }), ", ")))
+					}
+				}
+			}
+			if len(shared) > 0 && !forceDestructive {
+				return fmt.Errorf("formatting or shrinking %s would break what it is a member of:\n  %s\npass --force-destructive to go on anyway",
 					strings.Join(formatted, ", "), strings.Join(shared, "\n  "))
 			}
 			for _, p := range plan.Parts {

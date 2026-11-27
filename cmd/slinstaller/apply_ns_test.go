@@ -451,6 +451,33 @@ func applyChild(t *testing.T) {
 		{"name":"sdz1","path":"/dev/sdz1","size":1000,"type":"part","fstype":"linux_raid_member","uuid":"a1b2"}]}`)
 	_, err = e.run(confirmed, plainConfig())
 	e.refused("unassembled shared array", err, "has a fellow member on /dev/sdz1")
+
+	// A reuse install shrinking a member of a btrfs spanning another disk
+	// (its resize would act on devid 1, there), or formatting a PV of a
+	// group with a PV there: refused like a wipe.
+	reuseListing := `{"name":"slitest0","path":"` + testDisk + `","size":128000000000,"type":"disk","children":[
+		{"name":"slitest0p1","path":"` + testDisk + `p1","size":536870912,"type":"part","fstype":"vfat"},
+		{"name":"slitest0p2","path":"` + testDisk + `p2","size":107374182400,"type":"part","fstype":"btrfs","uuid":"b7f5"}]},
+		{"name":"sdz","path":"/dev/sdz","size":1000000000000,"type":"disk","children":[
+		{"name":"sdz1","path":"/dev/sdz1","size":1000000000000,"type":"part","fstype":"btrfs","uuid":"b7f5"}]}`
+	shrinkCfg := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{
+		{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Name: testName + "p2", Type: "part", FsType: "btrfs", Preserve: true, Resize: "40G"},
+		{Name: testName + "p3", Type: "part", FsType: "ext4", Mountpoint: "/", Create: true},
+	}}}}
+	e = newApplyEnv(t, "btrfs", "sh", "e2fsck", "resize2fs")
+	setListing(t, e.bin, reuseListing)
+	_, err = e.run(confirmed, shrinkCfg)
+	e.refused("shrinking a multi-device btrfs member", err, "has a fellow member on /dev/sdz1")
+	formatPV := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{
+		{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Name: testName + "p2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+	}}}}
+	e = newApplyEnv(t)
+	setListing(t, e.bin, strings.ReplaceAll(strings.ReplaceAll(reuseListing, `"btrfs","uuid":"b7f5"}]},`, `"LVM2_member","uuid":"pv1"}]},`), `"btrfs","uuid":"b7f5"}]}`, `"LVM2_member","uuid":"pv2"}]}`))
+	os.WriteFile(filepath.Join(e.bin, "pvs.out"), []byte("  "+testDisk+"p2:data\n  /dev/sdz1:data\n"), 0o644)
+	_, err = e.run(confirmed, formatPV)
+	e.refused("formatting a PV of a group spanning another disk", err, "is a physical volume of data")
 	e = newApplyEnv(t)
 	setListing(t, e.bin, shared)
 	_, err = e.run(confirmed, plainConfig(), "--force-destructive")
