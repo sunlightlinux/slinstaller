@@ -351,10 +351,19 @@ func (in *installer) finish() error {
 	// is written fresh at first boot.
 	// Failing that, the target is still unmounted before the error is
 	// returned: left mounted, it held the disk and kept its data unsynced.
-	resolvErr := removeIfPresent(in.resolvCopy)
-	if resolvErr == nil && in.resolvSaved != "" {
-		if err := os.Rename(in.resolvSaved, in.resolvCopy); err != nil {
-			resolvErr = fmt.Errorf("put back the target's resolv.conf: %w", err)
+	// Only the copy as it was made: a resolv.conf the config wrote over it
+	// (write-files, a post-install hook) is the system's own and stays —
+	// removed, the installed system had none — and the one set aside
+	// goes, rather than coming back over it.
+	var resolvErr error
+	if got, err := os.ReadFile(in.resolvCopy); in.resolvCopy != "" && err == nil && !bytes.HasPrefix(got, []byte(resolvMark)) {
+		resolvErr = removeIfPresent(in.resolvSaved)
+	} else {
+		resolvErr = removeIfPresent(in.resolvCopy)
+		if resolvErr == nil && in.resolvSaved != "" {
+			if err := os.Rename(in.resolvSaved, in.resolvCopy); err != nil {
+				resolvErr = fmt.Errorf("put back the target's resolv.conf: %w", err)
+			}
 		}
 	}
 	if resolvErr != nil {
@@ -842,7 +851,9 @@ func (in *installer) isOurResolv(fi os.FileInfo, dst string, live []byte) bool {
 	got, err := os.ReadFile(dst)
 	// Marked, or — left by an installer from before the mark — exactly the
 	// live file.
-	return err == nil && (bytes.HasPrefix(got, []byte(resolvMark)) || bytes.Equal(got, live))
+	// (The second only resuming: on a fresh install it took an image's own
+	// resolv.conf that happened to say the same for ours, and removed it.)
+	return err == nil && (bytes.HasPrefix(got, []byte(resolvMark)) || (in.opts.ResumeFrom != "" && bytes.Equal(got, live)))
 }
 
 // saveConfig records, on the installed system, the config it was built

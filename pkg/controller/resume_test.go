@@ -540,3 +540,42 @@ func TestResumeLookErrorSaid(t *testing.T) {
 	in.readRoot = func(string) ([]byte, error) { return nil, os.ErrNotExist }
 	wantErr(t, in.mount(), "nothing to resume")
 }
+
+// A resolv.conf the config wrote over the install-time copy is the
+// system's own: finish keeps it, and drops the one set aside.
+func TestFinishKeepsAWrittenResolvConf(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	etc := mkTarget(t, in, "etc")
+	in.resolvCopy = filepath.Join(etc, "resolv.conf")
+	in.resolvSaved = filepath.Join(etc, "resolv.conf.slinstaller-saved")
+	os.WriteFile(in.resolvSaved, []byte("nameserver 9.9.9.9\n"), 0o644)
+	os.WriteFile(in.resolvCopy, []byte("nameserver 192.0.2.53\n"), 0o644) // write-files
+	if err := in.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(in.resolvCopy); string(got) != "nameserver 192.0.2.53\n" {
+		t.Errorf("resolv.conf = %q", got)
+	}
+	if _, err := os.Stat(in.resolvSaved); err == nil {
+		t.Error("the set-aside file is left")
+	}
+}
+
+// Equal to the live file counts as our copy only resuming (an installer from
+// before the mark); on a fresh install it is the image's own.
+func TestIsOurResolvOnlyResuming(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	dst := filepath.Join(mkTarget(t, in, "etc"), "resolv.conf")
+	live := []byte("nameserver 1.1.1.1\n")
+	os.WriteFile(dst, live, 0o644)
+	fi, _ := os.Lstat(dst)
+	if in.isOurResolv(fi, dst, live) {
+		t.Error("an image's resolv.conf equal to the live one taken for ours")
+	}
+	in.opts.ResumeFrom = "bootloader"
+	if !in.isOurResolv(fi, dst, live) {
+		t.Error("resuming, a pre-mark copy not recognised")
+	}
+}

@@ -189,7 +189,7 @@ func TestFinish(t *testing.T) {
 	// to root, beside the saved config.
 	etc := mkTarget(t, in, "etc")
 	in.resolvCopy = filepath.Join(etc, "resolv.conf")
-	os.WriteFile(in.resolvCopy, []byte("nameserver 10.0.0.1\n"), 0o644)
+	os.WriteFile(in.resolvCopy, []byte(resolvMark+"nameserver 10.0.0.1\n"), 0o644)
 	in.opts.LogFile = filepath.Join(t.TempDir(), "install.log")
 	os.WriteFile(in.opts.LogFile, []byte("+ parted ...\n"), 0o644)
 	if err := in.finish(); err != nil {
