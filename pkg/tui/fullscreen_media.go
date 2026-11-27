@@ -216,10 +216,14 @@ func (m *model) restoreMediaDisk() {
 
 // confirmMedia applies the chosen installation mode.
 func (m model) confirmMedia() (tea.Model, tea.Cmd) {
-	m.diskSet = true      // the first disk is selected by default
-	m.safeInstall = false // reset; only a Safe confirm sets it
+	m.diskSet = true // the first disk is selected by default
+	// safeInstall is changed only by a mode that takes: cleared up front, a
+	// Safe confirm that then refused (encryption ticked, no room) left the
+	// old Safe layout no longer marked Safe — planned as a wipe, refused
+	// at Install with a misleading message.
 	switch m.mediaMode {
 	case 0: // Destructive: a standard whole-disk layout
+		m.safeInstall = false
 		m.parts = autoLayout(m.encrypt)
 		m.view = viewHub
 		if m.encrypt && m.passphrase == "" {

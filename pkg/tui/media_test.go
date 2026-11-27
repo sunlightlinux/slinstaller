@@ -592,3 +592,13 @@ func TestEscAfterDiskVanished(t *testing.T) {
 		t.Errorf("a disk is chosen after the chosen one vanished: %s", m.disks[m.diskIdx].Path)
 	}
 }
+
+// A Safe confirm refused (encryption ticked) leaves a Safe layout marked Safe.
+func TestRefusedSafeKeepsSafe(t *testing.T) {
+	m := readyModel()
+	m.safeInstall, m.encrypt, m.mediaMode = true, true, 2
+	nm, _ := m.confirmMedia()
+	if got := nm.(model); !got.safeInstall || got.popup != popupMessage {
+		t.Errorf("safeInstall %v popup %v", got.safeInstall, got.popup)
+	}
+}
