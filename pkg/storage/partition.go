@@ -392,9 +392,39 @@ func (m *maskWriter) Write(p []byte) (int, error) {
 		m.buf = m.buf[i+1:]
 	}
 	if len(m.buf) > 64<<10 {
-		m.flushLocked()
+		// A line this long is passed on in part, but not up to a secret
+		// that runs past the end of what has come so far: its first half
+		// would be shown unmasked, its second masked by nothing.
+		cut := safeCut(m.buf)
+		if _, err := io.WriteString(m.w, maskRegistered(string(m.buf[:cut]))); err != nil {
+			return len(p), err
+		}
+		m.buf = m.buf[cut:]
 	}
 	return len(p), nil
+}
+
+// safeCut returns how much of buf can be masked and passed on now: all of
+// it but the tail that may be the start of a registered secret, and never
+// the middle of one buf holds.
+func safeCut(buf []byte) int {
+	secretsMu.Lock()
+	defer secretsMu.Unlock()
+	longest := 0
+	for _, v := range secrets {
+		longest = max(longest, len(v))
+	}
+	cut := max(len(buf)-longest+1, 0)
+	for moved := true; moved; {
+		moved = false
+		for _, v := range secrets {
+			from := max(cut-len(v)+1, 0)
+			if i := bytes.Index(buf[from:min(cut+len(v)-1, len(buf))], []byte(v)); i >= 0 && from+i < cut {
+				cut, moved = from+i, true
+			}
+		}
+	}
+	return cut
 }
 
 func (m *maskWriter) flush() {
