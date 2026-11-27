@@ -288,6 +288,13 @@ func applyChild(t *testing.T) {
 			t.Errorf("a resumed install ran %s:\n%s", tool, got)
 		}
 	}
+	// Nor does it show the partition commands as its plan, to be followed
+	// by "nothing is partitioned or formatted".
+	e = newApplyEnv(t)
+	out, _, _ := runWith(t, "", append(append(append([]string{}, e.args...), "--resume"), writeConfig(t, e.base, plainConfig()))...)
+	if strings.Contains(out, "mklabel") || strings.Contains(out, "mkfs") {
+		t.Errorf("a resume printed the partition stage it does not run:\n%s", out)
+	}
 	// From a later stage, and not from one that cannot be resumed at.
 	e = newApplyEnv(t)
 	errOut, err = e.run("", plainConfig(), "--resume-from", "bootloader")
