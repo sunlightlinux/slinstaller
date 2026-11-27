@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -39,5 +40,30 @@ func TestStreamRunner(t *testing.T) {
 	}
 	if err := StreamRunner(&b)([]string{"/bin/false"}); err == nil {
 		t.Error("a failing command returned no error")
+	}
+}
+
+// Proxy and mirror credentials are masked too, keeping user and host.
+func TestShowCommandMasksURLPasswords(t *testing.T) {
+	got := ShowCommand([]string{"env", "https_proxy=http://bob:s3cret@proxy:3128", "no_proxy=a,b", "xbps-install", "-R", "https://u:p@m.example/x"})
+	want := "env https_proxy=http://bob:***@proxy:3128 no_proxy=a,b xbps-install -R https://u:***@m.example/x"
+	if got != want {
+		t.Errorf("ShowCommand = %q\nwant          %q", got, want)
+	}
+	for _, keep := range []string{"http://proxy:3128", "http://bob@proxy", "user@host:path", "https://h/a:b@c"} {
+		if MaskSecret(keep) != keep {
+			t.Errorf("MaskSecret(%q) = %q, want it unchanged", keep, MaskSecret(keep))
+		}
+	}
+}
+
+// A failed command's error is shown, logged and reported: it is masked.
+func TestRunCommandsErrorIsMasked(t *testing.T) {
+	err := RunCommands([][]string{{"useradd", "-p", "$6$salt$hash", "me"}}, func([]string) error { return errors.New("boom") })
+	if err == nil || strings.Contains(err.Error(), "$6$") || !strings.Contains(err.Error(), "<password hash>") {
+		t.Errorf("RunCommands error = %v", err)
+	}
+	if got := FormatCommands([][]string{{"env", "https_proxy=http://a:b@p"}}); strings.Contains(got, ":b@") {
+		t.Errorf("FormatCommands = %q", got)
 	}
 }

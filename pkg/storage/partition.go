@@ -228,7 +228,10 @@ type Runner func(args []string) error
 func RunCommands(cmds [][]string, run Runner) error {
 	for _, c := range cmds {
 		if err := run(c); err != nil {
-			return fmt.Errorf("storage: %s: %w", strings.Join(c, " "), err)
+			// Masked: this error reaches the screen, the diagnostics
+			// archive and a report-url, and the command can carry a
+			// password hash (useradd -p) or proxy credentials.
+			return fmt.Errorf("storage: %s: %w", ShowCommand(c), err)
 		}
 	}
 	return nil
@@ -293,12 +296,23 @@ var cryptHashRe = regexp.MustCompile(`^\$(1|2[abxy]?|5|6|7|y|gy|sha1|md5)\$`)
 func ShowCommand(args []string) string {
 	shown := make([]string, len(args))
 	for i, a := range args {
-		if cryptHashRe.MatchString(a) {
-			a = "<password hash>"
-		}
-		shown[i] = a
+		shown[i] = MaskSecret(a)
 	}
 	return strings.Join(shown, " ")
+}
+
+// urlPasswordRe matches the password in a URL's user information
+// (https_proxy=http://user:secret@proxy:3128).
+var urlPasswordRe = regexp.MustCompile(`(://[^/?#@\s:]*):[^/?#@\s]*@`)
+
+// MaskSecret returns one argument or value as it may be shown or logged: a
+// crypt(3) hash is replaced whole, and the password in a URL's user
+// information is replaced by "***", keeping the user and the host.
+func MaskSecret(a string) string {
+	if cryptHashRe.MatchString(a) {
+		return "<password hash>"
+	}
+	return urlPasswordRe.ReplaceAllString(a, "$1:***@")
 }
 
 // FormatCommands renders a command list one per line, for showing a dry
@@ -306,7 +320,7 @@ func ShowCommand(args []string) string {
 func FormatCommands(cmds [][]string) string {
 	var b strings.Builder
 	for _, c := range cmds {
-		b.WriteString(strings.Join(c, " "))
+		b.WriteString(ShowCommand(c))
 		b.WriteByte('\n')
 	}
 	return b.String()

@@ -12,6 +12,11 @@ change.
 
 ### Fixed
 
+- A failed command's error printed the command unmasked: a `useradd -p`
+  password hash reached the screen, the diagnostics archive and a
+  `report-url`. Errors, dry runs and logs now mask hashes and the password
+  in a URL (`https_proxy=http://user:***@proxy`); the diagnostics config
+  masks URL passwords as well as account hashes.
 - `system-upgrade` ran the target's `xbps-install -Syu` before the Sunlight
   mirror was written to its `/etc/xbps.d`, so the upgrade resolved every
   package against Void alone. The mirror is recorded first now.

@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
 	"gopkg.in/yaml.v3"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
+	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
 // lockPath is the lock an install holds from the moment it may touch a disk
@@ -127,14 +129,38 @@ func redactedConfig(cfg *config.Config) []byte {
 				}
 			}
 		}
+		maskURLPasswords(doc)
 		var out bytes.Buffer
-		out.WriteString("# password hashes removed; hook commands are as written\n")
+		out.WriteString("# password hashes and URL passwords removed; hook commands are as written\n")
 		if enc, err := yaml.Marshal(doc); err == nil {
 			out.Write(enc)
 			return out.Bytes()
 		}
 	}
 	return []byte("(config could not be redacted, so it is left out)\n")
+}
+
+// maskURLPasswords replaces, in place, the password of every URL in the
+// document (a proxy's, a mirror's) — the archive is handed to others.
+func maskURLPasswords(v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, e := range t {
+			if s, ok := e.(string); ok {
+				t[k] = storage.MaskSecret(s)
+			} else {
+				maskURLPasswords(e)
+			}
+		}
+	case []any:
+		for i, e := range t {
+			if s, ok := e.(string); ok {
+				t[i] = storage.MaskSecret(s)
+			} else {
+				maskURLPasswords(e)
+			}
+		}
+	}
 }
 
 // reportFailure writes the diagnostics for a failed install and tells the

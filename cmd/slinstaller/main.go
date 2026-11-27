@@ -1004,7 +1004,7 @@ func printRelease(plan *storage.Plan) {
 		}
 		fmt.Fprintf(os.Stderr, "\nBefore partitioning %s, the install first runs:\n", disk)
 		for _, c := range blockdev.Teardown(*d) {
-			fmt.Fprintf(os.Stderr, "  %s\n", strings.Join(c, " "))
+			fmt.Fprintf(os.Stderr, "  %s\n", storage.ShowCommand(c))
 		}
 		if why := d.InUse(); why != "" {
 			fmt.Fprintf(os.Stderr, "  (it will refuse: %s)\n", why)

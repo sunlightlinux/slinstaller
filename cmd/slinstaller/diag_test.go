@@ -94,6 +94,7 @@ func TestDiagnosticsArchive(t *testing.T) {
 	cfg := plainConfig()
 	cfg.Users = []*config.User{{Login: "ion", Password: "$6$salt$the-hash"}, {Login: "ana"}}
 	cfg.PostInstall = []*config.Hook{{Cmd: "echo done"}}
+	cfg.HTTPSProxy = "http://bob:s3cret@proxy.example:3128"
 
 	// No lsblk or efibootmgr here: their files say so instead of being
 	// left out, and the rest is still written.
@@ -113,6 +114,9 @@ func TestDiagnosticsArchive(t *testing.T) {
 		t.Errorf("install.log = %q", files["install.log"])
 	}
 	c := files["config.yaml"]
+	if strings.Contains(c, "s3cret") || !strings.Contains(c, "http://bob:***@proxy.example:3128") {
+		t.Errorf("proxy password kept in config.yaml:\n%s", c)
+	}
 	if strings.Contains(c, "the-hash") || !strings.Contains(c, "password: (removed)") || !strings.Contains(c, "login: ana") || !strings.Contains(c, "echo done") {
 		t.Errorf("config.yaml:\n%s", c)
 	}
