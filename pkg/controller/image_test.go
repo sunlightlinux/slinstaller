@@ -285,7 +285,7 @@ func TestTargetReposRecordedWithoutFetching(t *testing.T) {
 	if err := in.unpackImage(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(r.flat(), "cp -a "+in.opts.KeysDir+"/. "+filepath.Join(in.opts.Root, "var", "db", "xbps", "keys")+"/") {
+	if !strings.Contains(r.flat(), "cp -a --remove-destination "+in.opts.KeysDir+"/. "+filepath.Join(in.opts.Root, "var", "db", "xbps", "keys")+"/") {
 		t.Errorf("keys not seeded for an image:\n%s", r.flat())
 	}
 }
@@ -302,5 +302,41 @@ func TestImageKeysNotThroughLinks(t *testing.T) {
 	os.Symlink(outside, filepath.Join(in.opts.Root, "var"))
 	if err := in.unpackImage(); err == nil || !strings.Contains(err.Error(), "leads outside") {
 		t.Errorf("keys through /var -> %s: %v\n%s", outside, err, r.flat())
+	}
+}
+
+// A key file the image already has under the mirror's key's name is
+// replaced, not written through: cp onto an existing link opens what it
+// points at, and an absolute one points into the live system from here
+// (var/db/xbps/keys/<fp>.plist -> /dev/sdb wrote the key over a disk
+// nobody confirmed).
+func TestImageKeysNotWrittenThroughAKeyLink(t *testing.T) {
+	if _, err := exec.LookPath("cp"); err != nil {
+		t.Skip("no cp")
+	}
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.KeysDir = t.TempDir()
+	os.WriteFile(filepath.Join(in.opts.KeysDir, "sunlight.plist"), []byte("key"), 0o644)
+	in.cfg.Image = "/img/base.tar"
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "bin"), "grub-install"), nil, 0o755)
+	mkTarget(t, in, "etc")
+	victim := filepath.Join(t.TempDir(), "disk")
+	os.WriteFile(victim, []byte("live"), 0o644)
+	os.Symlink(victim, filepath.Join(mkTarget(t, in, "var", "db", "xbps", "keys"), "sunlight.plist"))
+	in.opts.Runner = func(args []string) error {
+		if args[0] == "cp" || args[0] == "mkdir" {
+			return storage.DefaultRunner(args)
+		}
+		return r.run(args)
+	}
+	if err := in.unpackImage(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "live" {
+		t.Errorf("the key was written through the image's link: %q", got)
+	}
+	if got := readTarget(t, in, "var", "db", "xbps", "keys", "sunlight.plist"); got != "key" {
+		t.Errorf("key in the target = %q", got)
 	}
 }

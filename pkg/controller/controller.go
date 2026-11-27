@@ -1155,7 +1155,10 @@ func (in *installer) unpackImage() error {
 				return fmt.Errorf("image %s: %s leads outside the installed system", image, d)
 			}
 		}
-		if err := storage.RunCommands([][]string{{"mkdir", "-p", keys}, {"cp", "-a", in.opts.KeysDir + "/.", keys + "/"}}, in.opts.Runner); err != nil {
+		// --remove-destination: a key file the image has under the same
+		// name, a link, is replaced; cp opens an existing link's target,
+		// and an absolute one is the live system's (a disk, even).
+		if err := storage.RunCommands([][]string{{"mkdir", "-p", keys}, {"cp", "-a", "--remove-destination", in.opts.KeysDir + "/.", keys + "/"}}, in.opts.Runner); err != nil {
 			return err
 		}
 	}

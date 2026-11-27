@@ -24,7 +24,7 @@ func TestCommands(t *testing.T) {
 
 	want := []string{
 		"mkdir -p /mnt/var/db/xbps/keys",
-		"cp -a /var/db/xbps/keys/. /mnt/var/db/xbps/keys/",
+		"cp -a --remove-destination /var/db/xbps/keys/. /mnt/var/db/xbps/keys/",
 		"env XBPS_TARGET_ARCH=aarch64 xbps-install -Sy -R https://repo.sunlightlinux.org/current -r /mnt base-system slinit",
 		"chroot /mnt xbps-reconfigure -fa", // an --arch: xbps ran no script
 	}

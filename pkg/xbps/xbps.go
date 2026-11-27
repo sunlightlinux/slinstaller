@@ -85,9 +85,11 @@ func (o Options) Commands() ([][]string, error) {
 	// target, so they must be there before anything is fetched.
 	if o.KeysDir != "" {
 		dest := filepath.Join(o.Root, "var", "db", "xbps", "keys")
+		// --remove-destination: an existing key file there (a resumed or
+		// reused root's) that is a link is replaced, not written through.
 		cmds = append(cmds,
 			[]string{"mkdir", "-p", dest},
-			[]string{"cp", "-a", o.KeysDir + "/.", dest + "/"},
+			[]string{"cp", "-a", "--remove-destination", o.KeysDir + "/.", dest + "/"},
 		)
 	}
 
