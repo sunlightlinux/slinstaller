@@ -1767,8 +1767,20 @@ func (in *installer) forceDracutModule(module string) error {
 func (in *installer) firstBoot() error {
 	root := in.opts.Root
 	// The files the system package writes in place: made the target's own
-	// first, so a link an image has there is not written through.
-	for _, rel := range []string{"etc/hostname", "etc/machine-id", "etc/rc.conf", "etc/rc.local", "etc/locale.conf", "etc/default/libc-locales"} {
+	// first, so a link an image has there is not written through — and
+	// only those that are written (a link the image keeps for something
+	// set at run time is left alone otherwise).
+	own := []string{"etc/machine-id"}
+	if in.cfg.Hostname != "" {
+		own = append(own, "etc/hostname")
+	}
+	if in.cfg.Keyboard != "" {
+		own = append(own, "etc/rc.conf")
+	}
+	if in.cfg.Language != "" {
+		own = append(own, "etc/locale.conf", "etc/default/libc-locales")
+	}
+	for _, rel := range own {
 		if err := ownFile(root, filepath.Join(root, rel)); err != nil {
 			return err
 		}
@@ -1886,22 +1898,39 @@ func ownFile(root, path string) error {
 	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
 		return nil
 	}
-	link, err := os.Readlink(path)
-	if err != nil {
-		return fmt.Errorf("read link %s: %w", path, err)
-	}
-	target := filepath.Join(filepath.Dir(path), link)
-	if filepath.IsAbs(link) {
-		target = filepath.Join(root, link)
+	// The whole chain resolved inside the target, link by link (each
+	// absolute one taken from the target's root): following only the
+	// first, a second absolute link was followed on the live system, and
+	// a file of the live system's was copied into the target.
+	target := path
+	for i := 0; ; i++ {
+		fi, err := os.Lstat(target)
+		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			break
+		}
+		if i == 40 {
+			return fmt.Errorf("%s: too many links", path)
+		}
+		link, err := os.Readlink(target)
+		if err != nil {
+			return fmt.Errorf("read link %s: %w", target, err)
+		}
+		if filepath.IsAbs(link) {
+			target = filepath.Join(root, link)
+		} else {
+			target = filepath.Join(filepath.Dir(target), link)
+		}
 	}
 	var data []byte
-	if st, err := os.Stat(target); err == nil && st.Mode().IsRegular() && insideTarget(root, filepath.Dir(target)) {
+	mode := os.FileMode(0o644)
+	if st, err := os.Lstat(target); err == nil && st.Mode().IsRegular() && insideTarget(root, filepath.Dir(target)) {
 		data, _ = os.ReadFile(target)
+		mode = st.Mode().Perm() // an executable rc.local stays executable
 	}
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("replace link %s: %w", path, err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, mode); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
@@ -2035,6 +2064,11 @@ func (in *installer) network() error {
 	}
 	// Bonds, VLANs and bridges are made at each boot by a service of their
 	// own; dhcpcd then finds the new interfaces and addresses them.
+	// rc.local is appended to here (and a resume from network skips
+	// first-boot): not through a link.
+	if err := ownFile(in.opts.Root, filepath.Join(in.opts.Root, "etc", "rc.local")); err != nil {
+		return err
+	}
 	if err := system.NetLinks(in.opts.Root, network.LinkScript(ifaces)); err != nil {
 		return err
 	}

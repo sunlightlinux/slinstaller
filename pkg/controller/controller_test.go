@@ -548,3 +548,43 @@ func TestFirstBootAndGrubNotThroughLinks(t *testing.T) {
 		}
 	}
 }
+
+// ownFile resolves a whole chain of links inside the target, keeps the mode,
+// and first-boot leaves alone a link to a file it does not write.
+func TestOwnFileChainModeAndUntouched(t *testing.T) {
+	root, live := t.TempDir(), t.TempDir()
+	secret := filepath.Join(live, "secret")
+	os.WriteFile(secret, []byte("HOSTSECRET\n"), 0o600)
+	etc := filepath.Join(root, "etc")
+	os.MkdirAll(etc, 0o755)
+	// rc.conf -> /etc/rc.conf.real -> <live secret>: the second link is the
+	// target's, resolved inside it (nothing there), never the live file.
+	os.Symlink("/etc/rc.conf.real", filepath.Join(etc, "rc.conf"))
+	os.Symlink(secret, filepath.Join(etc, "rc.conf.real"))
+	if err := ownFile(root, filepath.Join(etc, "rc.conf")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(etc, "rc.conf")); strings.Contains(string(got), "HOSTSECRET") {
+		t.Error("a live file was copied in through a chain of links")
+	}
+	// An executable script stays executable.
+	os.MkdirAll(filepath.Join(root, "usr", "share"), 0o755)
+	os.WriteFile(filepath.Join(root, "usr", "share", "rc.local"), []byte("#!/bin/sh\n"), 0o755)
+	os.Symlink("/usr/share/rc.local", filepath.Join(etc, "rc.local"))
+	if err := ownFile(root, filepath.Join(etc, "rc.local")); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(filepath.Join(etc, "rc.local")); !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o755 {
+		t.Errorf("rc.local: %v", fi.Mode())
+	}
+
+	// No hostname configured: a link at /etc/hostname is not touched.
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	te := mkTarget(t, in, "etc")
+	os.Symlink("/run/hostname", filepath.Join(te, "hostname"))
+	in.firstBoot()
+	if fi, err := os.Lstat(filepath.Join(te, "hostname")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("an untouched hostname link was replaced: %v %v", fi, err)
+	}
+}

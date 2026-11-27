@@ -47,19 +47,6 @@ func blockWithDir(t *testing.T, in *installer, rel ...string) {
 	}
 }
 
-// fullDisk makes every write to the file fail, as on a full disk.
-func fullDisk(t *testing.T, in *installer, rel ...string) {
-	t.Helper()
-	if _, err := os.Stat("/dev/full"); err != nil {
-		t.Skip("no /dev/full to fail a write with")
-	}
-	p := filepath.Join(append([]string{in.opts.Root}, rel...)...)
-	os.MkdirAll(filepath.Dir(p), 0o755)
-	if err := os.Symlink("/dev/full", p); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func wantErr(t *testing.T, err error, part string) {
 	t.Helper()
 	if err == nil {
