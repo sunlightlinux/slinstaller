@@ -246,7 +246,7 @@ func TestJSONYAMLFlag(t *testing.T) {
 func TestInstallerMessage(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/msg/pre-install-msg.yaml", func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, "install-msg:\n- default: \"Maintenance on Friday.\\n\"\n- default: \"\"\n- default: \"Ask \\x1b[31mops\\x07 first.\"\n  en_US: ignored\n")
+		io.WriteString(w, "install-msg:\n- default: \"Maintenance on Friday.\\n\"\n- default: \"\"\n- default: \"Ask \\x1b[31mops\\x07 first\\u009b2J.\"\n  en_US: ignored\n")
 	})
 	mux.HandleFunc("/msg/blank-msg.yaml", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "install-msg:\n- default: \"  \"\n") })
 	mux.HandleFunc("/msg/broken-msg.yaml", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "install-msg: [") })
@@ -255,7 +255,7 @@ func TestInstallerMessage(t *testing.T) {
 
 	// The lines as written, a blank one kept between them; what a terminal
 	// would act on is taken out.
-	if got := installerMessage(srv.URL+"/msg/", preInstallMessage); got != "Maintenance on Friday.\n\nAsk [31mops first." {
+	if got := installerMessage(srv.URL+"/msg/", preInstallMessage); got != "Maintenance on Friday.\n\nAsk [31mops first2J." { // ESC, BEL and the C1 CSI (U+009B) removed
 		t.Errorf("message = %q", got)
 	}
 	// No base, no such file, no text, not YAML, nobody listening: no

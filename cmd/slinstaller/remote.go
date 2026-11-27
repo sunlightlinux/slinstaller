@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -192,7 +193,17 @@ func installerMessage(base, name string) string {
 	if base == "" {
 		return ""
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		// Not from https down to http: what is shown sits right before the
+		// confirmation of a destructive install.
+		if req.URL.Scheme != "https" && len(via) > 0 && via[0].URL.Scheme == "https" {
+			return fmt.Errorf("redirect from https to %s refused", req.URL.Scheme)
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("too many redirects")
+		}
+		return nil
+	}}
 	resp, err := client.Get(strings.TrimSuffix(base, "/") + "/" + name)
 	if err != nil {
 		return ""
@@ -220,7 +231,10 @@ func installerMessage(base, name string) string {
 		text = text || strings.TrimSpace(line) != ""
 		// What a server sends is shown on a terminal: nothing but text.
 		lines = append(lines, strings.Map(func(r rune) rune {
-			if r < 0x20 && r != '\t' || r == 0x7f {
+			// C1 too (U+0080–U+009F): the console takes U+009B as CSI even
+			// in UTF-8 mode, so a server could clear or redraw the screen
+			// over the disk warning that follows the message.
+			if r < 0x20 && r != '\t' || r >= 0x7f && r <= 0x9f || r == utf8.RuneError {
 				return -1
 			}
 			return r
