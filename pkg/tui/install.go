@@ -469,8 +469,8 @@ type installModel struct {
 	// could no longer take lines as fast as the install made them.
 	lineRows  [][]logRow
 	lineWidth int
-	err         error
-	cancelled   bool
+	err       error
+	cancelled bool
 
 	// stop is closed by Ctrl+C while the install runs: the controller stops
 	// before its next stage and cleans up, and the screen waits for that.
