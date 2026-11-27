@@ -112,6 +112,10 @@ change.
   `md0` beside an array `md0`, an LV declared twice) are refused.
 - A reuse partition marked both `create` and `preserve` is refused: it
   was cut, never formatted, and failed at the mount.
+- **Wizard:** Esc on the menu asks before leaving (one Esc too many lost
+  every answer); Allow Insecure Installation goes with the plain-http
+  mirror it was ticked for, not into the config unseen once the mirror
+  was cleared.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 

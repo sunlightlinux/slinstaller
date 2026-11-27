@@ -629,3 +629,17 @@ func TestHasSafeEntries(t *testing.T) {
 		t.Errorf("a plain layout was cleared: %+v", m.parts)
 	}
 }
+
+// The disk Confirm takes is marked before any is chosen: Confirm with no
+// disk marked put the layout on the first, which the dialog had not shown
+// as the choice.
+func TestMediaDialogMarksTheDefaultDisk(t *testing.T) {
+	m := mediaDialog()
+	if m.diskSet {
+		t.Fatal("a disk is already chosen")
+	}
+	v := viewOf(m)
+	if !strings.Contains(v, "» /dev/sda") || strings.Contains(v, "» /dev/sdb") {
+		t.Errorf("the default disk is not marked:\n%s", v)
+	}
+}

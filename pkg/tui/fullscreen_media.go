@@ -688,8 +688,11 @@ func (m model) mediaView() string {
 	body = append(body, rule(w))
 
 	for i, d := range m.disks {
+		// The disk Confirm takes is marked before one is chosen too: the
+		// first, by default. Unmarked, Confirm put the layout on a disk
+		// the dialog had never shown as the choice.
 		mark := "  "
-		if m.diskSet && m.diskIdx == i {
+		if m.diskIdx == i {
 			mark = "» "
 		}
 		body = append(body, row(w, m.mediaCursor == nModes+i,
