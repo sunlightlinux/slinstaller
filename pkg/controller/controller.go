@@ -927,6 +927,13 @@ func (in *installer) unpackImage() error {
 	// mirror stopped at an unknown key.
 	if in.opts.KeysDir != "" && exists(in.opts.KeysDir) {
 		keys := filepath.Join(in.opts.Root, "var", "db", "xbps", "keys")
+		// Not through a link out of the image: an absolute /var link
+		// points into the live system from here.
+		for d := keys; d != in.opts.Root && d != "/" && d != "."; d = filepath.Dir(d) {
+			if _, err := os.Lstat(d); err == nil && !insideTarget(in.opts.Root, d) {
+				return fmt.Errorf("image %s: %s leads outside the installed system", image, d)
+			}
+		}
 		if err := storage.RunCommands([][]string{{"mkdir", "-p", keys}, {"cp", "-a", in.opts.KeysDir + "/.", keys + "/"}}, in.opts.Runner); err != nil {
 			return err
 		}

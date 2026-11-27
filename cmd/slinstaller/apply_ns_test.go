@@ -333,6 +333,9 @@ func applyChild(t *testing.T) {
 	e = newApplyEnv(t)
 	_, err = e.run(confirmed, plainConfig(), "--repo", "http://repo.example/current", "--offline=false")
 	e.refused("plain http", err, "is plain http")
+	e = newApplyEnv(t)
+	_, err = e.run(confirmed, plainConfig(), "--repo", "https://repo.example/current", "--extra-repo", "http://mirror.example/current", "--offline=false")
+	e.refused("plain http mirror", err, "--extra-repo http://mirror.example/current is plain http")
 	// A staged run fetches the same base: refused too.
 	e = newApplyEnv(t)
 	_, err = e.run(confirmed, plainConfig(), "--repo", "http://repo.example/current", "--offline=false", "--through", "partition")

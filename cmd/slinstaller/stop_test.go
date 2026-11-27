@@ -122,10 +122,17 @@ func TestFlagAfterTheConfig(t *testing.T) {
 // A foreign --arch is refused for a full install (its packages cannot be
 // configured here), allowed for a staged one.
 func TestForeignArch(t *testing.T) {
-	if err := run([]string{"--arch", "riscv64", "x.yaml"}); err == nil || !strings.Contains(err.Error(), "--arch riscv64 is not this machine's") {
+	if err := run([]string{"--apply", "--arch", "riscv64", "x.yaml"}); err == nil || !strings.Contains(err.Error(), "--arch riscv64 is not this machine's") {
 		t.Errorf("foreign arch: %v", err)
 	}
 	if err := run([]string{"--arch", hostXBPSArch() + "-musl", "--version"}); err != nil {
 		t.Errorf("this machine's arch (musl): %v", err)
+	}
+}
+
+// A run that installs nothing is not refused for a foreign --arch.
+func TestForeignArchWithoutApply(t *testing.T) {
+	if err := run([]string{"--arch", "riscv64", "--version"}); err != nil {
+		t.Errorf("--version with a foreign arch: %v", err)
 	}
 }

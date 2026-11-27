@@ -289,3 +289,18 @@ func TestTargetReposRecordedWithoutFetching(t *testing.T) {
 		t.Errorf("keys not seeded for an image:\n%s", r.flat())
 	}
 }
+
+// The mirror's key is not copied through an image's link out of it.
+func TestImageKeysNotThroughLinks(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.KeysDir = t.TempDir()
+	in.cfg.Image = "/img/base.tar"
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "bin"), "grub-install"), nil, 0o755)
+	mkTarget(t, in, "etc")
+	outside := t.TempDir()
+	os.Symlink(outside, filepath.Join(in.opts.Root, "var"))
+	if err := in.unpackImage(); err == nil || !strings.Contains(err.Error(), "leads outside") {
+		t.Errorf("keys through /var -> %s: %v\n%s", outside, err, r.flat())
+	}
+}

@@ -240,7 +240,7 @@ func run(args []string) error {
 	// cannot run in the chroot here (xbps-reconfigure, the bootloader):
 	// a full install failed at base-install, after the wipe. Only a staged
 	// run, which stops before them, may ask for one.
-	if arch != "" && through == "" && !strings.HasPrefix(arch, hostXBPSArch()) {
+	if apply && arch != "" && through == "" && !strings.HasPrefix(arch, hostXBPSArch()) {
 		return fmt.Errorf("--arch %s is not this machine's (%s): its packages cannot be configured here; use it only with --through", arch, hostXBPSArch())
 	}
 
@@ -766,6 +766,11 @@ restart:
 	if strings.HasPrefix(repo, "http://") && !cfg.AllowInsecureHTTP {
 		return fmt.Errorf("repository %s is plain http; set allowInsecureHTTP (--allow-insecure-http), or use an https mirror", repo)
 	}
+	for _, r := range extraRepos { // the mirrors too
+		if strings.HasPrefix(r, "http://") && !cfg.AllowInsecureHTTP {
+			return fmt.Errorf("--extra-repo %s is plain http; set allowInsecureHTTP (--allow-insecure-http), or use https", r)
+		}
+	}
 
 	if through == "" {
 		// UEFI-only: a legacy/BIOS boot of the installer has no
@@ -842,7 +847,8 @@ restart:
 		// alone — the skew the mirror is there to prevent.
 		for _, r := range extraRepos {
 			if strings.HasPrefix(r, "http") {
-				if err := network.WaitForConnectivity(r, time.Minute, nil); err != nil {
+				waiting := func() { fmt.Fprintf(os.Stderr, "waiting for the Sunlight mirror %s...\n", r) }
+				if err := network.WaitForConnectivity(r, time.Minute, waiting); err != nil {
 					return fmt.Errorf("%w - the Sunlight mirror is needed; check the network/proxy, or pass --extra-repo", err)
 				}
 			}
