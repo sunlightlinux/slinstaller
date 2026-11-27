@@ -165,7 +165,7 @@ func TestGenpassRejectsShortPassword(t *testing.T) {
 
 // The installer must default to the Sunlight mirror, layered over Void.
 func TestExtraRepoDefaultsToMirror(t *testing.T) {
-	if defaultExtraRepo != "http://repo-default.ionutnechita.ro/current" {
+	if defaultExtraRepo != "https://repo-default.ionutnechita.ro/current" {
 		t.Errorf("defaultExtraRepo = %q, want the Sunlight mirror", defaultExtraRepo)
 	}
 	// The embedded key must be a real plist, named by its fingerprint.

@@ -343,10 +343,11 @@ func applyChild(t *testing.T) {
 	_, err = e.run(confirmed, plainConfig(), "--packages", "grub-x86_64-efi")
 	e.refused("offline with no repository", err, "offline install needs a local repository")
 
-	// The default packages come from the live medium's repository.
+	// The default packages come from the live medium's repository, or the
+	// Sunlight mirror: with neither, refused.
 	e = newApplyEnv(t)
 	os.Remove(filepath.Join(e.repo, "x86_64-repodata"))
-	_, err = e.run(confirmed, plainConfig(), "--offline=false", "--repo", e.repo)
+	_, err = e.run(confirmed, plainConfig(), "--offline=false", "--repo", e.repo, "--extra-repo", "")
 	e.refused("no live repository", err, "is only in the live medium's repository")
 
 	// Kernel arguments that do not fit this machine — unless validation is

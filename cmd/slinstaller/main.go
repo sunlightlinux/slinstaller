@@ -59,9 +59,11 @@ const (
 	defaultPackages = "sunlight-base,grub-x86_64-efi,slpam"
 
 	// defaultExtraRepo is the Sunlight package mirror, layered ahead of Void
-	// (see --extra-repo). It is signed, so http is safe — the RSA signature,
-	// not the transport, is the integrity guarantee; its key is embedded below.
-	defaultExtraRepo = "http://repo-default.ionutnechita.ro/current"
+	// (see --extra-repo). Signed (its key is embedded below) and fetched over
+	// https: the signature guards what a package is, https also which
+	// version is current — over http a stale but correctly signed index
+	// could be served.
+	defaultExtraRepo = "https://repo-default.ionutnechita.ro/current"
 
 	// sunlightKeyFile is the Sunlight repo key's xbps filename (its RSA
 	// fingerprint). Seeded into the target so the mirror's signatures verify.
@@ -798,11 +800,14 @@ restart:
 				strings.Join(missing, ", "))
 		}
 
-		// slinit is not in any remote repository yet. Without the live
-		// medium's repository the install would fail at base-install —
-		// after the disk is wiped — so fail here instead.
-		if err := checkLocalPackages(packages, localRepos, localRepo); err != nil {
-			return err
+		// The Sunlight packages (slinit, sunlight-base, …) come from the live
+		// medium's repository or from the Sunlight mirror. With neither, the
+		// install would fail at base-install — after the disk is wiped — so
+		// fail here instead. (The mirror is checked to be reachable below.)
+		if len(extraRepos) == 0 {
+			if err := checkLocalPackages(packages, localRepos, localRepo); err != nil {
+				return err
+			}
 		}
 
 		// Fetching the base system needs the repository; check it is
@@ -812,6 +817,16 @@ restart:
 			waiting := func() { fmt.Fprintln(os.Stderr, "waiting for the network...") }
 			if err := network.WaitForConnectivity(repo, time.Minute, waiting); err != nil {
 				return fmt.Errorf("%w - check the network/proxy, or pass --repo", err)
+			}
+		}
+		// The mirrors too: xbps drops a repository it cannot reach without
+		// a word, and the install then took dbus and the rest from Void
+		// alone — the skew the mirror is there to prevent.
+		for _, r := range extraRepos {
+			if strings.HasPrefix(r, "http") {
+				if err := network.WaitForConnectivity(r, time.Minute, nil); err != nil {
+					return fmt.Errorf("%w - the Sunlight mirror is needed; check the network/proxy, or pass --extra-repo", err)
+				}
 			}
 		}
 	}
