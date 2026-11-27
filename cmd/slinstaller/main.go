@@ -1210,6 +1210,9 @@ func checkTargetDisks(disks []string, devs []blockdev.Device) error {
 			// An empty card reader, a detached loop device: nothing to
 			// install to, and no size for the fit check to go by.
 			return fmt.Errorf("target disk %s has no capacity (size 0): is there a medium in it?", disk)
+		case d.Type == "disk" && !blockdev.Installable(*d):
+			// zram, an eMMC's boot or RPMB area: not a disk a system goes on.
+			return fmt.Errorf("target %s is not a disk a system can be installed to (zram, or an eMMC boot area)", disk)
 		default:
 			// A mounted filesystem, active swap or the live medium on
 			// the target: installing would pull it from under the

@@ -190,3 +190,13 @@ func TestOneShotModesExclusive(t *testing.T) {
 		t.Errorf("discover+json-yaml: %v", err)
 	}
 }
+
+func TestCheckTargetDisksUninstallable(t *testing.T) {
+	devs := []blockdev.Device{{Name: "zram0", Path: "/dev/zram0", Type: "disk", Size: 8 << 30},
+		{Name: "mmcblk0boot0", Path: "/dev/mmcblk0boot0", Type: "disk", Size: 4 << 20}}
+	for _, d := range []string{"/dev/zram0", "/dev/mmcblk0boot0"} {
+		if err := checkTargetDisks([]string{d}, devs); err == nil || !strings.Contains(err.Error(), "not a disk a system can be installed to") {
+			t.Errorf("%s: %v", d, err)
+		}
+	}
+}

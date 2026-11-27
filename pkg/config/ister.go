@@ -171,9 +171,19 @@ func FromJSONDescriptor(path string) (*Config, []string, error) {
 			if kp == "" {
 				// taken above
 			} else if data, err := os.ReadFile(kp); err == nil && strings.TrimSpace(string(data)) != "" {
-				for _, l := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-					if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
-						usr.SSHKeys = append(usr.SSHKeys, l)
+				// Public-key lines only: a private key given for the .pub
+				// (or any other file) went line by line into the config and
+				// every installed machine's authorized_keys.
+				if strings.Contains(string(data), "PRIVATE KEY") {
+					notes = append(notes, fmt.Sprintf("user %s: %s is a PRIVATE key; nothing of it is taken - give the .pub", u.Username, kp))
+				} else {
+					for _, l := range strings.Split(string(data), "\n") {
+						if l = strings.TrimSpace(l); looksLikeSSHKey(l) {
+							usr.SSHKeys = append(usr.SSHKeys, l)
+						}
+					}
+					if len(usr.SSHKeys) == 0 {
+						notes = append(notes, fmt.Sprintf("user %s: %s holds no public-key line, so no SSH key is set", u.Username, kp))
 					}
 				}
 			} else {
@@ -181,7 +191,7 @@ func FromJSONDescriptor(path string) (*Config, []string, error) {
 			}
 		}
 		if u.Sudo && u.Password == "" {
-			notes = append(notes, fmt.Sprintf("user %s is an administrator without a password: give it one (--genpass), or the config is refused", u.Username))
+			notes = append(notes, fmt.Sprintf("user %s is an administrator without a password: unless another administrator has one, give it one (--genpass), or the config is refused", u.Username))
 		}
 		c.Users = append(c.Users, usr)
 	}
@@ -233,9 +243,14 @@ func isterVersion(raw json.RawMessage) uint {
 // looksLikeSSHKey reports whether s is an OpenSSH public key line rather than
 // a file name.
 func looksLikeSSHKey(s string) bool {
-	for _, p := range []string{"ssh-", "ecdsa-sha2-", "sk-ssh-", "sk-ecdsa-"} {
-		if strings.HasPrefix(s, p) && strings.Contains(s, " ") {
-			return true
+	// The key type is the first field, or follows the options
+	// (from="…",command="…" ssh-ed25519 AAAA…); the key itself follows it.
+	f := strings.Fields(s)
+	for i := 0; i < len(f)-1 && i < 2; i++ {
+		for _, p := range []string{"ssh-", "ecdsa-sha2-", "sk-ssh-", "sk-ecdsa-"} {
+			if strings.HasPrefix(f[i], p) && strings.HasPrefix(f[i+1], "AAAA") {
+				return true
+			}
 		}
 	}
 	return false

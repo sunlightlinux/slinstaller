@@ -157,6 +157,14 @@ func TestFromJSONDescriptorLatestAndKeyFile(t *testing.T) {
 	if err != nil || len(c.Users[0].SSHKeys) != 0 || !strings.Contains(strings.Join(notes, "\n"), "key file") {
 		t.Errorf("missing key file: %v %q %v", err, c.Users[0].SSHKeys, notes)
 	}
+	os.WriteFile(filepath.Join(filepath.Dir(path), "key.pub"), []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbn\n-----END OPENSSH PRIVATE KEY-----\n"), 0o600)
+	c, notes, _ = FromJSONDescriptor(path)
+	if len(c.Users[0].SSHKeys) != 0 || !strings.Contains(strings.Join(notes, "\n"), "PRIVATE key") {
+		t.Errorf("a private key taken: %q %v", c.Users[0].SSHKeys, notes)
+	}
+	if !looksLikeSSHKey(`from="10.0.0.0/8" ssh-ed25519 AAAAC3Nz x@y`) || looksLikeSSHKey("ssh-keys/my key.pub") {
+		t.Error("looksLikeSSHKey")
+	}
 	if isterVersion([]byte(`"42"`)) != 42 || isterVersion([]byte(`""`)) != 0 || isterVersion([]byte(`7`)) != 7 {
 		t.Error("isterVersion")
 	}
