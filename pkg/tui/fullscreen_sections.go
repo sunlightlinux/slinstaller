@@ -574,6 +574,11 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 				"Saved to " + abs,
 				"(re-run it later with: slinstaller --apply <file>)",
 			}
+			// Saved as it stands, but say so when it would not install
+			// (no disk chosen yet, say): the hint above reads as a promise.
+			if p := m.installProblem(); p != "" {
+				m.popupMsg = append(m.popupMsg, "", "As it stands the installer would refuse it:", p)
+			}
 		}
 		return m, nil
 	default: // text sections

@@ -660,6 +660,9 @@ func TestSaveConfiguration(t *testing.T) {
 	if saved.popup != popupMessage || !strings.Contains(strings.Join(saved.popupMsg, "\n"), "Saved to "+saveConfigPath) {
 		t.Fatalf("save popup: %v", saved.popupMsg)
 	}
+	if strings.Contains(strings.Join(saved.popupMsg, "\n"), "would refuse") {
+		t.Errorf("a complete config said to be refused: %v", saved.popupMsg)
+	}
 	cfg, err := config.Load(saveConfigPath)
 	if err != nil {
 		t.Fatalf("the saved config does not load: %v", err)
@@ -675,6 +678,12 @@ func TestSaveConfiguration(t *testing.T) {
 	}
 
 	// Nowhere to write it.
+	// One with no disk chosen is saved, with a word that it would not install.
+	saveConfigPath = filepath.Join(dir, "bare.yaml")
+	bare := openSectionInTab(withSize(newModel(twoTestDisks())), 1, secSaveConfig)
+	if msg := strings.Join(bare.popupMsg, "\n"); !strings.Contains(msg, "Saved to") || !strings.Contains(msg, "would refuse") {
+		t.Errorf("no disk chosen: %v", bare.popupMsg)
+	}
 	saveConfigPath = filepath.Join(dir, "no-such-dir", "saved.yaml")
 	if got := openSectionInTab(m, 1, secSaveConfig); !strings.Contains(strings.Join(got.popupMsg, "\n"), "Could not save:") {
 		t.Errorf("save failure popup: %v", got.popupMsg)
