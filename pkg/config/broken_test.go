@@ -548,3 +548,15 @@ func TestSecretName(t *testing.T) {
 		}
 	}
 }
+
+// Kernel arguments GRUB's script parser would break are refused.
+func TestKernelArgsGrubSafe(t *testing.T) {
+	for arg, bad := range map[string]bool{"quiet": false, `dyndbg="file x +p"`: false, "q=it's": true, "a=$y": true, "a;b": true, `a\b`: true, "a`b`": true} {
+		c := btrfsConfig()
+		c.KernelArguments = &KernelArguments{Add: []string{arg}}
+		err := c.Validate()
+		if bad != (err != nil && strings.Contains(err.Error(), "GRUB's config parsing")) {
+			t.Errorf("%q: %v", arg, err)
+		}
+	}
+}

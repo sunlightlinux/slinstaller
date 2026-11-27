@@ -1243,6 +1243,18 @@ func (c *Config) Validate() error {
 	add := func(format string, a ...any) { probs = append(probs, fmt.Sprintf(format, a...)) }
 	rootMin, rootMinLabel := c.minRoot()
 
+	// Kernel arguments go through /etc/default/grub (sh, quoted) and then,
+	// unquoted, into grub.cfg, which GRUB parses as its own script: a '
+	// there is a syntax error that stops grub-mkconfig at the end of the
+	// install, and $, ;, \ or ` are expanded, split or eaten at boot.
+	if c.KernelArguments != nil {
+		for _, a := range append(append([]string(nil), c.KernelArguments.Add...), c.KernelArguments.Remove...) {
+			if strings.ContainsAny(a, "'$;\\`\n\r") {
+				add("kernel-arguments: %q: ' $ ; \\ ` and line breaks do not survive GRUB's config parsing", a)
+			}
+		}
+	}
+
 	// A clr-installer alias whose file is not a device asks for an install
 	// into an image file (made, loop-mounted, kept with keepImage), which
 	// slinstaller does not do. Said here, rather than reading the file name
