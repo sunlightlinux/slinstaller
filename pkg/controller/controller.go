@@ -445,14 +445,18 @@ func (in *installer) releaseDisks() error {
 	if err != nil {
 		return err
 	}
+	var disks []blockdev.Device
+	var names []string
 	for _, disk := range in.plan.DiskList() {
 		d := blockdev.FindByPath(devs, disk)
 		if d == nil {
 			continue // a loop device or image the listing does not show
 		}
-		if err := storage.RunCommands(blockdev.Teardown(*d), in.opts.Runner); err != nil {
-			return fmt.Errorf("release %s: %w", disk, err)
-		}
+		disks, names = append(disks, *d), append(names, disk)
+	}
+	// All at once: an array or volume spanning the disks is released once.
+	if err := storage.RunCommands(blockdev.TeardownAll(disks), in.opts.Runner); err != nil {
+		return fmt.Errorf("release %s: %w", strings.Join(names, ", "), err)
 	}
 	in.settle()
 	return nil

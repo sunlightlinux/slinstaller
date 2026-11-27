@@ -12,6 +12,10 @@ change.
 
 ### Fixed
 
+- Reinstalling over a RAID array or volume group spanning several disks
+  failed while releasing the disks: each disk's teardown stopped the
+  shared array again (`mdadm --stop /dev/md127`: no such device). The
+  disks are released together, each holder once.
 - **Partition names are checked against what parted makes.** A partition's
   device came from its `name` unchecked, and parted numbers partitions
   itself. A child named for another disk (`nvme0n1p2` under `sda`) was

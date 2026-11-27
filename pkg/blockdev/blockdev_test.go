@@ -170,3 +170,25 @@ func TestShared(t *testing.T) {
 		t.Errorf("a disk with no arrays or volumes: %q", got)
 	}
 }
+
+// An array across two disks is listed under both; torn down together it is
+// stopped once, before either disk's signatures go.
+func TestTeardownAllReleasesASharedArrayOnce(t *testing.T) {
+	md := Device{Name: "md127", Path: "/dev/md127", Type: "raid1", Children: []Device{
+		{Name: "vg-root", Path: "/dev/mapper/vg-root", Type: "lvm"}}}
+	disk := func(n string) Device {
+		return Device{Name: n, Path: "/dev/" + n, Type: "disk", Children: []Device{
+			{Name: n + "1", Path: "/dev/" + n + "1", Type: "part", Children: []Device{md}}}}
+	}
+	var lines []string
+	for _, c := range TeardownAll([]Device{disk("sda"), disk("sdb")}) {
+		lines = append(lines, strings.Join(c, " "))
+	}
+	want := []string{
+		"dmsetup remove vg-root", "mdadm --stop /dev/md127",
+		"wipefs -a /dev/sda1", "wipefs -a /dev/sda", "wipefs -a /dev/sdb1", "wipefs -a /dev/sdb",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("TeardownAll:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+}

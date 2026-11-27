@@ -1001,15 +1001,22 @@ func printRelease(plan *storage.Plan) {
 	if err != nil {
 		return
 	}
+	var disks []blockdev.Device
+	var names []string
 	for _, disk := range plan.DiskList() {
-		d := blockdev.FindByPath(devs, disk)
-		if d == nil {
-			continue
+		if d := blockdev.FindByPath(devs, disk); d != nil {
+			disks, names = append(disks, *d), append(names, disk)
 		}
-		fmt.Fprintf(os.Stderr, "\nBefore partitioning %s, the install first runs:\n", disk)
-		for _, c := range blockdev.Teardown(*d) {
-			fmt.Fprintf(os.Stderr, "  %s\n", storage.ShowCommand(c))
-		}
+	}
+	if len(disks) == 0 {
+		return
+	}
+	// What the partition stage runs: one teardown for all the disks.
+	fmt.Fprintf(os.Stderr, "\nBefore partitioning %s, the install first runs:\n", strings.Join(names, ", "))
+	for _, c := range blockdev.TeardownAll(disks) {
+		fmt.Fprintf(os.Stderr, "  %s\n", storage.ShowCommand(c))
+	}
+	for _, d := range disks {
 		if why := d.InUse(); why != "" {
 			fmt.Fprintf(os.Stderr, "  (it will refuse: %s)\n", why)
 		}

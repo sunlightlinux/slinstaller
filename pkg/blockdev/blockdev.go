@@ -193,6 +193,16 @@ func isHolder(t string) bool {
 // partitioning (pvremove, vgremove, mdadm --stop and --zero-superblock).
 // Nothing found means only the signatures are erased.
 func Teardown(d Device) [][]string {
+	return TeardownAll([]Device{d})
+}
+
+// TeardownAll is Teardown for several disks at once: every holder on any
+// of them is released before any signature is erased, and each only once.
+// lsblk lists an array or a volume spanning disks under every member, so
+// tearing the disks down one by one stopped md127 for the first disk and
+// failed on the second ("mdadm --stop /dev/md127": no such device) —
+// every reinstall over a two-disk RAID 1 stopped there.
+func TeardownAll(ds []Device) [][]string {
 	var cmds [][]string
 	seen := map[string]bool{}
 	var release func(dev Device)
@@ -210,15 +220,20 @@ func Teardown(d Device) [][]string {
 			cmds = append(cmds, []string{"dmsetup", "remove", dev.Name})
 		}
 	}
-	for _, c := range d.Children {
-		release(c)
-	}
-	for _, c := range d.Children {
-		if c.Type == "part" {
-			cmds = append(cmds, []string{"wipefs", "-a", c.Path})
+	for _, d := range ds {
+		for _, c := range d.Children {
+			release(c)
 		}
 	}
-	return append(cmds, []string{"wipefs", "-a", d.Path})
+	for _, d := range ds {
+		for _, c := range d.Children {
+			if c.Type == "part" {
+				cmds = append(cmds, []string{"wipefs", "-a", c.Path})
+			}
+		}
+		cmds = append(cmds, []string{"wipefs", "-a", d.Path})
+	}
+	return cmds
 }
 
 // disksHolding returns the paths of the disks among devs whose tree holds
