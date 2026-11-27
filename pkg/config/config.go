@@ -2015,8 +2015,11 @@ func (c *Config) Validate() error {
 		}
 	}
 	if c.SwapFileSize != "" {
-		if _, err := parseSize(c.SwapFileSize); err != nil {
+		if n, err := parseSize(c.SwapFileSize); err != nil {
 			add("swapFileSize: %v", err)
+		} else if n > 0 && n < storage.MinPartitionSize {
+			// mkswap refuses a file of a few pages, after the wipe.
+			add("swapFileSize: %s is too small for a swap file (at least 1 MiB, or 0 for none)", c.SwapFileSize)
 		}
 	}
 

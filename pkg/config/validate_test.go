@@ -394,3 +394,15 @@ func TestDHCPIsAClrBool(t *testing.T) {
 		t.Errorf("dhcp 1: %v", err)
 	}
 }
+
+// A swap file of a few kilobytes passed the check and failed mkswap after
+// the wipe; 0 is none, and 1 MiB is the least taken.
+func TestTinySwapFileIsRefused(t *testing.T) {
+	for size, ok := range map[string]bool{"1K": false, "512KiB": false, "1M": true, "0": true, "2G": true} {
+		c := btrfsConfig()
+		c.SwapFileSize = size
+		if err := c.Validate(); (err == nil) != ok {
+			t.Errorf("swapFileSize %s: %v", size, err)
+		}
+	}
+}
