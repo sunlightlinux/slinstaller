@@ -421,3 +421,26 @@ func BenchmarkLogLinePastTheBound(b *testing.B) {
 		m = nm.(installModel)
 	}
 }
+
+// The Details window is the full view's slice, built alone.
+func TestLogWindowMatchesLogView(t *testing.T) {
+	m := installModel{width: 60, height: 20}
+	for i := 0; i < 300; i++ {
+		m.logs = append(m.logs, strings.Repeat(fmt.Sprintf("line %d ", i), i%9+1))
+	}
+	for _, cached := range []bool{false, true} {
+		if cached {
+			m.rewrapLog()
+		}
+		all := m.logView()
+		if m.logRowCount() != len(all) {
+			t.Fatalf("count %d, want %d", m.logRowCount(), len(all))
+		}
+		for _, w := range [][2]int{{0, 0}, {0, 5}, {17, 40}, {len(all) - 12, len(all)}, {len(all), len(all)}} {
+			got := m.logWindow(w[0], w[1])
+			if fmt.Sprint(got) != fmt.Sprint(all[w[0]:w[1]]) {
+				t.Errorf("cached %v window %v differs", cached, w)
+			}
+		}
+	}
+}

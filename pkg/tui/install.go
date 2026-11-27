@@ -503,6 +503,47 @@ func (m installModel) logView() []logRow {
 	return rows
 }
 
+// logRowCount is len(logView()) without building it: the Details view and
+// its scrolling need the count and a window, and building every row of a
+// 10,000-line log on each message (View runs after every one, and the log
+// sink waits for it) cost a millisecond and 5 MB a frame.
+func (m installModel) logRowCount() int {
+	if len(m.lineRows) != len(m.logs) || m.lineWidth != m.logWidth() {
+		return len(m.logView())
+	}
+	n := 0
+	for _, lr := range m.lineRows {
+		n += len(lr)
+	}
+	return n
+}
+
+// logWindow is logView()[start:end], built alone.
+func (m installModel) logWindow(start, end int) []logRow {
+	if len(m.lineRows) != len(m.logs) || m.lineWidth != m.logWidth() {
+		return m.logView()[start:end]
+	}
+	out := make([]logRow, 0, end-start)
+	at := 0
+	for i, lr := range m.lineRows {
+		if at+len(lr) <= start {
+			at += len(lr)
+			continue
+		}
+		for _, r := range lr {
+			if at >= start && at < end {
+				r.line = i
+				out = append(out, r)
+			}
+			at++
+		}
+		if at >= end {
+			break
+		}
+	}
+	return out
+}
+
 // lineToRows is one log line as the view shows it: wrapped to width n,
 // each piece carrying the line's kind.
 func lineToRows(l string, i, n int) []logRow {
@@ -527,7 +568,7 @@ func (m *installModel) rewrapLog() {
 // scrollLog handles the log view's keys; it reports whether it used one.
 func (m *installModel) scrollLog(key string) bool {
 	rows := m.logRows()
-	top := max(len(m.logView())-rows, 0) // furthest the view can scroll up
+	top := max(m.logRowCount()-rows, 0) // furthest the view can scroll up
 	switch key {
 	case "up", "k":
 		m.scroll++
@@ -1005,9 +1046,9 @@ func (m installModel) runningView() string {
 func (m installModel) detailsView() string {
 	w := contentWidth(m.width)
 	rows := m.logRows()
-	all := m.logView()
-	end := max(len(all)-m.scroll, 0)
+	end := max(m.logRowCount()-m.scroll, 0)
 	start := max(end-rows, 0)
+	shown := m.logWindow(start, end)
 
 	head := "Install log"
 	if m.logPath != "" {
@@ -1018,7 +1059,7 @@ func (m installModel) detailsView() string {
 	where := "following new lines"
 	switch {
 	case m.scroll > 0 && end > 0:
-		where = fmt.Sprintf("line %d of %d", all[end-1].line+1, len(m.logs))
+		where = fmt.Sprintf("line %d of %d", shown[len(shown)-1].line+1, len(m.logs))
 		if m.phase == phaseRunning {
 			where = "paused at " + where
 		}
@@ -1029,7 +1070,7 @@ func (m installModel) detailsView() string {
 		lineBG.Width(w).Render(spread(itemLabel.Render("  "+head), stepWait.Render(where), w)),
 		rule(w),
 	}
-	for _, r := range all[start:end] {
+	for _, r := range shown {
 		text := "  " + r.text
 		switch r.kind {
 		case logStage:
