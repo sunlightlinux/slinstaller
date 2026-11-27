@@ -641,3 +641,35 @@ func TestRaidNamePath(t *testing.T) {
 		}
 	}
 }
+
+func TestDiskImageTarget(t *testing.T) {
+	one := func() *Config {
+		return &Config{DiskImage: "https://img.example/disk.raw.zst", TargetMedia: []*Media{{Name: "sda", Type: "disk"}}}
+	}
+	if d, err := one().DiskImageTarget(); err != nil || d.Name != "sda" {
+		t.Errorf("one disk: %v", err)
+	}
+	for want, mod := range map[string]func(*Config){
+		"plain http":       func(c *Config) { c.DiskImage = "http://img/x" },
+		"not an https URL": func(c *Config) { c.DiskImage = "ftp://img/x" },
+		"names 2 entries":  func(c *Config) { c.TargetMedia = append(c.TargetMedia, &Media{Name: "sdb"}) },
+		"a layout cannot":  func(c *Config) { c.TargetMedia[0].Children = []*Media{{Name: "sda1"}} },
+		"needs a name":     func(c *Config) { c.TargetMedia[0].Name = "" },
+		"not both":         func(c *Config) { c.Image = "/x.tar" },
+	} {
+		c := one()
+		mod(c)
+		if _, err := c.DiskImageTarget(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v", want, err)
+		}
+	}
+	c := one()
+	c.DiskImage, c.AllowInsecureHTTP = "http://img/x", true
+	if _, err := c.DiskImageTarget(); err != nil {
+		t.Errorf("http allowed: %v", err)
+	}
+	c.DiskImage = "/local/disk.raw"
+	if _, err := c.DiskImageTarget(); err != nil {
+		t.Errorf("a file: %v", err)
+	}
+}

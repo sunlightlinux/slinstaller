@@ -175,3 +175,15 @@ func TestMaskWriterPassesProgress(t *testing.T) {
 		t.Errorf("held back: %q", b.String())
 	}
 }
+
+// A line longer than 64 KiB is masked and written as it stands.
+func TestMaskWriterLongLine(t *testing.T) {
+	AddSecret("long-secret-value")
+	var b strings.Builder
+	m := &maskWriter{w: &b}
+	m.Write([]byte(strings.Repeat("x", 70<<10) + "long-secret-value"))
+	m.flush()
+	if strings.Contains(b.String(), "long-secret-value") || len(b.String()) < 70<<10 {
+		t.Errorf("long line: %d bytes, secret shown %v", len(b.String()), strings.Contains(b.String(), "long-secret-value"))
+	}
+}

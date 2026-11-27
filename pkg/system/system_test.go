@@ -588,3 +588,24 @@ func TestLocaleEnabled(t *testing.T) {
 		t.Error("LocaleEnabled")
 	}
 }
+
+func TestCheckLocale(t *testing.T) {
+	if err := CheckLocale("", "", ""); err != nil {
+		t.Errorf("empty: %v", err)
+	}
+	if ok, checked := ValidTimezone("No/Such_Zone"); checked && !ok {
+		if err := CheckLocale("No/Such_Zone", "", ""); err == nil || !strings.Contains(err.Error(), "timezone") {
+			t.Errorf("bad zone: %v", err)
+		}
+	}
+	if ok, checked := ValidKeymap("no-such-map"); checked && !ok {
+		if err := CheckLocale("", "no-such-map", ""); err == nil || !strings.Contains(err.Error(), "keymap") {
+			t.Errorf("bad keymap: %v", err)
+		}
+	}
+	if ok, checked := ValidLocale("xx_XX.NOPE"); checked && !ok {
+		if err := CheckLocale("", "", "xx_XX.NOPE"); err == nil || !strings.Contains(err.Error(), "language") {
+			t.Errorf("bad language: %v", err)
+		}
+	}
+}
