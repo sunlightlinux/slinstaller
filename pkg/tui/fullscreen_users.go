@@ -254,15 +254,28 @@ func (m model) userListView() string {
 	if len(m.users) == 0 {
 		body = append(body, footer.Width(w).Render("  *** No Custom Users Defined ***"))
 	}
+	var rows []string
 	for i, u := range m.users {
 		admin := "no"
 		if u.Admin {
 			admin = "yes"
 		}
 		line := fmt.Sprintf("%-16s %-18s %-10s %s", u.Login, orDash(u.UserName), "****", admin)
-		body = append(body, row(w, i == m.userCursor, line))
+		rows = append(rows, row(w, i == m.userCursor, line))
 	}
-	body = append(body, lineBG.Width(w).Render(""))
+	// More accounts than the dialog holds scroll in a window that follows
+	// the cursor, under the column header and above the buttons; with the
+	// cursor on a button it shows the end of the table, nearest to it.
+	room := m.bodyBudget(1) - linesHeight(body) - 1
+	spacer := len(rows) <= room
+	if !spacer {
+		room++ // the blank spacer under the table goes first
+	}
+	// A cursor on a button is past the last row; windowLines clamps it there.
+	body = append(body, windowLines(rows, m.userCursor, m.userCursor, room, w)...)
+	if spacer {
+		body = append(body, lineBG.Width(w).Render(""))
+	}
 
 	// Buttons: Add New User / Revert / Confirm / Cancel.
 	var btns []button

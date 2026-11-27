@@ -1013,9 +1013,11 @@ func (m model) choiceView() string {
 			warnText.Width(w).Render("  The chosen disk will be ERASED."),
 			lineBG.Width(w).Render(""),
 		}
+		var rows []string
 		for i, d := range m.disks {
-			body = append(body, row(w, i == m.edCursor, fmt.Sprintf("%-14s %s", d.Path, d.Model)))
+			rows = append(rows, row(w, i == m.edCursor, fmt.Sprintf("%-14s %s", d.Path, d.Model)))
 		}
+		body = append(body, windowLines(rows, m.edCursor, m.edCursor, m.bodyBudget(0)-linesHeight(body), w)...)
 		return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
 	}
 	body := []string{
@@ -1030,13 +1032,15 @@ func (m model) choiceView() string {
 	if len(choiceBlurb(m.editing)) > 0 {
 		body = append(body, lineBG.Width(w).Render(""))
 	}
+	var rows []string
 	for i, c := range m.choices {
 		label := c
 		if m.editing == secKernel {
 			label = kernelLabel(c)
 		}
-		body = append(body, row(w, i == m.edCursor, label))
+		rows = append(rows, row(w, i == m.edCursor, label))
 	}
+	body = append(body, windowLines(rows, m.edCursor, m.edCursor, m.bodyBudget(0)-linesHeight(body), w)...)
 	return m.screen(body, "[Up/Down] move · [Enter] select · [Esc] back")
 }
 
@@ -1075,7 +1079,7 @@ func (m model) listView() string {
 	// buttons and the footer. The kernel-profile picker shows no inline
 	// preview — its Details button opens a separate window instead — so the
 	// list uses the full height.
-	rows := panelHeight(m.height) - len(header) - 4
+	rows := m.bodyBudget(1) - linesHeight(header) - 1 // the blank under the list
 	if rows < 3 {
 		rows = 3
 	}
@@ -1202,7 +1206,7 @@ func (m model) bundlesView() string {
 		itemLabel.Width(w).Render("  " + sectionTitles[secBundles]),
 		rule(w),
 	}
-	rows := panelHeight(m.height) - len(header) - 4
+	rows := m.bodyBudget(1) - linesHeight(header) - 1 // the blank under the list
 	if rows < 3 {
 		rows = 3
 	}

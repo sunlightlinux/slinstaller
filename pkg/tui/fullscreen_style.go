@@ -265,7 +265,10 @@ func frameScreenButtons(width, height int, body, buttons []string, foot string) 
 	// Pad with blank full-width lines so title+body fills the panel, leaving
 	// the last two rows for the rule and footer. A view taller than this
 	// (e.g. the Advanced menu on a short terminal) is left as-is.
-	for len(lines) < panelHeight(height)-2-len(buttons) {
+	// Lines are counted as drawn: a long message rendered to the width
+	// wraps onto a second line, and counting it as one overfilled the
+	// dialog by that line.
+	for used := linesHeight(lines); used < panelHeight(height)-2-len(buttons); used++ {
 		lines = append(lines, lineBG.Width(cw).Render(""))
 	}
 	lines = append(lines, buttons...)
@@ -288,8 +291,12 @@ func (m model) screenButtons(body, buttons []string, foot string) string {
 
 func rule(w int) string { return ruleBG.Width(w).Render(strings.Repeat("─", w)) }
 
-// row renders a plain full-width line, highlighted as an accent bar when selected.
+// row renders a plain full-width line, highlighted as an accent bar when
+// selected. It is one line whatever the text: a row too long for a narrow
+// dialog is clipped, where it used to wrap onto a second line the scrolled
+// lists do not count.
 func row(w int, selected bool, text string) string {
+	text = clip(text, w-2)
 	if selected {
 		return selBG.Width(w).Render("  " + text)
 	}
@@ -301,6 +308,7 @@ func row(w int, selected bool, text string) string {
 // at two lines so the hub's section list can be windowed and scrolled
 // cleanly — every section occupies the same space.
 func item(w int, selected bool, label, value string) []string {
+	label, value = clip(label, w-2), clip(value, w-6)
 	if selected {
 		return []string{
 			itemSelLabel.Width(w).Render("  " + label),
@@ -363,4 +371,65 @@ func wrapWords(s string, width, maxLines int) []string {
 		lines[maxLines-1] = clip(lines[maxLines-1]+" ...", width)
 	}
 	return lines
+}
+
+// bodyBudget is how many body lines a screen has room for between the
+// title and its buttons, rule and footer: the panel's fixed height less
+// the title, the rule, the footer and the given number of button lines.
+// A body taller than this pushed the dialog past the terminal, and
+// bubbletea's renderer dropped its top lines: the title and whatever the
+// operator was choosing between.
+func (m model) bodyBudget(buttons int) int {
+	return panelHeight(m.height) - 3 - buttons
+}
+
+// linesHeight is how many screen lines ls takes as drawn: a line rendered
+// to the dialog's width wraps when its text is longer, as a mode's
+// description does in a narrow terminal.
+func linesHeight(ls []string) int {
+	h := 0
+	for _, l := range ls {
+		h += lipgloss.Height(l)
+	}
+	return h
+}
+
+// windowLines fits a list of one-line rows into budget lines, the way the
+// hub windows its sections: when everything fits it is returned as-is;
+// otherwise it is cut to a window holding the focus rows [lo, hi] (the
+// cursor's row, and for a partition its LVs), with a "↑ more" / "↓ more"
+// line in place of the rows hidden above and below. lo wins when the focus
+// is taller than the window. The window is computed from the focus alone,
+// as the hub's is, so the view needs no scroll state of its own.
+func windowLines(lines []string, lo, hi, budget, w int) []string {
+	n := len(lines)
+	if n <= budget || n == 0 {
+		return lines
+	}
+	lo = min(max(lo, 0), n-1)
+	hi = min(max(hi, lo), n-1)
+	moreUp := footer.Width(w).Render("  ↑ more")
+	moreDown := footer.Width(w).Render("  ↓ more")
+	switch {
+	case budget <= 1:
+		return []string{lines[lo]}
+	case budget == 2:
+		if lo < n-1 {
+			return []string{lines[lo], moreDown}
+		}
+		return []string{moreUp, lines[lo]}
+	}
+	hi = min(hi, lo+budget-3)    // the focus fits between both indicators
+	if k := budget - 1; hi < k { // the top of the list: only "↓ more"
+		return append(append([]string{}, lines[:k]...), moreDown)
+	}
+	if k := budget - 1; lo >= n-k { // the bottom: only "↑ more"
+		return append([]string{moreUp}, lines[n-k:]...)
+	}
+	// The middle: the focus at the bottom of the window, as the hub
+	// keeps its cursor, with rows hidden on both sides.
+	k := budget - 2
+	start := hi - k + 1
+	out := append([]string{moreUp}, lines[start:start+k]...)
+	return append(out, moreDown)
 }

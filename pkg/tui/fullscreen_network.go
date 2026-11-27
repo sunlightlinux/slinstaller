@@ -325,6 +325,7 @@ func (m model) netListView() string {
 	if len(m.netIfaces) == 0 {
 		body = append(body, footer.Width(w).Render("  No network interfaces found"))
 	}
+	var rows []string
 	for i, ni := range m.netIfaces {
 		setting := "Automatic (DHCP)"
 		if ni.Static {
@@ -332,8 +333,11 @@ func (m model) netListView() string {
 		} else if v4 := ifaceLiveV4(ni); v4 != "" {
 			setting = "DHCP - " + v4
 		}
-		body = append(body, row(w, i == m.netCursor, fmt.Sprintf("%-14s %s", ni.Name, setting)))
+		rows = append(rows, row(w, i == m.netCursor, fmt.Sprintf("%-14s %s", ni.Name, setting)))
 	}
+	// Interfaces past the dialog's height scroll in a window that keeps
+	// the cursor's on screen, under the title.
+	body = append(body, windowLines(rows, m.netCursor, m.netCursor, m.bodyBudget(0)-linesHeight(body), w)...)
 	return m.screen(body, "[Up/Down] move · [Enter] configure · [Esc] back")
 }
 

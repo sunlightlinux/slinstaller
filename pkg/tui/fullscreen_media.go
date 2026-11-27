@@ -687,6 +687,7 @@ func (m model) mediaView() string {
 	}
 	body = append(body, rule(w))
 
+	var disks []string
 	for i, d := range m.disks {
 		// The disk Confirm takes is marked before one is chosen too: the
 		// first, by default. Unmarked, Confirm put the layout on a disk
@@ -695,17 +696,30 @@ func (m model) mediaView() string {
 		if m.diskIdx == i {
 			mark = "» "
 		}
-		body = append(body, row(w, m.mediaCursor == nModes+i,
+		disks = append(disks, row(w, m.mediaCursor == nModes+i,
 			fmt.Sprintf("%s%-14s %-9s %s", mark, d.Path, gib(d.Size), d.Model)))
 	}
-	body = append(body, rule(w))
 
 	encBox := "[ ]"
 	if m.encrypt {
 		encBox = "[x]"
 	}
-	body = append(body, row(w, m.mediaCursor == encIdx, encBox+" Enable Encryption"))
-	body = append(body, lineBG.Width(w).Render(""))
+	tail := []string{rule(w), row(w, m.mediaCursor == encIdx, encBox+" Enable Encryption"), lineBG.Width(w).Render("")}
+
+	// More disks than the dialog holds scroll in a window, so the title,
+	// the modes and the buttons stay on screen. The window follows the
+	// cursor through the disks and otherwise shows the marked disk.
+	room := m.bodyBudget(1) - linesHeight(body) - linesHeight(tail)
+	if len(disks) > room {
+		tail = tail[:len(tail)-1] // the blank spacer goes first
+		room++
+	}
+	focus := m.diskIdx
+	if c := m.mediaCursor - nModes; c >= 0 && c < len(disks) {
+		focus = c
+	}
+	body = append(body, windowLines(disks, focus, focus, room, w)...)
+	body = append(body, tail...)
 
 	var btns []button
 	for i, b := range mediaButtons {
@@ -737,12 +751,20 @@ func (m model) partListView() string {
 	if len(m.parts) == 0 {
 		body = append(body, footer.Width(w).Render("  none yet - press [a] to add"))
 	}
+	// A long layout scrolls in a window that keeps the cursor's partition,
+	// and as many of its LVs as fit, on screen under the fixed header.
+	var lines []string
+	lo, hi := 0, 0
 	for i, p := range m.parts {
-		body = append(body, row(w, i == m.partCursor, partSummary(p)))
+		if i == m.partCursor {
+			lo, hi = len(lines), len(lines)+len(p.LVs)
+		}
+		lines = append(lines, row(w, i == m.partCursor, partSummary(p)))
 		for _, lv := range p.LVs {
-			body = append(body, lineBG.Width(w).Render("      lv "+lvSummary(lv)))
+			lines = append(lines, lineBG.Width(w).Render("      lv "+lvSummary(lv)))
 		}
 	}
+	body = append(body, windowLines(lines, lo, hi, m.bodyBudget(0)-linesHeight(body), w)...)
 	return m.screen(body, "[c] change disk · [a] add · [l] add LV · [d] delete · [Esc] back")
 }
 
