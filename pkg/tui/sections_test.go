@@ -134,6 +134,24 @@ func TestHubInstallButton(t *testing.T) {
 	if nm, _ = m.Update(enter); nm.(model).confirmed {
 		t.Error("an install with no admin user was started")
 	}
+
+	// What the installer would refuse after the wizard is refused here,
+	// keeping everything entered: a bad hostname, a duplicate mountpoint.
+	m = onInstall(readyModel())
+	m.hostname = "-bad host"
+	nm, cmd = m.Update(enter)
+	got = nm.(model)
+	if got.confirmed || cmd != nil || got.popup != popupMessage || !strings.Contains(viewOf(got), "hostname") {
+		t.Errorf("an invalid hostname went through: confirmed=%v\n%s", got.confirmed, viewOf(got))
+	}
+	if got.hostname != "-bad host" || len(got.users) == 0 {
+		t.Error("the answers were not kept")
+	}
+	m = onInstall(readyModel())
+	m.parts = append(m.parts, m.parts[len(m.parts)-1])
+	if nm, _ = m.Update(enter); nm.(model).confirmed {
+		t.Error("a layout with / twice went through")
+	}
 }
 
 func TestSectionValues(t *testing.T) {

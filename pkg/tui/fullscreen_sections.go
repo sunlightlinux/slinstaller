@@ -402,6 +402,16 @@ func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.openSection(vis[m.hubCursor])
 		case m.hubCursor == len(vis):
 			if m.canInstall() {
+				// What the installer would refuse after the wizard — an
+				// invalid hostname, a duplicate mountpoint, a layout that
+				// cannot be cut — is refused here, where the answers are
+				// still on screen. Refused after, it ended the program and
+				// every section had to be filled in again.
+				if problem := m.installProblem(); problem != "" {
+					m.popup = popupMessage
+					m.popupMsg = append([]string{"Not ready", ""}, problemLines(problem)...)
+					return m, nil
+				}
 				m.confirmed = true
 				return m, tea.Quit
 			}
@@ -1198,4 +1208,32 @@ func (m model) textView() string {
 		lineBG.Width(w).Render("  " + m.input.View()),
 	}
 	return m.screen(body, "type · [Enter] confirm · [Esc] back")
+}
+
+// installProblem is what the installer would refuse in the config the
+// wizard has built — checked as main checks it before anything is done:
+// the config's own validation and its partition plan. "" when there is
+// nothing.
+func (m model) installProblem() string {
+	cfg, err := m.buildConfig()
+	if err == nil {
+		err = cfg.Validate()
+	}
+	if err == nil {
+		_, err = cfg.Plan()
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// problemLines breaks a validation message into popup lines of a width
+// the popup fits on an 80-column console.
+func problemLines(msg string) []string {
+	var out []string
+	for _, l := range strings.Split(strings.TrimPrefix(msg, "config: "), "\n") {
+		out = append(out, wrapLog(l, 64)...)
+	}
+	return out
 }
