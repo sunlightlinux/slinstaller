@@ -2,9 +2,12 @@ package controller
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
@@ -801,4 +804,31 @@ func TestNetworkLinksAreMadeAtBoot(t *testing.T) {
 	os.WriteFile(filepath.Join(sd, "boot"), nil, 0o644)
 	blockFile(t, in, "etc", "slinit.d", "sunlight-netlinks")
 	wantErr(t, in.network(), "write sunlight-netlinks")
+}
+
+// failingWriter fails every write, as a full disk does.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, syscall.ENOSPC }
+func (failingWriter) Close() error              { return nil }
+
+// A write that fails to fstab (the swap file's line) or /etc/default/grub
+// is reported, not taken for done.
+func TestAppendWriteFailures(t *testing.T) {
+	defer func(f func(string) (io.WriteCloser, error)) { openAppend = f }(openAppend)
+	openAppend = func(string) (io.WriteCloser, error) { return failingWriter{}, nil }
+
+	var r recorder
+	cfg := twoPartConfig()
+	cfg.SwapFileSize = "1G"
+	in := stagedInstaller(t, cfg, &r)
+	mkTarget(t, in, "etc")
+	if err := in.swapfile(); err == nil || !errors.Is(err, syscall.ENOSPC) {
+		t.Errorf("swapfile with a full disk: %v", err)
+	}
+	in = stagedInstaller(t, twoPartConfig(), &r)
+	mkTarget(t, in, "etc", "default")
+	if err := in.bootloader(); err == nil || !errors.Is(err, syscall.ENOSPC) {
+		t.Errorf("bootloader with a full disk: %v", err)
+	}
 }

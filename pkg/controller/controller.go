@@ -726,6 +726,13 @@ func (in *installer) mount() error {
 	return nil
 }
 
+// openAppend opens a target file to append to; a variable so tests can
+// make the write itself fail (a full disk), which a link to /dev/full no
+// longer does now that a link there is replaced.
+var openAppend = func(path string) (io.WriteCloser, error) {
+	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+}
+
 // resumeMark, in the target, marks an install in progress (see mount). At
 // the top of the root filesystem, where nothing an image unpacks collides
 // with it: under var/, a /var link in the image met a non-empty directory
@@ -1350,11 +1357,11 @@ func (in *installer) swapfile() error {
 	if holds(path, storage.SwapFileFstab) {
 		return nil
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := openAppend(path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
-	_, werr := f.WriteString(storage.SwapFileFstab)
+	_, werr := io.WriteString(f, storage.SwapFileFstab)
 	cerr := f.Close()
 	if werr != nil {
 		return werr
@@ -1521,11 +1528,11 @@ func (in *installer) bootloader() error {
 		return err
 	}
 	if grubDefault.Len() > 0 && !holds(path, grubDefault.String()) {
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		f, err := openAppend(path)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", path, err)
 		}
-		_, werr := f.WriteString(grubDefault.String())
+		_, werr := io.WriteString(f, grubDefault.String())
 		cerr := f.Close()
 		if werr != nil {
 			return werr
