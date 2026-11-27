@@ -389,6 +389,11 @@ func TestMkfsDoesNotDiscardADiscardedDisk(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("mkfs:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
+	// Zeroing is not a trim: mkfs keeps its discard.
+	pl.DiskWipe = map[string]string{"/dev/sda": "zero"}
+	if cmds, _ = pl.MkfsCommands(); strings.Contains(strings.Join(cmds[1], " "), "nodiscard") {
+		t.Errorf("nodiscard after wipe: zero: %v", cmds[1])
+	}
 	// Without the wipe, mkfs keeps its default.
 	pl.DiskWipe = nil
 	cmds, _ = pl.MkfsCommands()

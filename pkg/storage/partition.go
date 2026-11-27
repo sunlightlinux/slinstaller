@@ -198,7 +198,7 @@ func (pl *Plan) MkfsCommands() ([][]string, error) {
 }
 
 // discarded reports whether p is a plain partition of a disk the install
-// has just discarded or zeroed whole (wipe: discard / zero, blkdiscard).
+// has just discarded whole (wipe: discard, blkdiscard).
 func (pl *Plan) discarded(p Partition) bool {
 	if p.Encrypted || p.LV || p.Raid {
 		return false
@@ -207,8 +207,9 @@ func (pl *Plan) discarded(p Partition) bool {
 	if disk == "" {
 		disk = pl.Disk
 	}
-	w := pl.DiskWipe[disk]
-	return w == "discard" || w == "zero"
+	// Only a discard: zeroing (blkdiscard -z) writes zeros, it does not
+	// trim, and an SSD then wants mkfs's own discard.
+	return pl.DiskWipe[disk] == "discard"
 }
 
 // noDiscard tells mkfs not to discard the device again: mke2fs, mkfs.xfs,

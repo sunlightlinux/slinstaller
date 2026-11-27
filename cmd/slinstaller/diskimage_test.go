@@ -82,6 +82,16 @@ func TestDiskImagePipelineFailsOnAnyStage(t *testing.T) {
 	if err := write(filepath.Join(dir, "missing.raw")); err == nil {
 		t.Error("a missing image was reported as written")
 	}
+	// gzip's "trailing garbage ignored" (exit 2) is a whole image.
+	if _, err := exec.LookPath("gzip"); err == nil {
+		exec.Command("gzip", "-k", raw).Run()
+		gz, _ := os.ReadFile(raw + ".gz")
+		padded := filepath.Join(dir, "padded.raw.gz")
+		os.WriteFile(padded, append(gz, "garbage"...), 0o644)
+		if err := write(padded); err != nil {
+			t.Errorf("a gzip image with trailing garbage: %v", err)
+		}
+	}
 }
 
 func TestDiskImageDryRunAndRefusals(t *testing.T) {

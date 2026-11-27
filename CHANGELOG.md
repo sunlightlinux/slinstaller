@@ -12,7 +12,7 @@ change.
 
 ### Changed
 
-- On a disk wiped with `wipe: discard` or `zero`, mkfs is told not to
+- On a disk wiped with `wipe: discard`, mkfs is told not to
   discard it a second time (`-E nodiscard`, `-K`, `-t 0`).
 - The install log view (Details) wraps and classifies each line once, as
   it arrives, instead of all 10000 on every frame: 1.3 ms a frame instead

@@ -79,10 +79,19 @@ func imageExt(image string) string {
 func checkedPipeline(stages []string) string {
 	parts := make([]string, len(stages))
 	for i, st := range stages {
-		parts[i] = "{ " + st + "; echo $? >&3; }"
+		// gzip's 2 is a warning ("decompression OK, trailing garbage
+		// ignored"): the image came out whole.
+		ok := ""
+		if strings.HasPrefix(st, "gzip ") {
+			ok = `[ $r = 2 ] && r=0; `
+		}
+		parts[i] = "{ " + st + "; r=$?; " + ok + "echo $r >&3; }"
 	}
+	// One status per stage must come back, all 0: a stage gone without
+	// reporting counts as failed.
 	return `s=$( { ` + strings.Join(parts, " | ") + `; } 3>&1 ) || exit 1
-for c in $s; do [ "$c" = 0 ] || { echo "disk-image: a step of the write failed (exit statuses: $(echo $s))" >&2; exit 1; }; done`
+n=0; for c in $s; do n=$((n+1)); [ "$c" = 0 ] || { echo "disk-image: a step of the write failed (exit statuses: $(echo $s))" >&2; exit 1; }; done
+[ "$n" = ` + fmt.Sprint(len(stages)) + ` ] || { echo "disk-image: a step of the write did not finish" >&2; exit 1; }`
 }
 
 // installDiskImage is the whole of a disk-image run: resolve the image,

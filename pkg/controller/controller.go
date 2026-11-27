@@ -599,12 +599,14 @@ const resolvMark = "# slinstaller: the live system's resolv.conf, for the instal
 
 // isOurResolv reports whether the file at dst is a copy this installer
 // left there (a resumed install's first attempt never got to finish).
-func (in *installer) isOurResolv(fi os.FileInfo, dst string, _ []byte) bool {
+func (in *installer) isOurResolv(fi os.FileInfo, dst string, live []byte) bool {
 	if !fi.Mode().IsRegular() {
 		return false
 	}
 	got, err := os.ReadFile(dst)
-	return err == nil && bytes.HasPrefix(got, []byte(resolvMark))
+	// Marked, or — left by an installer from before the mark — exactly the
+	// live file.
+	return err == nil && (bytes.HasPrefix(got, []byte(resolvMark)) || bytes.Equal(got, live))
 }
 
 // saveConfig records, on the installed system, the config it was built
