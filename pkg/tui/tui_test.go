@@ -256,3 +256,11 @@ func TestPromptIndex(t *testing.T) {
 		t.Errorf("read error: %v", err)
 	}
 }
+
+// A choice is taken whatever its case, and returned as listed.
+func TestPromptChoiceIgnoresCase(t *testing.T) {
+	var out bytes.Buffer
+	if got := promptChoice(answers("BTRFS"), &out, "Root filesystem", rootFilesystems, "ext4"); got != "btrfs" {
+		t.Errorf("got %q", got)
+	}
+}

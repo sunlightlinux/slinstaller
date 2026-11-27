@@ -148,3 +148,11 @@ func TestDiagRedactsEnvAndFiles(t *testing.T) {
 		t.Errorf("redacted config:\n%s", got)
 	}
 }
+
+func TestLogLevelRange(t *testing.T) {
+	for _, l := range []string{"0", "5", "-1"} {
+		if err := run([]string{"--log-level", l, "x.yaml"}); err == nil || !strings.Contains(err.Error(), "the levels are 1") {
+			t.Errorf("--log-level %s: %v", l, err)
+		}
+	}
+}

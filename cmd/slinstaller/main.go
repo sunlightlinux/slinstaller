@@ -244,6 +244,10 @@ func run(args []string) error {
 		return fmt.Errorf("--arch %s is not this machine's (%s): its packages cannot be configured here; use it only with --through", arch, hostXBPSArch())
 	}
 
+	if logLevel < 1 || logLevel > 4 {
+		return fmt.Errorf("--log-level %d: the levels are 1 (error) to 4 (debug)", logLevel)
+	}
+
 	// Stage names are known now: a misspelt one was found only once the
 	// disk path had been retyped, or not at all in a dry run.
 	for flagName, stage := range map[string]string{"--through": through, "--resume-from": resumeFrom} {

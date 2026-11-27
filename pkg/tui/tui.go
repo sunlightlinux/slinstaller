@@ -299,7 +299,7 @@ func promptChoice(in *bufio.Reader, w io.Writer, label string, opts []string, de
 			return def
 		}
 		for _, o := range opts {
-			if s == o {
+			if strings.EqualFold(s, o) { // "EXT4", "Btrfs": the choice, as listed
 				return o
 			}
 		}
