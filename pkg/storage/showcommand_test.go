@@ -200,3 +200,17 @@ func TestMaskSecretLongestFirstAndGOST(t *testing.T) {
 		t.Errorf("gost-yescrypt hash: %q", got)
 	}
 }
+
+// A proxy without a scheme is masked to the last "@" before its host, as
+// one with a scheme is: a password with an "@" in it was shown from there.
+func TestMaskBareProxyAtInPassword(t *testing.T) {
+	for in, want := range map[string]string{
+		"https_proxy=user:@pw@proxy:3128": "https_proxy=user:***@proxy:3128",
+		"https_proxy=user:p@w@proxy:3128": "https_proxy=user:***@proxy:3128",
+		"http_proxy=user:@proxy:3128":     "http_proxy=user:***@proxy:3128",
+	} {
+		if got := MaskSecret(in); got != want {
+			t.Errorf("%s masked as %s, want %s", in, got, want)
+		}
+	}
+}

@@ -495,7 +495,8 @@ func hasSecrets() bool {
 
 // barePasswordRe matches user:password@ with no scheme in a proxy
 // setting: …_proxy=user:password@host (any case).
-var barePasswordRe = regexp.MustCompile(`(?i)((?:^|[\s"'])[a-z]*_?proxy=)([^\s:/@="']+):[^\s@/]+@`)
+// Like urlPasswordRe, the password runs to the last "@" before the host.
+var barePasswordRe = regexp.MustCompile(`(?i)((?:^|[\s"'])[a-z]*_?proxy=)([^\s:/@="']+):[^\s/]*@`)
 
 var (
 	secretsMu sync.Mutex
