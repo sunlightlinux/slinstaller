@@ -52,15 +52,16 @@ func VendorKernelArgs(args, vendor string) string {
 			if vendor == "intel" {
 				out = append(out, t) // keep flags such as igfx_off
 			} else {
-				out = append(out, "amd_iommu=on")
+				out = append(out, "amd_iommu="+iommuSwitch(t))
 			}
 		case strings.HasPrefix(t, "amd_iommu="):
 			if vendor == "amd" {
 				out = append(out, t)
 			} else {
-				out = append(out, "intel_iommu=on")
+				out = append(out, "intel_iommu="+iommuSwitch(t))
 			}
-		case t == "kvm-intel.nested=1" || t == "kvm-amd.nested=1":
+		case t == "kvm-intel.nested=1" || t == "kvm-amd.nested=1" ||
+			t == "kvm_intel.nested=1" || t == "kvm_amd.nested=1":
 			out = append(out, "kvm-"+vendor+".nested=1")
 		case strings.HasPrefix(t, "intel_idle.max_cstate="):
 			if vendor == "intel" {
@@ -71,6 +72,18 @@ func VendorKernelArgs(args, vendor string) string {
 		}
 	}
 	return strings.Join(out, " ")
+}
+
+// iommuSwitch is what an IOMMU argument for the other vendor asks of this
+// one: off stays off — it is set to get past broken IOMMU firmware, and
+// turned to on it could keep the machine from booting — anything else is
+// on.
+func iommuSwitch(t string) string {
+	_, v, _ := strings.Cut(t, "=")
+	if first, _, _ := strings.Cut(v, ","); first == "off" {
+		return "off"
+	}
+	return "on"
 }
 
 // RefitVendor makes a kernel command line written for one CPU vendor right

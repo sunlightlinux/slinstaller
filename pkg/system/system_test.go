@@ -533,3 +533,32 @@ func TestAutoUpdate(t *testing.T) {
 		}
 	}
 }
+
+// An IOMMU turned off stays off on the other vendor: it is set to get past
+// broken firmware, and turned on it could keep the machine from booting.
+func TestVendorKeepsIOMMUOff(t *testing.T) {
+	if got := VendorKernelArgs("intel_iommu=off quiet", "amd"); got != "amd_iommu=off quiet" {
+		t.Errorf("intel off on AMD: %q", got)
+	}
+	if got := RefitVendor([]string{"amd_iommu=off"}, "intel"); strings.Join(got, " ") != "intel_iommu=off" {
+		t.Errorf("amd off on Intel: %q", got)
+	}
+	if got := VendorKernelArgs("intel_iommu=on,igfx_off kvm_intel.nested=1", "amd"); got != "amd_iommu=on kvm-amd.nested=1" {
+		t.Errorf("on, and the underscore spelling: %q", got)
+	}
+}
+
+// A locale spelled as glibc also accepts it (en_US.utf8) is generated.
+func TestLocaleMatchesTheCodesetAsGlibcDoes(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "etc", "default"), 0o755)
+	os.WriteFile(filepath.Join(root, "etc", "default", "libc-locales"), []byte("#en_US.UTF-8 UTF-8\n#ro_RO.UTF-8 UTF-8\n"), 0o644)
+	changed, err := Locale(root, "en_US.utf8")
+	if err != nil || !changed {
+		t.Fatalf("Locale: %v, changed %v", err, changed)
+	}
+	got, _ := os.ReadFile(filepath.Join(root, "etc", "default", "libc-locales"))
+	if string(got) != "en_US.UTF-8 UTF-8\n#ro_RO.UTF-8 UTF-8\n" {
+		t.Errorf("libc-locales:\n%s", got)
+	}
+}

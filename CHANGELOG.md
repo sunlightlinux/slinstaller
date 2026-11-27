@@ -37,6 +37,13 @@ change.
 
 ### Fixed
 
+- Replaying a profile on a CPU of the other vendor turned an explicit
+  `intel_iommu=off` into `amd_iommu=on` (and back): an IOMMU switched off
+  to get past broken firmware came back on. Off stays off now, and
+  `kvm_intel.nested=1` is translated like `kvm-intel.nested=1`.
+- A language spelled `en_US.utf8` passed the check but was never
+  generated (the libc-locales line is `en_US.UTF-8`); the codeset is
+  compared as glibc compares it.
 - Two or more static routes on an interface were written on one
   `static routes=` line, which dhcpcd refuses whole: the interface came up
   with none. Each route has its own line now.

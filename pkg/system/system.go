@@ -400,7 +400,10 @@ func Locale(root, lang string) (bool, error) {
 		if !strings.HasPrefix(line, "#") {
 			continue
 		}
-		if fields := strings.Fields(strings.TrimLeft(line, "# ")); len(fields) > 0 && fields[0] == lang {
+		// Compared as glibc compares them (ValidLocale lets en_US.utf8
+		// through for the en_US.UTF-8 line): an exact match left the line
+		// commented, no locale generated, and LANG naming none.
+		if fields := strings.Fields(strings.TrimLeft(line, "# ")); len(fields) > 0 && normLocale(fields[0]) == normLocale(lang) {
 			lines[i] = strings.TrimPrefix(line, "#")
 			changed = true
 		}
