@@ -332,6 +332,14 @@ restart:
 		return err
 	}
 
+	// A key the config carries that nothing reads is most likely a typo
+	// (encryptd: true installs unencrypted). Said before anything is
+	// checked: a misspelt mountpoint otherwise showed only as "no
+	// partition mounts /", the typo itself never named.
+	for _, k := range cfg.UnknownKeys() {
+		fmt.Fprintf(os.Stderr, "warning: config key %s is not one slinstaller knows; it is ignored\n", k)
+	}
+
 	// Disks named by serial, WWN, model or a stable path become the kernel
 	// names they have on this machine, before anything is checked or shown.
 	if cfg.NeedsDisks() {
@@ -445,12 +453,20 @@ restart:
 	if !fullscreen {
 		fmt.Print(storage.FormatCommands(cmds))
 		printRelease(plan)
+		// A Safe install's new partitions are checked against the disk's
+		// table when it runs; the dry run says now what it would refuse,
+		// rather than show a mkfs of an existing partition and leave it at
+		// that.
+		if !plan.Wipe && !apply {
+			if err := plan.CheckCreateNumbers(); err != nil && strings.Contains(err.Error(), "is to be created") {
+				fmt.Fprintf(os.Stderr, "\n(it will refuse: %v)\n", err)
+			}
+		}
 	}
-	// A key the config carries that nothing reads is most likely a typo
-	// (encryptd: true installs unencrypted); said where the plan ends, so
-	// it is in view when the operator confirms.
-	for _, k := range cfg.UnknownKeys() {
-		fmt.Fprintf(os.Stderr, "warning: config key %s is not one slinstaller knows; it is ignored\n", k)
+	// And again, in short, where the plan ends, so it is in view when the
+	// operator confirms.
+	if keys := cfg.UnknownKeys(); len(keys) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: ignored, not keys slinstaller knows (see above): %s\n", strings.Join(keys, ", "))
 	}
 
 	if !apply && !systemCheck {

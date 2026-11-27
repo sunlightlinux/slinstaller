@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -45,5 +47,50 @@ func TestHelpIsNotAnError(t *testing.T) {
 	}
 	if err := run([]string{"--no-such-flag"}); err == nil {
 		t.Error("an unknown flag was not an error")
+	}
+}
+
+// A misspelt key is named even when the config it leaves short fails to
+// validate: "no partition mounts /" alone did not say why.
+func TestUnknownKeyIsNamedBeforeValidation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "typo.yaml")
+	os.WriteFile(path, []byte(`targetMedia:
+- name: sda
+  type: disk
+  children:
+  - {name: sda1, type: part, fstype: vfat, mountpoint: /boot, size: 512M}
+  - {name: sda2, type: part, fstype: ext4, mountpiont: /}
+`), 0o644)
+	_, errOut, err := runWith(t, "", path)
+	if err == nil || !strings.Contains(errOut, "config key targetMedia[0].children[1].mountpiont is not one slinstaller knows") {
+		t.Errorf("err %v, stderr:\n%s", err, errOut)
+	}
+}
+
+// The dry run of a Safe install says when a new partition is named for one
+// the disk already has, instead of only listing a mkfs of it.
+func TestDryRunSaysAboutACreateNumber(t *testing.T) {
+	bin := t.TempDir()
+	os.WriteFile(filepath.Join(bin, "parted"), []byte(`#!/bin/sh
+echo "BYT;"; echo "/dev/sda:100000MiB:scsi:512:512:gpt:DISK:;"
+echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"; echo "2:513MiB:20000MiB:19487MiB:ntfs::;"
+echo "3:20000MiB:30000MiB:10000MiB:xfs::;"; echo "4:30000MiB:40000MiB:10000MiB:ext4::;"
+echo "1:40000MiB:100000MiB:60000MiB:free;"
+`), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	dir := t.TempDir()
+	path := filepath.Join(dir, "safe.yaml")
+	os.WriteFile(path, []byte(`reusePartitions: true
+targetMedia:
+- name: sda
+  type: disk
+  children:
+  - {name: sda1, type: part, fstype: vfat, mountpoint: /boot/efi, preserve: true}
+  - {name: sda3, type: part, fstype: ext4, mountpoint: /, create: true, start: 40000M, size: 20000M}
+`), 0o644)
+	_, errOut, err := runWith(t, "", path)
+	if err != nil || !strings.Contains(errOut, "(it will refuse:") || !strings.Contains(errOut, "parted will number it 5") {
+		t.Errorf("err %v, stderr:\n%s", err, errOut)
 	}
 }
