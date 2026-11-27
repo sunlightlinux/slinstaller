@@ -85,3 +85,65 @@ func checkPlan(t *testing.T, c *Config) {
 		}
 	}
 }
+
+// FuzzJSONDescriptor checks --json-yaml on any descriptor: it converts or
+// refuses, never panics, and what it writes is a config that loads, and
+// loads back to itself — saved again it is the same file and plans the
+// same, its aliases resolved — so the YAML an operator is handed is the config converted.
+func FuzzJSONDescriptor(f *testing.F) {
+	f.Add([]byte(descriptor))
+	f.Add([]byte(`{"DestinationType":"physical","PartitionLayout":[{"disk":"../sdz","partition":1,"size":"rest"}],"Hostname":"a\nb: c"}`))
+	dir := f.TempDir()
+	f.Fuzz(func(t *testing.T, data []byte) {
+		in := filepath.Join(dir, "d.json")
+		if err := os.WriteFile(in, data, 0o600); err != nil {
+			t.Skip()
+		}
+		c, _, err := FromJSONDescriptor(in)
+		if err != nil {
+			return
+		}
+		first, second := filepath.Join(dir, "1.yaml"), filepath.Join(dir, "2.yaml")
+		if err := Save(first, c); err != nil {
+			return
+		}
+		c1, err := Load(first)
+		if err != nil {
+			t.Fatalf("the converted config does not load: %v\n%s", err, read(first))
+		}
+		if err := Save(second, c1); err != nil {
+			t.Fatal(err)
+		}
+		c2, err := Load(second)
+		if err != nil {
+			t.Fatalf("saved again, it does not load: %v", err)
+		}
+		third := filepath.Join(dir, "3.yaml")
+		if err := Save(third, c2); err != nil {
+			t.Fatal(err)
+		}
+		// The first file names disks by alias (${sda}); loading resolves
+		// them, so it is the second and third that must agree.
+		if a, b := read(second), read(third); a != b {
+			t.Errorf("not the same after a round trip:\n%s\n---\n%s", a, b)
+		}
+		p1, e1 := c1.Plan()
+		p2, e2 := c2.Plan()
+		if (e1 == nil) != (e2 == nil) || e1 == nil && !slices.Equal(flat(p1.TableCommands()), flat(p2.TableCommands())) {
+			t.Errorf("plans differ: %v / %v", e1, e2)
+		}
+	})
+}
+
+func read(path string) string {
+	data, _ := os.ReadFile(path)
+	return string(data)
+}
+
+func flat(cmds [][]string) []string {
+	var out []string
+	for _, c := range cmds {
+		out = append(out, strings.Join(c, " "))
+	}
+	return out
+}
