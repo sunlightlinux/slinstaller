@@ -565,12 +565,14 @@ restart:
 	// own progress view instead, so the plain command list is skipped there.
 	refuses := false // the dry run has said the install would be refused
 	if !fullscreen {
-		// A resume runs no partition stage: its commands, shown as the
-		// plan, were followed by "nothing is partitioned or formatted".
+		// A resume runs no partition stage: its commands, and what it
+		// releases first, shown as the plan, were followed by "nothing is
+		// partitioned or formatted". (A resume is never a dry run, which
+		// is all refuses is for.)
 		if !resume {
 			fmt.Print(storage.FormatCommands(cmds))
+			refuses = printRelease(plan)
 		}
-		refuses = printRelease(plan)
 		// A Safe install's new partitions are checked against the disk's
 		// table when it runs; the dry run says now what it would refuse,
 		// rather than show a mkfs of an existing partition and leave it at

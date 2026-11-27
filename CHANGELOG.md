@@ -119,8 +119,8 @@ change.
 - The prompt flow's swap size is held to the 1 MiB that the config check
   holds a swap partition and a swap file to: a smaller one was taken at
   the prompt and refused only after the last question, ending the flow.
-- A `--resume` does not print the partition stage as its plan: it runs
-  none. `--skip-validation-all`'s help no longer says it skips all
+- A `--resume` does not print the partition stage as its plan, nor the
+  `wipefs` and teardown said to run before it: it runs none of them. `--skip-validation-all`'s help no longer says it skips all
   validation.
 
 ## [2.2.0] - 2026-11-27

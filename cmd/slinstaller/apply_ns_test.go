@@ -291,9 +291,14 @@ func applyChild(t *testing.T) {
 	// Nor does it show the partition commands as its plan, to be followed
 	// by "nothing is partitioned or formatted".
 	e = newApplyEnv(t)
-	out, _, _ := runWith(t, "", append(append(append([]string{}, e.args...), "--resume"), writeConfig(t, e.base, plainConfig()))...)
+	out, resumeErr, _ := runWith(t, "", append(append(append([]string{}, e.args...), "--resume"), writeConfig(t, e.base, plainConfig()))...)
 	if strings.Contains(out, "mklabel") || strings.Contains(out, "mkfs") {
 		t.Errorf("a resume printed the partition stage it does not run:\n%s", out)
+	}
+	// Nor what that stage releases first: "Before partitioning ..., the
+	// install first runs: wipefs ..." was still printed above it.
+	if strings.Contains(resumeErr, "Before partitioning") || strings.Contains(resumeErr, "wipefs") {
+		t.Errorf("a resume printed the release it does not run:\n%s", resumeErr)
 	}
 	// From a later stage, and not from one that cannot be resumed at.
 	e = newApplyEnv(t)
