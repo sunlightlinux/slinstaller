@@ -2113,6 +2113,46 @@ func (c *Config) Plan() (*storage.Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Here as well as in Validate, which skipValidationAll turns off: the
+	// disk is /dev/<name>, and "../sdz" (with partitions "../sdz1") is
+	// /dev/sdz, which nothing has checked; "" is /dev/ itself.
+	for _, d := range disks {
+		if d.Name == "" || d.Name == "." || d.Name == ".." || strings.Contains(d.Name, "/") {
+			return nil, fmt.Errorf("config: disk %q: give the device's name (e.g. sda), not a path", d.Name)
+		}
+	}
+	// A logical volume is /dev/<vg>/<lv>: an empty or ".." name in either
+	// points mkfs at what lvcreate did not make.
+	lvmNames := func(vg string, lvs []*Media) error {
+		if vg == "" {
+			return nil
+		}
+		if !validLVMName(vg, false) {
+			return fmt.Errorf("config: volume group %q is not a name LVM takes", vg)
+		}
+		for _, lv := range lvs {
+			if lv != nil && !validLVMName(lv.Name, false) {
+				return fmt.Errorf("config: logical volume %q of %s is not a name LVM takes", lv.Name, vg)
+			}
+		}
+		return nil
+	}
+	for _, d := range disks {
+		for _, ch := range d.Children {
+			if ch != nil {
+				if err := lvmNames(ch.VolumeGroup, ch.Children); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	for _, a := range c.Raid {
+		if a != nil {
+			if err := lvmNames(a.VolumeGroup, a.Children); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	if c.ReusePartitions {
 		return c.planReuse(disks)

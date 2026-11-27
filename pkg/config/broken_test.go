@@ -687,3 +687,18 @@ func TestDiskImageTarget(t *testing.T) {
 		t.Errorf("a file: %v", err)
 	}
 }
+
+// A disk is /dev/<name>: with Validate switched off, the plan still
+// refuses a name that is a path or nothing, which would partition /dev/sdz
+// ("../sdz", partitions "../sdz1") or /dev/ itself.
+func TestPlanDiskNameSkipValidationAll(t *testing.T) {
+	for _, name := range []string{"../sdz", "", "..", "mapper/x"} {
+		c := &Config{SkipValidationAll: true, TargetMedia: []*Media{{Name: name, Type: "disk", Children: []*Media{
+			{Name: name + "1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
+			{Name: name + "2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+		}}}}
+		if _, err := c.Plan(); err == nil || !strings.Contains(err.Error(), "not a path") {
+			t.Errorf("disk %q: %v", name, err)
+		}
+	}
+}

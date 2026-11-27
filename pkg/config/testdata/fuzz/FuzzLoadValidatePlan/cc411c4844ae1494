@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("targetMedia:\n- name: 0\n  children:\n  - type: lvm\n    volumeGroup: 0\n    children:\n    - {fstype: ext2}")

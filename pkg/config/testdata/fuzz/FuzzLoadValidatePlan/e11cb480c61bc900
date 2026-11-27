@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("targetMedia:\n- children:\n  - 0:")
