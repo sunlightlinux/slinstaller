@@ -49,11 +49,22 @@ func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
 
 	swap := promptChoice(in, w, "Swap", []string{"partition", "file", "none"}, "partition")
 	swapSize := ""
+	// Size and hostname are checked here, asked again until right: checked
+	// only once everything had been asked, a typo ended the flow. (An ended
+	// input gives the default, which is valid, so these loops end.)
 	if swap != "none" {
 		swapSize = promptDefault(in, w, "Swap size", "2G")
+		for err := config.ValidSwapSize(swapSize); err != nil; err = config.ValidSwapSize(swapSize) {
+			fmt.Fprintf(w, "  %v, try again\n", err)
+			swapSize = promptDefault(in, w, "Swap size", "2G")
+		}
 	}
 
 	hostname := promptDefault(in, w, "Hostname", "sunlight")
+	for err := config.ValidHostname(hostname); err != nil; err = config.ValidHostname(hostname) {
+		fmt.Fprintf(w, "  %v, try again\n", err)
+		hostname = promptDefault(in, w, "Hostname", "sunlight")
+	}
 	// The account is checked as the full-screen form checks it.
 	login := promptDefault(in, w, "Username", "user")
 	for err := config.ValidLogin(login); err != nil; err = config.ValidLogin(login) {

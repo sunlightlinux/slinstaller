@@ -46,8 +46,8 @@ func TestPromptInstall(t *testing.T) {
 		"btrfs",                                  // root filesystem
 		"y",                                      // encrypt
 		"a long passphrase", "a long passphrase", // LUKS passphrase, twice
-		"file", "4G", // swap
-		"box",                            // hostname
+		"file", "0", "4G", // swap: none is not size 0
+		"-bad", "box", // hostname, the first refused
 		"Bad Login!",                     // refused
 		"ion",                            // username
 		"correct horse", "correct horse", // password, twice
@@ -65,7 +65,7 @@ func TestPromptInstall(t *testing.T) {
 		"Selected /dev/nvme0n1 (60GiB Second SSD) - it will be ERASED.", "try again",
 		"Disk:        /dev/nvme0n1, 60GiB Second SSD (ERASED)", "2) /dev/nvme0n1   60GiB    Second SSD", "Root:        btrfs, fills the disk",
 		"Encryption:  yes (LUKS)", "Swap:        4G file", "Hostname:    box", "Admin user:  ion",
-		"Kernel:      Server profile",
+		"Kernel:      Server profile", "a swap of size 0 is no swap", "hostname \"-bad\" must be",
 	} {
 		if !strings.Contains(shown, want) {
 			t.Errorf("prompt output missing %q:\n%s", want, shown)

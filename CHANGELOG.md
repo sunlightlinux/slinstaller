@@ -29,6 +29,10 @@ change.
   the answers are still there. A bad hostname or a duplicate mountpoint
   used to end the program after the wizard, and every section had to be
   filled in again.
+- The text flow checks the swap size and the hostname as they are typed
+  and asks again; a typo there used to end the flow after every question
+  had been answered. A swap size of 0 says to choose none, not that a
+  partition "fills its disk but is not the last".
 - `--help` exits 0 instead of reporting "flag: help requested" as an error.
 
 ### Fixed

@@ -1052,6 +1052,29 @@ func init() {
 // ValidLogin checks a login name as clr-installer does: present, a valid
 // Unix name, no longer than MaxLoginLength, and not one the base system
 // already uses.
+// ValidHostname checks a host name the way Validate does, for a front-end
+// to ask again rather than fail after it has asked everything.
+func ValidHostname(h string) error {
+	if len(h) > 63 || !hostnameRe.MatchString(h) {
+		return fmt.Errorf("hostname %q must be 1-63 characters of letters, digits and hyphens", h)
+	}
+	return nil
+}
+
+// ValidSwapSize checks a swap size a front-end was given: a size with a
+// unit, more than nothing. ("0" means "fill the disk" for a partition,
+// which a swap before the root cannot.)
+func ValidSwapSize(s string) error {
+	n, err := parseSize(s)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("a swap of size 0 is no swap; choose none instead")
+	}
+	return nil
+}
+
 func ValidLogin(login string) error {
 	switch {
 	case login == "":
@@ -1742,8 +1765,10 @@ func (c *Config) Validate() error {
 		add("no administrator has a password (%s): root is locked once there is an administrator, and sudo asks for one - give an administrator a password hash", strings.Join(admins, ", "))
 	}
 
-	if c.Hostname != "" && (len(c.Hostname) > 63 || !hostnameRe.MatchString(c.Hostname)) {
-		add("hostname %q must be 1-63 characters of letters, digits and hyphens", c.Hostname)
+	if c.Hostname != "" {
+		if err := ValidHostname(c.Hostname); err != nil {
+			add("%v", err)
+		}
 	}
 	if c.SwapFileSize != "" {
 		if _, err := parseSize(c.SwapFileSize); err != nil {
