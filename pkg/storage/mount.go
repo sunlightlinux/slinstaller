@@ -77,6 +77,12 @@ func NewMounter(root string) *Mounter {
 func (m *Mounter) MountAll(pl *Plan) error {
 	for _, p := range pl.MountOrder() {
 		target := filepath.Join(m.root, p.Mountpoint)
+		// The deepest directory there already, first: MkdirAll follows
+		// links, and made directories on the live system before the
+		// check after it refused.
+		if err := m.inside(existingParent(target)); err != nil {
+			return err
+		}
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return fmt.Errorf("storage: mkdir %s: %w", target, err)
 		}
@@ -108,6 +114,12 @@ func (m *Mounter) MountMeta() error {
 	for _, name := range metaMounts {
 		src := "/" + name
 		target := filepath.Join(m.root, name)
+		// The deepest directory there already, first: MkdirAll follows
+		// links, and made directories on the live system before the
+		// check after it refused.
+		if err := m.inside(existingParent(target)); err != nil {
+			return err
+		}
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return fmt.Errorf("storage: mkdir %s: %w", target, err)
 		}
@@ -393,4 +405,13 @@ func (m *Mounter) inside(target string) error {
 		return fmt.Errorf("storage: %s leads outside the target (to %s); not mounted on", target, real)
 	}
 	return nil
+}
+
+// existingParent is the deepest existing directory on the way to dir.
+func existingParent(dir string) string {
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Lstat(d); err == nil || d == filepath.Dir(d) {
+			return d
+		}
+	}
 }

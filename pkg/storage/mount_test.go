@@ -107,3 +107,23 @@ func TestMountpointInside(t *testing.T) {
 		t.Errorf("MountAll through the link: %v", err)
 	}
 }
+
+// A root that is itself a link is fine; a mountpoint below a link out of
+// the target makes nothing outside.
+func TestMountpointInsideLinkedRoot(t *testing.T) {
+	real, outside := t.TempDir(), t.TempDir()
+	root := filepath.Join(t.TempDir(), "mnt")
+	os.Symlink(real, root)
+	os.MkdirAll(filepath.Join(root, "boot"), 0o755)
+	if err := NewMounter(root).inside(filepath.Join(root, "boot")); err != nil {
+		t.Errorf("a linked root: %v", err)
+	}
+	os.Symlink(outside, filepath.Join(real, "var"))
+	err := (&Mounter{root: real}).MountAll(&Plan{Parts: []Partition{{Device: "tmpfs", Filesystem: "tmpfs", Mountpoint: "/var/lib/x"}}})
+	if err == nil || !strings.Contains(err.Error(), "leads outside") {
+		t.Errorf("through /var: %v", err)
+	}
+	if ents, _ := os.ReadDir(outside); len(ents) != 0 {
+		t.Errorf("made outside: %v", ents)
+	}
+}
