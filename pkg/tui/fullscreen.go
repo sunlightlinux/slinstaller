@@ -92,13 +92,16 @@ func (m model) buildConfig() (*config.Config, error) {
 			Children: layoutToMedia(m.disks[m.diskIdx].Name, m.parts),
 		}},
 		Hostname: m.hostname, Keyboard: m.keyboard, Language: m.language, Timezone: m.timezone,
-		Users:             users,
-		Kernel:            m.kernel,
-		HTTPSProxy:        strings.TrimSpace(m.proxy),
-		CopyNetwork:       m.copyNetwork,
-		AutoUpdate:        boolPtr(m.autoUpdate != 2),
-		SwupdMirror:       strings.TrimSpace(m.mirror),
-		AllowInsecureHTTP: m.allowInsecure,
+		Users:       users,
+		Kernel:      m.kernel,
+		HTTPSProxy:  strings.TrimSpace(m.proxy),
+		CopyNetwork: m.copyNetwork,
+		AutoUpdate:  boolPtr(m.autoUpdate != 2),
+		SwupdMirror: strings.TrimSpace(m.mirror),
+		// Only for the mirror it was ticked for: left ticked when the mirror
+		// was cleared or made https, it let a plain-http image or report
+		// URL through without being shown anywhere.
+		AllowInsecureHTTP: m.allowInsecure && strings.HasPrefix(strings.TrimSpace(m.mirror), "http://"),
 		ReusePartitions:   m.safeInstall, // Safe install reuses the disk
 	}
 	// The kernel command line: the chosen arguments, plus the live system's

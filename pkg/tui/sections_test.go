@@ -736,3 +736,20 @@ func TestNetworkTestPopup(t *testing.T) {
 		t.Error("the spinner tick did not arrive")
 	}
 }
+
+// Allow insecure installation is ticked for a plain-http mirror; once the
+// mirror is cleared or https, the config does not carry it any more.
+func TestAllowInsecureOnlyWithAnHTTPMirror(t *testing.T) {
+	m := readyModel()
+	m.allowInsecure = true
+	for mirror, want := range map[string]bool{"http://mirror.lan/current": true, "": false, "https://m.example/current": false, "/srv/repo": false} {
+		m.mirror = mirror
+		c, err := m.buildConfig()
+		if err != nil {
+			t.Fatalf("%q: %v", mirror, err)
+		}
+		if c.AllowInsecureHTTP != want {
+			t.Errorf("mirror %q: allowInsecureHTTP %v, want %v", mirror, c.AllowInsecureHTTP, want)
+		}
+	}
+}
