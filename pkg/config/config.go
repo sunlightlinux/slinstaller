@@ -1399,6 +1399,11 @@ func (c *Config) Validate() error {
 			if ch == nil {
 				continue
 			}
+			// A partition cut now holds nothing to keep: preserved, it was
+			// made and never formatted, and the mount stage failed on it.
+			if ch.Create && ch.Preserve {
+				add("%s: create and preserve: a partition created now has nothing on it to keep", ch.Name)
+			}
 			if ch.Create && strings.TrimSpace(ch.Start) == "" {
 				if inFree++; inFree == 2 {
 					add("%s: only one partition per disk can be created without a start (in the largest free region); give the others a start", d.Name)

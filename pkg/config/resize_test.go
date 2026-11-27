@@ -109,3 +109,13 @@ func TestKeptUnmountedPartitionMayHoldAnyFilesystem(t *testing.T) {
 		t.Errorf("formatting as ntfs: %v", err)
 	}
 }
+
+// A partition a reuse install creates has nothing on it to keep: marked
+// preserve too, it was cut, never formatted, and failed at the mount.
+func TestCreateAndPreserveIsRefused(t *testing.T) {
+	c := resizeConfig()
+	c.TargetMedia[0].Children[2].Preserve = true
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "create and preserve") {
+		t.Errorf("create with preserve: %v", err)
+	}
+}

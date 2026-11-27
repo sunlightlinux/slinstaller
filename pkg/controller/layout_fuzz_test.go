@@ -118,7 +118,9 @@ func genConfig(data []byte, s string) *config.Config {
 				ch.Children = lvs()
 			}
 			if c.ReusePartitions {
-				ch.Preserve, ch.Create = flags&8 != 0, flags&16 != 0
+				// A created partition keeps nothing: never both.
+				ch.Create = flags&16 != 0
+				ch.Preserve = flags&8 != 0 && !ch.Create
 				ch.Start, ch.Resize = g.pick(genStarts...), g.pick(genResizes...)
 			}
 			d.Children = append(d.Children, ch)
