@@ -229,7 +229,7 @@ func (m model) updateNetForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.view = viewNetList
 				return m, nil
 			}
-			m.formStep = 1 // static: collect fields
+			m.formStep, m.formErr = 1, "" // static: collect fields
 			ti := textinput.New()
 			ti.Focus()
 			ti.SetValue(ni.Addr)
@@ -240,12 +240,30 @@ func (m model) updateNetForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if key.String() == "enter" {
 		v := strings.TrimSpace(m.input.Value())
+		// Each field is checked as it is typed: an address that did not
+		// parse was dropped later without a word, and the interface
+		// installed on DHCP while the hub said it was static.
+		m.formErr = ""
 		switch m.formStep {
 		case 1:
+			if parseCIDR(v) == nil {
+				m.formErr = "not an address in CIDR form (address/prefix, e.g. 192.168.1.50/24)"
+				return m, nil
+			}
 			ni.Addr = v
 		case 2:
+			if v != "" && net.ParseIP(v) == nil {
+				m.formErr = "not an IP address"
+				return m, nil
+			}
 			ni.Gateway = v
 		case 3:
+			for _, d := range strings.Fields(v) {
+				if net.ParseIP(d) == nil {
+					m.formErr = fmt.Sprintf("%q is not an IP address", d)
+					return m, nil
+				}
+			}
 			ni.DNS = v
 			ni.Static = true
 			m.view = viewNetList
@@ -345,6 +363,9 @@ func (m model) netFormView() string {
 		footer.Width(w).Render("  " + hint),
 		lineBG.Width(w).Render(""),
 		lineBG.Width(w).Render("  " + m.input.View()),
+	}
+	if m.formErr != "" {
+		body = append(body, lineBG.Width(w).Render(""), warnText.Width(w).Render("  "+m.formErr))
 	}
 	return m.screen(body, "type · [Enter] next · [Esc] cancel")
 }

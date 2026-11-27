@@ -55,6 +55,10 @@ change.
 
 ### Fixed
 
+- The full-screen network form took any address: one without its prefix
+  (`192.168.1.50`) was dropped later and the interface installed on DHCP
+  while the hub showed it static. Address, gateway and DNS are checked as
+  they are typed.
 - A logical volume that fills its group, declared before one of a fixed
   size, was created first and took everything; the next `lvcreate` failed
   after the disk was wiped. Sized volumes are created first now.

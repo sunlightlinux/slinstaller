@@ -114,6 +114,14 @@ func TestNetworkInterfaces(t *testing.T) {
 		t.Fatalf("form: view %d cursor %d", m.view, m.edCursor)
 	}
 	m = send(send(m, down), enter)
+	// An address without its prefix, or a gateway that is not an IP, is
+	// refused where it is typed, not dropped later for DHCP.
+	if bad := send(typeText(m, "192.168.1.50"), enter); bad.formStep != 1 || !strings.Contains(viewOf(bad), "not an address in CIDR form") {
+		t.Errorf("an address without a prefix went through: step %d\n%s", bad.formStep, viewOf(bad))
+	}
+	if bad := send(typeText(send(typeText(m, "10.0.0.2/24"), enter), "not-an-ip"), enter); bad.formStep != 2 || !strings.Contains(viewOf(bad), "not an IP address") {
+		t.Errorf("a bad gateway went through: step %d", bad.formStep)
+	}
 	for _, step := range []struct{ title, value string }{
 		{"Address in CIDR form", "10.0.0.2/24"},
 		{"Gateway (blank for none)", "10.0.0.1"},
