@@ -115,7 +115,8 @@ change.
 - **Wizard:** Esc on the menu asks before leaving (one Esc too many lost
   every answer); Allow Insecure Installation goes with the plain-http
   mirror it was ticked for, not into the config unseen once the mirror
-  was cleared.
+  was cleared; Installation Media marks the disk Confirm will take before
+  one is chosen.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 
