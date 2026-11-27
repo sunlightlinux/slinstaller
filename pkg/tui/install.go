@@ -66,7 +66,9 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 	stop := make(chan struct{})
 	opts.Stop = stop
 	devs, _ := blockdev.List() // best effort: sizes and models for the confirmation
+	result := make(chan error, 1)
 	m := installModel{
+		result:  result,
 		confirm: confirmLines(plan, devs),
 		cfg:     cfg, opts: opts, disk: plan.Disk, ch: ch, stop: stop,
 		total: 12, // the controller's stage count; the first update corrects it
@@ -79,6 +81,9 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 		return false, runErr
 	}
 	fm := final.(installModel)
+	if fm.cancelled && fm.stopping {
+		return false, awaitAbandoned(ch, result)
+	}
 	if fm.cancelled {
 		return false, fmt.Errorf("aborted")
 	}
@@ -115,6 +120,32 @@ var abandonChildren = func() {
 	signal.Ignore(syscall.SIGTERM)
 	_ = syscall.Kill(0, syscall.SIGTERM)
 }
+
+// awaitAbandoned waits, for a while, for an install the operator left
+// mid-step to wind down — its commands were ended (abandonChildren), so
+// the step fails and the controller unmounts — taking the messages it
+// still sends so it is not blocked on them. Returning at once left that
+// cleanup racing the program's exit, and the "aborted" of a cancelled
+// confirmation skipped the diagnostics this failure deserves.
+func awaitAbandoned(ch chan tea.Msg, result chan error) error {
+	timeout := time.After(15 * time.Second)
+	for {
+		select {
+		case err := <-result:
+			if err == nil {
+				return fmt.Errorf("left by the operator during the install")
+			}
+			return fmt.Errorf("left by the operator during the install: %w", err)
+		case <-ch:
+		case <-timeout:
+			return fmt.Errorf("left by the operator during the install; it did not wind down within 15s, so the target may still be mounted")
+		}
+	}
+}
+
+// AbandonChildren is abandonChildren for the text flow, whose second
+// SIGTERM (a service manager, timeout(1)) reaches the installer alone.
+func AbandonChildren() { abandonChildren() }
 
 // Messages pushed from the install goroutine into the model.
 type (
@@ -499,6 +530,10 @@ type installModel struct {
 	confirm   []string
 	onInstall bool
 
+	// result gets the install's error when controller.Install returns,
+	// for RunInstall to wait on after the operator left mid-step.
+	result chan error
+
 	steps   []installStep // every stage, with how far it has got
 	spin    spinner.Model // turns beside the running stage
 	details bool          // the full command log is on screen
@@ -692,9 +727,12 @@ func (m *installModel) start() tea.Cmd {
 	// and corrupt the full-screen view.
 	opts.Output = &lineWriter{sink: sink}
 
-	cfg, now := m.cfg, m.now
+	cfg, now, result := m.cfg, m.now, m.result
 	go func() {
 		err := controller.Install(cfg, opts)
+		if result != nil {
+			result <- err
+		}
 		if f != nil {
 			mu.Lock()
 			fmt.Fprintf(f, "slinstaller install log, ended %s: %v\n", now().Format(time.RFC1123), errOrOK(err))

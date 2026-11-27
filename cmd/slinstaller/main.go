@@ -986,6 +986,9 @@ func installStoppable(cfg *config.Config, opts controller.Options) error {
 		select {
 		case <-sigs:
 			fmt.Fprintln(os.Stderr, "\nLeaving now; the step running is abandoned and the target may still be mounted.")
+			// A Ctrl+C on the terminal reaches the commands too; a SIGTERM
+			// sent to the installer does not, and they went on writing.
+			tui.AbandonChildren()
 			os.Exit(130)
 		case <-done:
 		}

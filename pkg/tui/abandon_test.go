@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // abandonChildren ends what the installer started and leaves the installer
@@ -39,5 +42,23 @@ func TestAbandonChildren(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "ABANDONED") {
 		t.Fatalf("child: %v\n%s", err, out)
+	}
+}
+
+// Leaving mid-step waits for the install to wind down, taking the messages
+// it still sends, and reports it as a failure (not a cancelled
+// confirmation, which writes no diagnostics).
+func TestAwaitAbandoned(t *testing.T) {
+	ch := make(chan tea.Msg, 2)
+	result := make(chan error, 1)
+	go func() {
+		for i := 0; i < 10; i++ { // more than the buffer: blocks unless taken
+			ch <- logMsg("still writing")
+		}
+		result <- errors.New("controller: base-install: signal: terminated")
+	}()
+	err := awaitAbandoned(ch, result)
+	if err == nil || err.Error() == "aborted" || !strings.Contains(err.Error(), "base-install") {
+		t.Errorf("awaitAbandoned = %v", err)
 	}
 }
