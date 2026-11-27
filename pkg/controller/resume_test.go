@@ -94,6 +94,39 @@ func TestResumeReusesTheKeyfile(t *testing.T) {
 	}
 }
 
+// A first attempt that failed between two volumes left one without the
+// keyfile in a slot: the resume adds it there, and only there.
+func TestResumeAddsAMissingKeySlot(t *testing.T) {
+	args := fakeCryptsetup(t)
+	home := &config.Media{Name: "sda3", Type: "crypt", FsType: "ext4", Mountpoint: "/home"}
+	var r recorder
+	in, _ := cryptInstaller(t, cryptConfig("/boot", home), &r)
+	if err := in.crypttab(); err != nil {
+		t.Fatal(err)
+	}
+	// The keyfile opens sda2, not sda3.
+	script := "#!/bin/sh\necho \"$@\" >> \"" + args + "/args\"\n" +
+		"case \"$*\" in *--test-passphrase*sda3) exit 2 ;; esac\n" +
+		"[ \"$1\" = luksUUID ] && { echo \"uuid-$(basename \"$2\")\"; exit 0; }\ncat > /dev/null\n"
+	os.WriteFile(filepath.Join(args, "cryptsetup"), []byte(script), 0o755)
+	os.Remove(filepath.Join(args, "args"))
+
+	in.opts.ResumeFrom, in.keyfile = "fstab", ""
+	if err := in.crypttab(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(args, "args"))
+	var adds []string
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.Contains(l, "luksAddKey") {
+			adds = append(adds, l)
+		}
+	}
+	if len(adds) != 1 || !strings.Contains(adds[0], "/dev/sda3") {
+		t.Errorf("luksAddKey on resume: %q\nall:\n%s", adds, data)
+	}
+}
+
 func TestResumeFromValidation(t *testing.T) {
 	var r recorder
 	err := Install(twoPartConfig(), Options{ResumeFrom: "partition", Runner: r.run, Devices: noDevices})

@@ -911,9 +911,21 @@ const keyfilePath = "/etc/cryptkeys/slinstaller.key"
 // initramfs, so it stays on the root for the post-boot runit service alone.
 func (in *installer) setupKeyfile(enc []storage.Partition) error {
 	full := filepath.Join(in.opts.Root, keyfilePath)
-	// Resuming, the first attempt's keyfile is already in the target and in
-	// the volumes' key slots: a second one would only use up another slot.
-	if in.opts.ResumeFrom == "" || !exists(full) {
+	// Resuming, the first attempt's keyfile is already in the target and,
+	// mostly, in the volumes' key slots: a second key would only use up
+	// another slot. But that attempt may have failed between two volumes,
+	// so each one the keyfile does not open yet gets it now — skipped
+	// whole, a volume left without it did not open at boot.
+	if in.opts.ResumeFrom != "" && exists(full) {
+		for _, p := range enc {
+			if luks.KeyOpens(p.Device, full) {
+				continue
+			}
+			if err := luks.AddKey(p.Device, full, in.opts.Passphrase, in.output()); err != nil {
+				return err
+			}
+		}
+	} else {
 		key := make([]byte, 2048)
 		if _, err := rand.Read(key); err != nil {
 			return fmt.Errorf("generate keyfile: %w", err)

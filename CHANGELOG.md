@@ -12,6 +12,9 @@ change.
 
 ### Fixed
 
+- A resume after the keyfile was added to some encrypted volumes but not
+  all skipped them all, and crypttab pointed the rest at a key they did
+  not hold. Each volume the keyfile does not open is given it now.
 - When the install-time resolv.conf could not be taken back out, the end
   of the install returned before unmounting, leaving the target mounted.
   It is unmounted either way now.

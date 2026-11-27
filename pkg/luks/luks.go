@@ -65,6 +65,12 @@ func AddKey(device, keyfile, passphrase string, out io.Writer) error {
 	return run(args, passphrase, out)
 }
 
+// KeyOpens reports whether keyfile opens the LUKS volume on device, by a
+// test open that maps nothing.
+func KeyOpens(device, keyfile string) bool {
+	return exec.Command("cryptsetup", "open", "--test-passphrase", "--key-file", keyfile, device).Run() == nil
+}
+
 func run(args []string, passphrase string, out io.Writer) error {
 	if out == nil {
 		out = os.Stderr
