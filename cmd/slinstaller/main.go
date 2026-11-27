@@ -109,7 +109,7 @@ func run(args []string) error {
 	fs.BoolVar(&apply, "apply", false,
 		"carry out the plan (destructive); without it, the plan is only printed")
 	fs.StringVar(&through, "through", "",
-		"with --apply, run only up to this install stage (partition, mount, meta-fs, base-install, fstab) - for VM testing")
+		"with --apply, run only up to this install stage: "+strings.Join(controller.StageNames(), ", ")+" - for VM testing")
 	fs.StringVar(&root, "root", "/mnt", "with --apply, the target mount tree")
 	fs.StringVar(&repo, "repo", "",
 		"xbps repository for the base system (default: the config's swupdMirror, else Void's official repo)")
@@ -519,9 +519,10 @@ restart:
 	// The plan is shown whether or not it will run, so --apply executes
 	// exactly what a dry run printed. The full-screen front-end shows its
 	// own progress view instead, so the plain command list is skipped there.
+	refuses := false // the dry run has said the install would be refused
 	if !fullscreen {
 		fmt.Print(storage.FormatCommands(cmds))
-		printRelease(plan)
+		refuses = printRelease(plan)
 		// A Safe install's new partitions are checked against the disk's
 		// table when it runs; the dry run says now what it would refuse,
 		// rather than show a mkfs of an existing partition and leave it at
@@ -529,6 +530,7 @@ restart:
 		if !plan.Wipe && !apply {
 			if err := plan.CheckCreateNumbers(); err != nil && strings.Contains(err.Error(), "is to be created") {
 				fmt.Fprintf(os.Stderr, "\n(it will refuse: %v)\n", err)
+				refuses = true
 			}
 		}
 	}
@@ -539,6 +541,13 @@ restart:
 	}
 
 	if !apply && !systemCheck {
+		// Not an invitation to --apply what it has just said will be
+		// refused. (Still exit 0: whether a disk is in use is a fact of
+		// the machine the dry run runs on, not of the config.)
+		if refuses {
+			fmt.Fprintln(os.Stderr, "\nDry run. As it stands, --apply would refuse this - see \"it will refuse\" above.")
+			return nil
+		}
 		if plan.Wipe {
 			fmt.Fprintf(os.Stderr,
 				"\nDry run. Re-run with --apply to partition %s - this destroys its contents.\n",
@@ -670,6 +679,11 @@ restart:
 	if systemCheck {
 		logPath = ""
 	}
+	// Refused before the log is opened: opening truncates it, and the one
+	// there may be a failed install's, wanted for its post-mortem.
+	if !systemCheck && geteuid() != 0 {
+		return fmt.Errorf("--apply must run as root")
+	}
 	var quiet io.Writer // set when the commands' output goes to the file alone
 	if logPath != "" {
 		var lf *os.File
@@ -742,7 +756,7 @@ restart:
 	}
 
 	if !systemCheck {
-		if os.Geteuid() != 0 {
+		if geteuid() != 0 {
 			return fmt.Errorf("--apply must run as root")
 		}
 		if lock == nil {
@@ -1069,7 +1083,9 @@ restart:
 		fmt.Fprintf(os.Stderr, "(stopped after stage %q; target left mounted at %s)\n", through, root)
 		return nil
 	}
-	if logPath != "" {
+	// Not with postArchive: false, which keeps it off the target. (A copy
+	// that failed was warned about where it failed.)
+	if logPath != "" && (cfg.PostArchive == nil || *cfg.PostArchive) {
 		fmt.Fprintln(os.Stderr, "The install log is saved in /root/slinstaller.log on the installed system.")
 	}
 	// postReboot: an unattended install that should come up into the new
@@ -1265,6 +1281,9 @@ func resolvePackages(opts controller.Options, cfg *config.Config) error {
 	return nil
 }
 
+// geteuid is os.Geteuid; a variable so tests reach the checks after it.
+var geteuid = os.Geteuid
+
 // hostXBPSArch is this machine's architecture as xbps names it.
 func hostXBPSArch() string {
 	switch runtime.GOARCH {
@@ -1308,13 +1327,13 @@ func powerCommand(action string) error {
 // before partitioning (blockdev.Teardown), as the controller finds them
 // now. It is read from the live system, so it is shown apart from the
 // plan's own commands.
-func printRelease(plan *storage.Plan) {
+func printRelease(plan *storage.Plan) (refuses bool) {
 	if !plan.Wipe {
-		return
+		return false
 	}
 	devs, err := blockdev.List()
 	if err != nil {
-		return
+		return false
 	}
 	var disks []blockdev.Device
 	var names []string
@@ -1334,8 +1353,10 @@ func printRelease(plan *storage.Plan) {
 	for _, d := range disks {
 		if why := d.InUse(); why != "" {
 			fmt.Fprintf(os.Stderr, "  (it will refuse: %s)\n", why)
+			refuses = true
 		}
 	}
+	return refuses
 }
 
 // printDisks lists the machine's whole disks and their partitions.

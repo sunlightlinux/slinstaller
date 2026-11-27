@@ -218,11 +218,15 @@ func TestDryRun(t *testing.T) {
 	for _, want := range []string{
 		"Before partitioning " + testDisk, "wipefs -a " + testDisk + "p1",
 		"(it will refuse: " + testDisk + "p1 is mounted at /mnt/data)",
-		"Dry run. Re-run with --apply to partition " + testDisk,
+		// Not "Re-run with --apply" after saying --apply would refuse.
+		"As it stands, --apply would refuse this",
 	} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("dry run missing %q:\n%s", want, errOut)
 		}
+	}
+	if strings.Contains(errOut, "Re-run with --apply") {
+		t.Errorf("invited to --apply what it would refuse:\n%s", errOut)
 	}
 	if _, err := os.Stat(filepath.Join(bin, "parted.args")); err == nil {
 		t.Error("a dry run ran parted")
@@ -305,14 +309,23 @@ func TestApplyNeedsRoot(t *testing.T) {
 	path := writeConfig(t, dir, plainConfig())
 	log := filepath.Join(dir, "install.log")
 
+	os.WriteFile(log, []byte("a failed install's log\n"), 0o600)
 	_, _, err := runWith(t, "", "--apply", "--log", log, path)
 	wantRunErr(t, "--apply as a user", err, "--apply must run as root")
+	if got, _ := os.ReadFile(log); string(got) != "a failed install's log\n" {
+		t.Errorf("the log was truncated before the refusal: %q", got)
+	}
 	_, _, err = runWith(t, "")
 	wantRunErr(t, "interactive as a user", err, "interactive install must run as root")
 
-	// A --log that cannot be written is an error: it was asked for.
+	// A --log that cannot be written is an error: it was asked for. (As
+	// root: a user is refused before the log is opened, which truncates it.)
+	asRoot := func() { geteuid = func() int { return 0 } }
+	defer func() { geteuid = os.Geteuid }()
+	asRoot()
 	_, _, err = runWith(t, "", "--apply", "--log", filepath.Join(dir, "no-such-dir", "x.log"), path)
 	wantRunErr(t, "unwritable --log", err, "--log:")
+	geteuid = os.Geteuid
 
 	// A local repository under the target root would vanish when the target
 	// is mounted over it.
@@ -336,6 +349,7 @@ func TestApplyNeedsRoot(t *testing.T) {
 	extra := plainConfig()
 	extra.Packages = []string{"vim", "vim"}
 	t.Setenv("TMPDIR", filepath.Join(dir, "no-such-dir"))
+	asRoot()
 	_, _, err = runWith(t, "", "--apply", "--log", log, writeConfig(t, dir, extra))
 	wantRunErr(t, "no temp directory for the keys", err, "seed the Sunlight repo key")
 }
