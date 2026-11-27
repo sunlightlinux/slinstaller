@@ -360,3 +360,17 @@ func TestApplyLogLevel(t *testing.T) {
 		}
 	}
 }
+
+// postArchive: false, clr-installer's switch, keeps the log off the target.
+func TestPostArchiveFalse(t *testing.T) {
+	root, live := t.TempDir(), filepath.Join(t.TempDir(), "slinstaller.log")
+	os.WriteFile(live, []byte("log\n"), 0o600)
+	off := false
+	in := &installer{cfg: &config.Config{PostArchive: &off}, opts: Options{Root: root, LogFile: live}}
+	if err := in.archiveLog(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "root", "slinstaller.log")); err == nil {
+		t.Error("the log was archived with postArchive: false")
+	}
+}

@@ -2080,7 +2080,8 @@ func bootsSlinit(root string, remove map[string]bool) bool {
 // beside the saved config. It is private to root: it lists every command
 // the install ran.
 func (in *installer) archiveLog() error {
-	if in.opts.LogFile == "" {
+	// postArchive: false (clr-installer's) keeps the log off the target.
+	if in.opts.LogFile == "" || (in.cfg != nil && in.cfg.PostArchive != nil && !*in.cfg.PostArchive) {
 		return nil
 	}
 	data, err := os.ReadFile(in.opts.LogFile)

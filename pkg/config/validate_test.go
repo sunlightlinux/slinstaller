@@ -210,3 +210,19 @@ targetMedia:
 		t.Errorf("a clr-installer config's ignored keys were listed: %v", k)
 	}
 }
+
+// clr-installer keys slinstaller knows and ignores are not reported.
+func TestClrImageKeysAreQuiet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	os.WriteFile(path, []byte("iso: true\nisoPublisher: x\nkeepImage: true\ncopySwupd: false\npostArchive: false\n"), 0o644)
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.UnknownKeys()) != 0 {
+		t.Errorf("reported: %v", c.UnknownKeys())
+	}
+	if c.PostArchive == nil || *c.PostArchive {
+		t.Error("postArchive: false not read")
+	}
+}

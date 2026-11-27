@@ -112,6 +112,10 @@ type Config struct {
 	// swapFileSize. A human size such as "2G".
 	SwapFileSize string `yaml:"swapFileSize,omitempty"`
 
+	// PostArchive is clr-installer's switch for copying the install log
+	// into the installed system; it is on unless set to false.
+	PostArchive *bool `yaml:"postArchive,omitempty"`
+
 	// Raid declares software RAID arrays. Each array's members are the
 	// `type: raid` partitions (across the disks) that carry its name; the
 	// array holds a filesystem at /dev/md/<name>, like any other mount.
@@ -246,6 +250,9 @@ func (c *Config) UnknownKeys() []string { return c.unknown }
 var clrIgnored = map[string]bool{
 	"model": true, "majMin": true, "ro": true, "rm": true, "state": true,
 	"telemetry": true, "telemetryURL": true, "telemetryTID": true, "telemetryPolicy": true,
+	// Image and ISO generation, and Clear's swupd: things this installer
+	// does not do (an image target is refused with its own message).
+	"iso": true, "isoPublisher": true, "isoApplicationId": true, "keepImage": true, "copySwupd": true,
 }
 
 // unknownKeys walks a YAML node against the type it is decoded into and
