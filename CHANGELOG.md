@@ -18,6 +18,23 @@ change.
   ran under `--apply` without having been shown. They are printed now in
   the order the stage runs them, and a test checks the stage runs that
   list and nothing else.
+- **An account the target already has gets what the config says of it.**
+  A login already in the target's `/etc/passwd` (an image that carries it)
+  skipped `useradd` and nothing else was done: it kept the image's
+  password and stayed out of `wheel` while root was locked for there
+  being an administrator. It is given the config's group, name and
+  password with `usermod`.
+- **Packages, kernels and env names that are not names are refused**,
+  with `skipValidationAll` too. `packages: [-r, /]` reached
+  `xbps-install` as options and installed into the live system's root;
+  an empty env name replaced every `$` in the hooks, and one beginning
+  with `-` was an option to `env`.
+- **Revert, Cancel and Esc on Manage User** go back to the accounts the
+  table was opened with, as clr-installer's do. Revert deleted every
+  account, those confirmed on an earlier visit too, and Cancel kept the
+  changes.
+- `--unmount` and `--in-target` are refused with another one-shot mode
+  (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 
 ## [2.2.0] - 2026-11-27
 
