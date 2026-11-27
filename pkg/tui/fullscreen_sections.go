@@ -352,7 +352,8 @@ func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Type == tea.KeyRunes && len(key.Runes) > 0:
 		// A paste comes as one key of several runes: ignored, the
 		// unfiltered list's first entry was what Enter then chose.
-		m.listFilter += string(key.Runes)
+		// A bracketed paste keeps the line break it was copied with.
+		m.listFilter += strings.TrimRight(string(key.Runes), "\r\n")
 		m.listCursor = 0
 	}
 	// Keep the cursor within the (possibly re-filtered) list.

@@ -25,7 +25,7 @@ func TestListFilterEditsWholeCharacters(t *testing.T) {
 		t.Errorf("Backspace after ü left %q", got.listFilter)
 	}
 
-	paste := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Zürich"), Paste: true}
+	paste := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Zürich\n"), Paste: true} // copied with its line break
 	got = send(send(m, paste), enter)
 	if got.timezone != "Europe/Zürich" {
 		t.Errorf("pasted filter chose %q", got.timezone)
