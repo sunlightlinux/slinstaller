@@ -414,6 +414,39 @@ func TestValidKeymap(t *testing.T) {
 	}
 }
 
+func TestValidLocale(t *testing.T) {
+	savedL, savedV := localesFile, libcLocalesFile
+	defer func() { localesFile, libcLocalesFile = savedL, savedV }()
+
+	localesFile = filepath.Join(t.TempDir(), "absent")
+	libcLocalesFile = filepath.Join(t.TempDir(), "absent")
+	if _, checked := ValidLocale("xx_YY.garbage"); checked {
+		t.Error("no locale list should be unchecked")
+	}
+
+	// Void's libc-locales: every line commented until it is enabled.
+	libcLocalesFile = filepath.Join(t.TempDir(), "libc-locales")
+	os.WriteFile(libcLocalesFile, []byte("#en_US.UTF-8 UTF-8\nro_RO.UTF-8 UTF-8\n#de_DE@euro ISO-8859-15\n"), 0o644)
+	for lang, want := range map[string]bool{
+		"en_US.UTF-8": true, "en_US.utf8": true, "ro_RO.UTF-8": true, "de_DE@euro": true,
+		"C": true, "C.UTF-8": true, "POSIX": true,
+		"xx_YY.garbage": false, "en_US.UTF-8 x": false, "en_US": false, "en_GB.UTF-8": false,
+	} {
+		if ok, checked := ValidLocale(lang); ok != want || !checked {
+			t.Errorf("ValidLocale(%q) = %v, %v; want %v, true", lang, ok, checked, want)
+		}
+	}
+
+	// glibc's SUPPORTED is read first, in either of its spellings.
+	localesFile = filepath.Join(t.TempDir(), "SUPPORTED")
+	os.WriteFile(localesFile, []byte("fr_FR.UTF-8 UTF-8\nja_JP.EUC-JP/EUC-JP \\\n"), 0o644)
+	for _, lang := range []string{"fr_FR.UTF-8", "ja_JP.eucjp", "ro_RO.UTF-8"} {
+		if ok, _ := ValidLocale(lang); !ok {
+			t.Errorf("ValidLocale(%q) refused", lang)
+		}
+	}
+}
+
 func TestListTimezonesKeymapsLocales(t *testing.T) {
 	savedZ, savedK, savedL := zoneinfoDir, keymapsDir, localesFile
 	defer func() { zoneinfoDir, keymapsDir, localesFile = savedZ, savedK, savedL }()

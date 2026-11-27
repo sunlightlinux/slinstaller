@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/sunlightlinux/slinstaller/pkg/config"
+	"github.com/sunlightlinux/slinstaller/pkg/system"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,15 +88,20 @@ func TestUnderRoot(t *testing.T) {
 // has. v1.10.0 checked "" as a name and refused every install that did not
 // set both, the serial text flow included.
 func TestCheckLocale(t *testing.T) {
-	if err := checkLocale("", ""); err != nil {
+	if err := checkLocale("", "", ""); err != nil {
 		t.Errorf("empty timezone and keymap refused: %v", err)
 	}
 	if _, err := os.Stat("/usr/share/zoneinfo"); err == nil {
-		if err := checkLocale("Not/AZone", ""); err == nil {
+		if err := checkLocale("Not/AZone", "", ""); err == nil {
 			t.Error("an unknown timezone was accepted")
 		}
-		if err := checkLocale("UTC", ""); err != nil {
+		if err := checkLocale("UTC", "", ""); err != nil {
 			t.Errorf("UTC refused: %v", err)
+		}
+	}
+	if ok, checked := system.ValidLocale("xx_YY.garbage"); checked && !ok {
+		if err := checkLocale("", "", "xx_YY.garbage"); err == nil || !strings.Contains(err.Error(), "language") {
+			t.Errorf("an unknown language was accepted: %v", err)
 		}
 	}
 }

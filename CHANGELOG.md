@@ -12,6 +12,11 @@ change.
 
 ### Fixed
 
+- **The language was never checked.** `language: xx_YY.garbage` was
+  written to the target's `LANG` as given. It is now checked, like the
+  timezone and keymap, against the locales the live system's C library
+  lists (glibc's `SUPPORTED` or `/etc/default/libc-locales`), and left
+  unchecked where there is no such list (musl).
 - **A misspelt config key was silently ignored.** `encryptd: true`
   loaded without a word and the install was not encrypted. Keys nothing
   reads are now listed as warnings, with their path, where the plan

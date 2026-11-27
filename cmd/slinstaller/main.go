@@ -416,11 +416,11 @@ restart:
 		return installDiskImage(cfg, rest[0], apply, stdin)
 	}
 
-	// Catch a mistyped timezone or keymap here, before anything is wiped,
+	// Catch a mistyped timezone, keymap or language here, before anything is wiped,
 	// but only when the live system actually has the data to check against
 	// (so a minimal medium that lacks it does not reject a valid value).
 	if !cfg.SkipValidationAll {
-		if err := checkLocale(cfg.Timezone, cfg.Keyboard); err != nil {
+		if err := checkLocale(cfg.Timezone, cfg.Keyboard, cfg.Language); err != nil {
 			return err
 		}
 	}
@@ -995,12 +995,12 @@ func installStoppable(cfg *config.Config, opts controller.Options) error {
 	return controller.Install(cfg, opts)
 }
 
-// checkLocale rejects a timezone or keymap the live system does not know.
-// An empty one is not checked: it means "leave the target's default", as
-// system.Timezone and system.Keymap apply it, and the serial text flow
+// checkLocale rejects a timezone, keymap or language the live system does
+// not know. An empty one is not checked: it means "leave the target's
+// default", as system.Timezone, system.Keymap and system.Locale apply it, and the serial text flow
 // never asks for either. Checking "" as a name refused every such install
 // before it began.
-func checkLocale(tz, keymap string) error {
+func checkLocale(tz, keymap, lang string) error {
 	if tz != "" {
 		if ok, checked := system.ValidTimezone(tz); checked && !ok {
 			return fmt.Errorf("timezone %q is not a known zoneinfo zone (e.g. UTC, Europe/Bucharest)", tz)
@@ -1009,6 +1009,11 @@ func checkLocale(tz, keymap string) error {
 	if keymap != "" {
 		if ok, checked := system.ValidKeymap(keymap); checked && !ok {
 			return fmt.Errorf("keymap %q is not among the system's console keymaps (e.g. us, de, ro)", keymap)
+		}
+	}
+	if lang != "" {
+		if ok, checked := system.ValidLocale(lang); checked && !ok {
+			return fmt.Errorf("language %q is not a locale the system's C library supports (e.g. en_US.UTF-8)", lang)
 		}
 	}
 	return nil

@@ -148,6 +148,10 @@ var (
 // SUPPORTED). A variable so tests can point it elsewhere.
 var localesFile = "/usr/share/i18n/SUPPORTED"
 
+// libcLocalesFile is Void's list of the locales glibc can generate, each
+// line commented until enabled (see Locale). A variable for tests.
+var libcLocalesFile = "/etc/default/libc-locales"
+
 // ListTimezones returns the zoneinfo zones on the live system, sorted — the
 // candidates for the Choose Timezone list. The tab/list metadata files and
 // the posix/right duplicate trees are skipped. Empty when there is no
@@ -225,7 +229,7 @@ var localesFallback = []string{
 // then Void's commented /etc/default/libc-locales, and falls back to a
 // built-in common set so the list is never empty.
 func ListLocales() []string {
-	for _, path := range []string{localesFile, "/etc/default/libc-locales"} {
+	for _, path := range []string{localesFile, libcLocalesFile} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -266,6 +270,49 @@ func ValidTimezone(tz string) (ok, checked bool) {
 	}
 	fi, err := os.Stat(filepath.Join(zoneinfoDir, tz))
 	return err == nil && !fi.IsDir(), true
+}
+
+// ValidLocale reports whether lang is a locale the live system's C library
+// can generate: listed in glibc's SUPPORTED or in libc-locales (enabled or
+// not), or one every libc has (C, POSIX). The codeset is compared as glibc
+// normalises it, so en_US.utf8 is en_US.UTF-8. checked is false when there
+// is no list to check against (a musl system).
+func ValidLocale(lang string) (ok, checked bool) {
+	switch lang {
+	case "C", "POSIX", "C.UTF-8", "C.utf8":
+		return true, true
+	}
+	want := normLocale(lang)
+	for _, path := range []string{localesFile, libcLocalesFile} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		checked = true
+		for _, line := range strings.Split(string(data), "\n") {
+			// SUPPORTED: "en_US.UTF-8 UTF-8" (glibc's source tree writes
+			// "en_US.UTF-8/UTF-8 \"); libc-locales: "#en_US.UTF-8 UTF-8".
+			f := strings.Fields(strings.TrimLeft(line, "# \t"))
+			if len(f) > 0 {
+				name, _, _ := strings.Cut(f[0], "/")
+				if normLocale(name) == want {
+					return true, true
+				}
+			}
+		}
+	}
+	return false, checked
+}
+
+// normLocale lower-cases a locale's codeset and drops its punctuation, as
+// glibc does when it looks a locale up (UTF-8, utf8 and UTF8 are one).
+func normLocale(lang string) string {
+	name, codeset, ok := strings.Cut(lang, ".")
+	if !ok {
+		return lang
+	}
+	codeset = strings.NewReplacer("-", "", "_", "").Replace(strings.ToLower(codeset))
+	return name + "." + codeset
 }
 
 // ValidKeymap reports whether code names a console keymap the live system
