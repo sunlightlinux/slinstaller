@@ -851,6 +851,11 @@ restart:
 	// LUKS passphrase, when the layout is encrypted. The interactive
 	// front-end already collected it; otherwise take it from --crypt-file
 	// or the environment for an unattended install, or prompt.
+	// Read once and gone, encrypted layout or not: left set, every child
+	// inherited it — xbps-install, the package scripts xbps-reconfigure
+	// runs in the target, the config's hooks.
+	envPassphrase := os.Getenv("SLINSTALLER_LUKS_PASSPHRASE")
+	os.Unsetenv("SLINSTALLER_LUKS_PASSPHRASE")
 	if encrypted {
 		opts.Passphrase = interactivePass
 		if opts.Passphrase == "" && cryptFile != "" {
@@ -862,12 +867,9 @@ restart:
 			opts.Passphrase = strings.TrimRight(string(data), "\r\n")
 		}
 		if opts.Passphrase == "" {
-			opts.Passphrase = os.Getenv("SLINSTALLER_LUKS_PASSPHRASE")
+			opts.Passphrase = envPassphrase
 		}
-		// Read once and gone: left set, every child inherited it —
-		// xbps-install, the package scripts xbps-reconfigure runs in the
-		// target, the config's hooks.
-		os.Unsetenv("SLINSTALLER_LUKS_PASSPHRASE")
+
 		if opts.Passphrase == "" {
 			// Read it with echo off so the passphrase is not shown on screen,
 			// and on a terminal twice, as a typo here locks the disk. A pipe

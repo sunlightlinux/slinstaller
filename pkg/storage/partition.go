@@ -366,7 +366,10 @@ func ShowCommand(args []string) string {
 
 // urlPasswordRe matches the password in a URL's user information
 // (https_proxy=http://user:secret@proxy:3128).
-var urlPasswordRe = regexp.MustCompile(`(://[^/?#@\s:]*):[^/?#@\s]*@`)
+// The password runs to the last "@" before the path: a raw @, # or ? in
+// it (http://u:p@ss@proxy) would otherwise be shown in part, or not at
+// all.
+var urlPasswordRe = regexp.MustCompile(`(://[^/?#@\s:]*):[^/\s]*@`)
 
 // MaskSecret returns one argument or value as it may be shown or logged: a
 // crypt(3) hash is replaced whole, and the password in a URL's user

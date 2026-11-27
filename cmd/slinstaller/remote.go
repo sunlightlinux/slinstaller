@@ -125,7 +125,7 @@ func (r *reporter) post(e event) {
 	}
 	if !r.warned {
 		r.warned = true
-		fmt.Fprintf(os.Stderr, "warning: the install could not be reported to %s: %v\n", r.url, err)
+		fmt.Fprintf(os.Stderr, "warning: the install could not be reported to %s: %v\n", storage.MaskSecret(r.url), err)
 	}
 }
 

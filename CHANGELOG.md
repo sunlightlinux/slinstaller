@@ -284,7 +284,8 @@ change.
   `/run/...` landed on the live system's file) or overwritten and then
   deleted (an image's). It is set aside for the install and put back.
 - `SLINSTALLER_LUKS_PASSPHRASE` stayed in the environment of every command
-  the install ran, package scripts and hooks included.
+  the install ran, package scripts and hooks included (now cleared for an
+  unencrypted layout too).
 - A failed command's error printed the command unmasked: a `useradd -p`
   password hash reached the screen, the diagnostics archive and a
   `report-url`. Errors, dry runs and logs now mask hashes and the password

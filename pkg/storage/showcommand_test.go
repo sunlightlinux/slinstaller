@@ -50,6 +50,16 @@ func TestShowCommandMasksURLPasswords(t *testing.T) {
 	if got != want {
 		t.Errorf("ShowCommand = %q\nwant          %q", got, want)
 	}
+	// A raw @, # or ? in the password is masked whole.
+	for in, want := range map[string]string{
+		"http://u:p@ss@proxy:3128":  "http://u:***@proxy:3128",
+		"http://u:p#ss@proxy:3128/": "http://u:***@proxy:3128/",
+		"http://u:p?ss@proxy":       "http://u:***@proxy",
+	} {
+		if got := MaskSecret(in); got != want {
+			t.Errorf("MaskSecret(%q) = %q, want %q", in, got, want)
+		}
+	}
 	for _, keep := range []string{"http://proxy:3128", "http://bob@proxy", "user@host:path", "https://h/a:b@c"} {
 		if MaskSecret(keep) != keep {
 			t.Errorf("MaskSecret(%q) = %q, want it unchanged", keep, MaskSecret(keep))
