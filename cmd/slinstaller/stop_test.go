@@ -12,12 +12,41 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
-	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
 // Ctrl+C (SIGINT) during an install stops it after the stage running,
 // through the controller's cleanup, instead of killing the process.
+//
+// The first command sends the signal and waits until the handler has said
+// so on stderr (it then closes the stop at once), instead of sleeping a
+// fixed time and hoping the handler ran in it.
 func TestInstallStopsOnSIGINT(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedErr := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = savedErr; w.Close() }()
+	// Everything written to stderr is read (a full pipe would block the
+	// install); the first "Interrupted" closes heard.
+	heard := make(chan struct{})
+	go func() {
+		defer r.Close()
+		var said []byte
+		buf := make([]byte, 512)
+		for {
+			n, err := r.Read(buf)
+			if err != nil {
+				return
+			}
+			if !strings.Contains(string(said), "Interrupted") {
+				if said = append(said, buf[:n]...); strings.Contains(string(said), "Interrupted") {
+					close(heard)
+				}
+			}
+		}
+	}()
 	var ran []string
 	signalled := false
 	opts := controller.Options{
@@ -28,12 +57,16 @@ func TestInstallStopsOnSIGINT(t *testing.T) {
 			if !signalled {
 				signalled = true
 				syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-				time.Sleep(200 * time.Millisecond) // let the handler see it
+				select {
+				case <-heard:
+				case <-time.After(10 * time.Second):
+					t.Error("the handler said nothing in 10s")
+				}
 			}
 			return nil
 		},
 	}
-	err := installStoppable(plainConfig(), opts)
+	err = installStoppable(plainConfig(), opts)
 	if !errors.Is(err, controller.ErrStopped) || !strings.Contains(err.Error(), "before mount") {
 		t.Fatalf("err = %v\nran:\n%s", err, strings.Join(ran, "\n"))
 	}
@@ -108,9 +141,8 @@ func TestRootAndStageFlags(t *testing.T) {
 	if err := run([]string{"--through", "bootlaoder", "x.yaml"}); err == nil || !strings.Contains(err.Error(), `--through "bootlaoder" is not a stage`) {
 		t.Errorf("--through typo: %v", err)
 	}
-	if _, err := storage.UnmountTree("/"); err == nil {
-		t.Error("UnmountTree(/) was not refused")
-	}
+	// (UnmountTree's own refusal of "/" is tested in storage, against a
+	// mount table of the test's: here it read the host's.)
 }
 
 // A flag after the config file is said to be one, not a second file.

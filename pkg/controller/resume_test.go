@@ -635,6 +635,12 @@ func TestReassembleChecksWhatIsThere(t *testing.T) {
 			{Name: "sda2", Path: "/dev/sda2", Type: "part", FsType: "ext4"}}}}, nil
 	}
 	wantErr(t, in.reassemble(), "holds ext4, not the crypto_LUKS")
+	// A partition lsblk sees nothing on is said to hold nothing, not "".
+	in.opts.Devices = func() ([]blockdev.Device, error) {
+		return []blockdev.Device{{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []blockdev.Device{
+			{Name: "sda2", Path: "/dev/sda2", Type: "part"}}}}, nil
+	}
+	wantErr(t, in.reassemble(), "/dev/sda2 holds nothing, not the crypto_LUKS")
 	if got, _ := os.ReadFile(filepath.Join(args, "args")); len(got) != 0 || len(r.cmds) != 0 {
 		t.Errorf("ran before refusing: %s %s", got, r.flat())
 	}

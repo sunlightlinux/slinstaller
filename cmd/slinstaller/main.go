@@ -1401,8 +1401,12 @@ var stdinIsTerminal = func() bool { return isTerminal(os.Stdin) }
 var geteuid = os.Geteuid
 
 // hostXBPSArch is this machine's architecture as xbps names it.
-func hostXBPSArch() string {
-	switch runtime.GOARCH {
+func hostXBPSArch() string { return xbpsArch(runtime.GOARCH) }
+
+// xbpsArch is the xbps name of a Go architecture (GOARCH); one xbps does
+// not name otherwise is the same.
+func xbpsArch(goarch string) string {
+	switch goarch {
 	case "amd64":
 		return "x86_64"
 	case "arm64":
@@ -1410,17 +1414,16 @@ func hostXBPSArch() string {
 	case "386":
 		return "i686"
 	}
-	return runtime.GOARCH
+	return goarch
 }
 
 // checkLocale rejects a timezone, keymap or language the live system does
 // not know. An empty one is not checked: it means "leave the target's
 // default", as system.Timezone, system.Keymap and system.Locale apply it, and the serial text flow
 // never asks for either. Checking "" as a name refused every such install
-// before it began.
-func checkLocale(tz, keymap, lang string) error {
-	return system.CheckLocale(tz, keymap, lang)
-}
+// before it began. A variable so tests do not depend on what data the
+// machine running them has.
+var checkLocale = system.CheckLocale
 
 // powerCommand reboots, powers off or halts the machine, for the config's
 // postReboot and power-state. The action is the command's name.

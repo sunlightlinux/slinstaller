@@ -214,3 +214,22 @@ func TestMaskBareProxyAtInPassword(t *testing.T) {
 		}
 	}
 }
+
+// A secret of four characters is registered, one of three is not (it would
+// garble everything); a secret that holds another is masked whole, however
+// they were registered.
+func TestAddSecretLengthAndOrder(t *testing.T) {
+	withSecrets(t, nil, func() {
+		AddSecret("q7z", "k9w2")
+		if got := maskRegistered("q7z k9w2"); got != "q7z ***" {
+			t.Errorf("short secrets: %q", got)
+		}
+		AddSecret("tok-k9w2-tail", "k9w2")
+		if got := maskRegistered("a tok-k9w2-tail b"); got != "a *** b" {
+			t.Errorf("a secret holding another: %q", got)
+		}
+		if len(secrets) != 2 {
+			t.Errorf("registered %q, want each once", secrets)
+		}
+	})
+}

@@ -198,13 +198,15 @@ func TestKeymapAndZoneListsWithoutData(t *testing.T) {
 	// the first match.
 	keymapsDir = t.TempDir()
 	os.MkdirAll(filepath.Join(keymapsDir, "i386", "qwerty"), 0o755)
-	for _, f := range []string{"i386/qwerty/us.map.gz", "i386/qwerty/ro.map", "i386/qwerty/README", "i386/zz.map"} {
+	for _, f := range []string{"i386/qwerty/us.map.gz", "i386/qwerty/ro.map", "i386/qwerty/README", "i386/zz.map", "i386/x.y.map"} {
 		os.WriteFile(filepath.Join(keymapsDir, f), nil, 0o644)
 	}
-	if got := strings.Join(ListKeymaps(), ","); got != "ro,us,zz" {
+	if got := strings.Join(ListKeymaps(), ","); got != "ro,us,x.y,zz" {
 		t.Errorf("keymaps = %q", got)
 	}
-	for _, bad := range []string{"", "../us", "us.map", "i386/us"} {
+	// (x.y.map is there: a dotted name is refused by its form, not for
+	// want of a file.)
+	for _, bad := range []string{"", "../us", "us.map", "i386/us", "x.y"} {
 		if ok, checked := ValidKeymap(bad); ok || !checked {
 			t.Errorf("ValidKeymap(%q) = %v, %v; want refused and checked", bad, ok, checked)
 		}

@@ -16,7 +16,9 @@ import (
 func FuzzRedactedConfig(f *testing.F) {
 	f.Add("s3cr3t-pw", "API_TOKEN")
 	f.Add("p@ss#w?rd", "dbPassword")
-	f.Add("a: b\n- c", "WIFI_PSK")
+	// YAML syntax in the secret (a mapping, a comment, a flow map): the
+	// fuzz body skips blanks, so none here.
+	f.Add("a:b-#{c}", "WIFI_PSK")
 	f.Fuzz(func(t *testing.T, secret, envName string) {
 		// A secret short or common enough to turn up in the YAML anyway
 		// (a key, "true", a quote) tells nothing; nor one URL syntax

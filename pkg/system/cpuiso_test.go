@@ -10,11 +10,19 @@ import (
 )
 
 func TestParseAndFormatCPUList(t *testing.T) {
-	got := parseCPUList("0-3,8,10-11")
-	want := []int{0, 1, 2, 3, 8, 10, 11}
-	if len(got) != len(want) {
-		t.Fatalf("parseCPUList = %v, want %v", got, want)
+	// The ids themselves, sorted, once each; a range with a bound that is
+	// not a number is passed over, not read as starting at 0.
+	for list, want := range map[string]string{
+		"0-3,8,10-11":   "[0 1 2 3 8 10 11]",
+		"8, 1-2 ,1,,":   "[1 2 8]",
+		"x-3,5,4-y,z,7": "[5 7]",
+		"":              "[]",
+	} {
+		if got := fmt.Sprint(parseCPUList(list)); got != want {
+			t.Errorf("parseCPUList(%q) = %s, want %s", list, got, want)
+		}
 	}
+	got := parseCPUList("0-3,8,10-11")
 	if s := formatRanges(got); s != "0-3,8,10-11" {
 		t.Errorf("formatRanges = %q, want 0-3,8,10-11", s)
 	}
@@ -43,6 +51,12 @@ func TestComputeCPUIsolation(t *testing.T) {
 		}
 	}
 
+	// Three CPUs are enough: one kept for the system, two isolated.
+	os.WriteFile(filepath.Join(dir, "online"), []byte("0-2\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "cpu0", "topology", "thread_siblings_list"), []byte("0\n"), 0o644)
+	if ci := ComputeCPUIsolation(); !ci.OK || ci.Isolated != "1-2" {
+		t.Errorf("3 CPUs: %+v", ci)
+	}
 	// Too few CPUs: not OK.
 	os.WriteFile(filepath.Join(dir, "online"), []byte("0-1\n"), 0o644)
 	if ComputeCPUIsolation().OK {
@@ -56,8 +70,16 @@ func TestHugepagesGiB(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "meminfo")
 	os.WriteFile(f, []byte("MemTotal:       32000000 kB\nMemFree: 1 kB\n"), 0o644)
 	meminfoFile = f
-	if n := HugepagesGiB(); n < 1 {
-		t.Errorf("HugepagesGiB for 32G = %d, want >=1", n)
+	if n := HugepagesGiB(); n != 7 { // 30 GiB: a quarter
+		t.Errorf("HugepagesGiB for 30G = %d, want 7", n)
+	}
+	// Where a quarter would leave the system under 4 GiB, what leaves it 4;
+	// one page is still worth reserving.
+	for kib, want := range map[string]int{"5242880": 1, "6291456": 1, "7340032": 1} {
+		os.WriteFile(f, []byte("MemTotal:       "+kib+" kB\n"), 0o644)
+		if n := HugepagesGiB(); n != want {
+			t.Errorf("HugepagesGiB for %s kB = %d, want %d", kib, n, want)
+		}
 	}
 	// Small machine: 0.
 	os.WriteFile(f, []byte("MemTotal:       4000000 kB\n"), 0o644)

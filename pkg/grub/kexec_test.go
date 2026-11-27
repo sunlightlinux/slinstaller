@@ -64,6 +64,16 @@ func TestKexecCommand(t *testing.T) {
 	if cmd, err = KexecCommand(root); err != nil || !strings.HasSuffix(cmd[4], "ro single") {
 		t.Errorf("default past the end: %v, %v", cmd, err)
 	}
+	// One past the last entry is past the end too.
+	root = target(t, strings.Replace(grubCfg, `"1"`, `"2"`, 1), "boot/vmlinuz-6.18.62_1", "boot/initramfs-6.18.62_1.img")
+	if cmd, err = KexecCommand(root); err != nil || !strings.HasSuffix(cmd[4], "ro single") {
+		t.Errorf("default just past the end: %v, %v", cmd, err)
+	}
+	// A kernel with no arguments, after a bare "set": an empty command line.
+	root = target(t, "set\nmenuentry 'x' {\n linux /boot/vmlinuz\n}\n", "boot/vmlinuz")
+	if cmd, err = KexecCommand(root); err != nil || len(cmd) != 4 || cmd[2] != root+"/boot/vmlinuz" || cmd[3] != "--append=" {
+		t.Errorf("a kernel with no arguments: %v, %v", cmd, err)
+	}
 	// No initramfs line: none is passed.
 	root = target(t, "menuentry 'x' {\n linuxefi /boot/vmlinuz root=/dev/sda2\n}\n", "boot/vmlinuz")
 	if cmd, err = KexecCommand(root); err != nil || len(cmd) != 4 || cmd[3] != "--append=root=/dev/sda2" {

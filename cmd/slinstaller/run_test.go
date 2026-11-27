@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -292,23 +293,38 @@ func TestDryRun(t *testing.T) {
 		t.Error("a layout with an unsupported filesystem was planned")
 	}
 
-	// A mistyped timezone or keymap is caught here when the live system can
-	// tell — and not at all with --skip-validation-all.
-	if ok, checked := system.ValidTimezone("Mars/Olympus"); checked && !ok {
-		tz := plainConfig()
-		tz.Timezone = "Mars/Olympus"
-		p := writeConfig(t, dir, tz)
-		_, _, err = runWith(t, "", p)
-		wantRunErr(t, "bad timezone", err, "not a known zoneinfo zone")
-		if _, _, err = runWith(t, "", "--skip-validation-all", p); err != nil {
-			t.Errorf("bad timezone with validation off: %v", err)
+	// A mistyped timezone, keymap or language is caught here, from the
+	// config's own values — and not at all with --skip-validation-all.
+	// (What the live system knows is system.CheckLocale's to check, with
+	// data of its own; here it is a stand-in, so this runs on any host.)
+	saved := checkLocale
+	defer func() { checkLocale = saved }()
+	var asked []string
+	checkLocale = func(tz, keymap, lang string) error {
+		asked = append(asked, tz+"|"+keymap+"|"+lang)
+		if tz == "Mars/Olympus" || keymap == "zz-nokeys" {
+			return errors.New("not known here")
 		}
+		return nil
 	}
-	if ok, checked := system.ValidKeymap("zz-nokeys"); checked && !ok {
-		km := plainConfig()
-		km.Keyboard = "zz-nokeys"
-		_, _, err = runWith(t, "", writeConfig(t, dir, km))
-		wantRunErr(t, "bad keymap", err, "not among the system's console keymaps")
+	for _, set := range []func(*config.Config){
+		func(c *config.Config) { c.Timezone = "Mars/Olympus" },
+		func(c *config.Config) { c.Keyboard = "zz-nokeys" },
+	} {
+		c := plainConfig()
+		set(c)
+		c.Language = "ro_RO.UTF-8"
+		p := writeConfig(t, dir, c)
+		asked = nil
+		_, _, err = runWith(t, "", p)
+		wantRunErr(t, "a bad timezone or keymap", err, "not known here")
+		if want := c.Timezone + "|" + c.Keyboard + "|ro_RO.UTF-8"; len(asked) != 1 || asked[0] != want {
+			t.Errorf("checked %q, want %q", asked, want)
+		}
+		asked = nil
+		if _, _, err = runWith(t, "", "--skip-validation-all", p); err != nil || len(asked) != 0 {
+			t.Errorf("with validation off: %v, checked %q", err, asked)
+		}
 	}
 }
 
@@ -499,5 +515,42 @@ func TestDryRunSizesAutoSwap(t *testing.T) {
 	want := config.SuggestedSwap(system.MemTotalBytes()) >> 20
 	if !strings.Contains(out, fmt.Sprintf("mkpart linux-swap 512MiB %dMiB", 512+want)) {
 		t.Errorf("swap partition not sized for this machine (%d MiB):\n%s", want, out)
+	}
+}
+
+// --genpass - at a terminal asks for the password twice, and two that
+// differ are refused rather than one of them hashed: typed unseen, a typo
+// became a hash nobody could log in with.
+func TestGenpassAtATerminalAsksTwice(t *testing.T) {
+	ptm, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("no pseudo-terminal: %v", err)
+	}
+	defer ptm.Close()
+	if err := unix.IoctlSetPointerInt(int(ptm.Fd()), unix.TIOCSPTLCK, 0); err != nil {
+		t.Skipf("cannot unlock the pseudo-terminal: %v", err)
+	}
+	n, err := unix.IoctlGetInt(int(ptm.Fd()), unix.TIOCGPTN)
+	if err != nil {
+		t.Skipf("no pseudo-terminal number: %v", err)
+	}
+	pts, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", n), os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("cannot open the pseudo-terminal's other end: %v", err)
+	}
+	defer pts.Close()
+	// What is written to one end is read from the other: the terminal the
+	// password is read from is the multiplexer side.
+	if _, err := pts.WriteString("correct horse\ncorrect horsf\n"); err != nil {
+		t.Fatal(err)
+	}
+	savedIn, savedErr := os.Stdin, os.Stderr
+	devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	defer devnull.Close()
+	os.Stdin, os.Stderr = ptm, devnull
+	err = run([]string{"--genpass", "-"})
+	os.Stdin, os.Stderr = savedIn, savedErr
+	if err == nil || !strings.Contains(err.Error(), "the passwords do not match") {
+		t.Errorf("two passwords that differ: %v", err)
 	}
 }

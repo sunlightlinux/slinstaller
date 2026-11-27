@@ -88,6 +88,21 @@ func TestWriteSSHKeys(t *testing.T) {
 	if cmd, err := (User{Login: "x"}).WriteSSHKeys(t.TempDir()); err != nil || cmd != nil {
 		t.Errorf("no keys should be a no-op, got %v / %v", cmd, err)
 	}
+
+	// A file already there (a preserved home) is rewritten, and made 0600
+	// whatever mode it had: sshd ignores keys others can write.
+	file := filepath.Join(root, "home", "ion", ".ssh", "authorized_keys")
+	os.WriteFile(file, []byte("old key\n"), 0o666)
+	os.Chmod(file, 0o666)
+	if _, err := u.WriteSSHKeys(root); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(file); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("a kept authorized_keys: %v, %v", fi.Mode().Perm(), err)
+	}
+	if got, _ := os.ReadFile(file); string(got) != "ssh-ed25519 AAAA\nssh-rsa BBBB\n" {
+		t.Errorf("a kept authorized_keys holds %q", got)
+	}
 }
 
 // A preserved home belongs to its previous owner: links planted in it are
@@ -164,6 +179,13 @@ func TestKeymap(t *testing.T) {
 	if !strings.Contains(string(got), "KEYMAP=\"us\"") {
 		t.Errorf("rc.conf = %q, want it to set KEYMAP", got)
 	}
+	// Letters, digits and ._-+@ are written as they are; anything else is
+	// single-quoted, the ends of each range included.
+	for v, want := range map[string]string{"azAZ09._-+@": "azAZ09._-+@", "a b": "'a b'", "a`b": "'a`b'", "a'b": `'a'\''b'`, "": "''"} {
+		if got := shellValue(v, false); got != want {
+			t.Errorf("shellValue(%q) = %s, want %s", v, got, want)
+		}
+	}
 
 	// Empty code writes nothing.
 	root2 := t.TempDir()
@@ -201,6 +223,17 @@ func TestLocaleGlibc(t *testing.T) {
 	// Other locales stay commented.
 	if !strings.Contains(string(out), "#de_DE.UTF-8 UTF-8") {
 		t.Error("unrelated locale was changed")
+	}
+
+	// Void's file opens with bare "#" lines; a locale it does not list is
+	// no change, and the file is left as it was.
+	libc = "#\n# Comment out locales you do not need\n#\n#de_DE.UTF-8 UTF-8\n"
+	os.WriteFile(filepath.Join(root, "etc", "default", "libc-locales"), []byte(libc), 0o644)
+	if generated, err := Locale(root, "xx_XX.UTF-8"); err != nil || generated {
+		t.Errorf("a locale not listed: generated %v, %v", generated, err)
+	}
+	if out, _ := os.ReadFile(filepath.Join(root, "etc", "default", "libc-locales")); string(out) != libc {
+		t.Errorf("libc-locales changed for a locale it does not list:\n%s", out)
 	}
 }
 
@@ -275,6 +308,17 @@ func TestMachineID(t *testing.T) {
 	again, _ := os.ReadFile(path)
 	if string(again) != string(got) {
 		t.Errorf("machine-id changed from %q to %q; it must stay with the machine", got, again)
+	}
+	// An empty one (a live medium's placeholder) is no ID: it is filled.
+	os.Remove(path) // written 0444; the installer, as root, writes it anyway
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := MachineID(root); err != nil {
+		t.Fatalf("MachineID over an empty file: %v", err)
+	}
+	if got, _ := os.ReadFile(path); len(strings.TrimSpace(string(got))) != 32 {
+		t.Errorf("an empty machine-id was kept: %q", got)
 	}
 }
 
@@ -361,8 +405,9 @@ func TestValidTimezone(t *testing.T) {
 	}
 
 	// With data: a real zone passes, a bad one and traversal fail.
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "zoneinfo")
 	zoneinfoDir = dir
+	os.WriteFile(filepath.Join(filepath.Dir(dir), "outside"), []byte("tz"), 0o644)
 	if err := os.MkdirAll(filepath.Join(dir, "Europe"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -378,6 +423,10 @@ func TestValidTimezone(t *testing.T) {
 	}{
 		{"UTC", true}, {"Europe/Bucharest", true},
 		{"Europe/Nope", false}, {"../etc/passwd", false}, {"Europe", false}, // a dir is not a zone
+		// Names that would reach a file, refused by their form: one up and
+		// out of the zoneinfo tree, and an absolute path (which Join would
+		// otherwise take as under it).
+		{"../outside", false}, {"Europe/../../outside", false}, {"/UTC", false},
 	} {
 		ok, checked := ValidTimezone(tc.tz)
 		if !checked {
@@ -461,12 +510,12 @@ func TestListTimezonesKeymapsLocales(t *testing.T) {
 	os.WriteFile(filepath.Join(z, "Europe", "Bucharest"), []byte("x"), 0o644)
 	os.WriteFile(filepath.Join(z, "zone.tab"), []byte("x"), 0o644)
 	os.WriteFile(filepath.Join(z, "posix", "Europe", "Paris"), []byte("x"), 0o644)
-	tz := ListTimezones()
-	if !contains(tz, "UTC") || !contains(tz, "Europe/Bucharest") {
-		t.Errorf("timezones missing expected zones: %v", tz)
+	os.MkdirAll(filepath.Join(z, "right"), 0o755)
+	for _, f := range []string{"right/UTC", "zone1970.tab", "iso3166.tab", "leapseconds", "tzdata.zi", "leap-seconds.list"} {
+		os.WriteFile(filepath.Join(z, f), []byte("x"), 0o644)
 	}
-	if contains(tz, "zone.tab") || contains(tz, "posix/Europe/Paris") {
-		t.Errorf("timezones included skipped entries: %v", tz)
+	if tz := strings.Join(ListTimezones(), ","); tz != "Europe/Bucharest,UTC" {
+		t.Errorf("timezones = %s, want only the zones, sorted", tz)
 	}
 
 	// Keymaps: basename without .map/.map.gz, de-duplicated.
@@ -480,14 +529,24 @@ func TestListTimezonesKeymapsLocales(t *testing.T) {
 		t.Errorf("keymaps wrong: %v", km)
 	}
 
-	// Locales: parse SUPPORTED, keep UTF-8.
+	// Locales: parse SUPPORTED, keep UTF-8, once each, sorted. (None of
+	// these is in the fallback set, so it cannot stand in for the file.)
+	savedV := libcLocalesFile
+	defer func() { libcLocalesFile = savedV }()
 	lf := filepath.Join(t.TempDir(), "SUPPORTED")
-	os.WriteFile(lf, []byte("en_US.UTF-8 UTF-8\nen_US.ISO-8859-1 ISO-8859-1\n# comment\nro_RO.UTF-8 UTF-8\n"), 0o644)
+	os.WriteFile(lf, []byte("sv_SE.UTF-8 UTF-8\nen_US.ISO-8859-1 ISO-8859-1\n# comment\nnl_NL.UTF-8 UTF-8\nsv_SE.UTF-8 UTF-8\n"), 0o644)
 	localesFile = lf
-	lc := ListLocales()
-	if !contains(lc, "en_US.UTF-8") || !contains(lc, "ro_RO.UTF-8") || contains(lc, "en_US.ISO-8859-1") {
-		t.Errorf("locales wrong: %v", lc)
+	if lc := strings.Join(ListLocales(), ","); lc != "nl_NL.UTF-8,sv_SE.UTF-8" {
+		t.Errorf("locales = %s", lc)
 	}
+	// A SUPPORTED with no UTF-8 locale gives way to libc-locales.
+	os.WriteFile(lf, []byte("en_US.ISO-8859-1 ISO-8859-1\n"), 0o644)
+	libcLocalesFile = filepath.Join(t.TempDir(), "libc-locales")
+	os.WriteFile(libcLocalesFile, []byte("#fi_FI.UTF-8 UTF-8\n#fi_FI ISO-8859-1\n"), 0o644)
+	if lc := strings.Join(ListLocales(), ","); lc != "fi_FI.UTF-8" {
+		t.Errorf("locales from libc-locales = %s", lc)
+	}
+	libcLocalesFile = filepath.Join(t.TempDir(), "nope")
 
 	// Missing locale sources -> the built-in fallback (never empty).
 	localesFile = filepath.Join(t.TempDir(), "nope")
@@ -590,23 +649,38 @@ func TestLocaleEnabled(t *testing.T) {
 	}
 }
 
+// CheckLocale refuses a zone, keymap or language the live system's data
+// does not have, accepts one it has, and accepts anything where there is no
+// data to check against (a musl system has no locale list). The data is the
+// test's own: the host's may lack any of it (Ubuntu ships no kbd keymaps),
+// and a check that runs only where it is present checked nothing there.
 func TestCheckLocale(t *testing.T) {
+	savedZ, savedK, savedL, savedV := zoneinfoDir, keymapsDir, localesFile, libcLocalesFile
+	defer func() { zoneinfoDir, keymapsDir, localesFile, libcLocalesFile = savedZ, savedK, savedL, savedV }()
+	none := filepath.Join(t.TempDir(), "none")
+	zoneinfoDir, keymapsDir, localesFile, libcLocalesFile = none, none, none, none
+	if err := CheckLocale("No/Such_Zone", "no-such-map", "xx_XX.NOPE"); err != nil {
+		t.Errorf("no data to check against: %v", err)
+	}
+
+	zoneinfoDir, keymapsDir = t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(zoneinfoDir, "UTC"), []byte("tz"), 0o644)
+	os.WriteFile(filepath.Join(keymapsDir, "us.map.gz"), nil, 0o644)
+	localesFile = filepath.Join(t.TempDir(), "SUPPORTED")
+	os.WriteFile(localesFile, []byte("en_US.UTF-8 UTF-8\n"), 0o644)
 	if err := CheckLocale("", "", ""); err != nil {
 		t.Errorf("empty: %v", err)
 	}
-	if ok, checked := ValidTimezone("No/Such_Zone"); checked && !ok {
-		if err := CheckLocale("No/Such_Zone", "", ""); err == nil || !strings.Contains(err.Error(), "timezone") {
-			t.Errorf("bad zone: %v", err)
-		}
+	if err := CheckLocale("UTC", "us", "en_US.UTF-8"); err != nil {
+		t.Errorf("all known: %v", err)
 	}
-	if ok, checked := ValidKeymap("no-such-map"); checked && !ok {
-		if err := CheckLocale("", "no-such-map", ""); err == nil || !strings.Contains(err.Error(), "keymap") {
-			t.Errorf("bad keymap: %v", err)
-		}
-	}
-	if ok, checked := ValidLocale("xx_XX.NOPE"); checked && !ok {
-		if err := CheckLocale("", "", "xx_XX.NOPE"); err == nil || !strings.Contains(err.Error(), "language") {
-			t.Errorf("bad language: %v", err)
+	for _, c := range []struct{ tz, keymap, lang, want string }{
+		{"No/Such_Zone", "us", "en_US.UTF-8", "timezone"},
+		{"UTC", "no-such-map", "en_US.UTF-8", "keymap"},
+		{"UTC", "us", "xx_XX.NOPE", "language"},
+	} {
+		if err := CheckLocale(c.tz, c.keymap, c.lang); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("CheckLocale(%q, %q, %q) = %v, want a bad %s", c.tz, c.keymap, c.lang, err, c.want)
 		}
 	}
 }
@@ -630,11 +704,90 @@ func TestNetLinksRunit(t *testing.T) {
 	if strings.Count(string(rc), netLinksScript) != 1 {
 		t.Errorf("rc.local:\n%s", rc)
 	}
+	// An rc.local of the system's own is added to, once.
+	own := t.TempDir()
+	os.MkdirAll(filepath.Join(own, "etc"), 0o755)
+	os.WriteFile(filepath.Join(own, "etc", "rc.local"), []byte("#!/bin/sh\necho mine\n"), 0o755)
+	for i := 0; i < 2; i++ {
+		if err := NetLinks(own, "#!/bin/sh\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rc, _ := os.ReadFile(filepath.Join(own, "etc", "rc.local")); !strings.HasPrefix(string(rc), "#!/bin/sh\necho mine\n") || strings.Count(string(rc), netLinksScript+"\n") != 1 {
+		t.Errorf("rc.local:\n%s", rc)
+	}
 	if fi, err := os.Stat(filepath.Join(root, netLinksScript)); err != nil || fi.Mode().Perm()&0o100 == 0 {
 		t.Errorf("script: %v %v", fi, err)
 	}
 	if MemTotalBytes() == 0 {
 		t.Log("no /proc/meminfo here")
+	}
+}
+
+// On a slinit system NetLinks makes the script a scripted service of its
+// own, enabled at boot, and leaves rc.local alone; the script is written as
+// given, executable.
+func TestNetLinksSlinit(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, SlinitServicesDir, "boot"), 0o755)
+	script := "#!/bin/sh\nip link add bond0 type bond\n"
+	if err := NetLinks(root, script); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, netLinksScript)); err != nil || string(got) != script {
+		t.Errorf("script: %q, %v", got, err)
+	}
+	if fi, err := os.Stat(filepath.Join(root, netLinksScript)); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Errorf("script mode: %v", err)
+	}
+	svc, err := os.ReadFile(filepath.Join(root, "etc", "slinit.d", NetLinksServiceName))
+	if err != nil || !strings.Contains(string(svc), "type = scripted\n") || !strings.Contains(string(svc), "command = "+netLinksScript+"\n") {
+		t.Errorf("service file: %v\n%s", err, svc)
+	}
+	link, err := os.Readlink(filepath.Join(root, "etc", "slinit.d", "boot.d", NetLinksServiceName))
+	if err != nil || link != filepath.Join("/etc/slinit.d", NetLinksServiceName) {
+		t.Errorf("not enabled: %q, %v", link, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc", "rc.local")); err == nil {
+		t.Error("rc.local written on a slinit system")
+	}
+}
+
+// Where the script or rc.local cannot be written, NetLinks says so.
+func TestNetLinksReportsFailures(t *testing.T) {
+	// /etc is a file: no directory for the script.
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "etc"), nil, 0o644)
+	if err := NetLinks(root, "x"); err == nil {
+		t.Error("no /etc/slinit.d, and no error")
+	}
+	// The script's name is taken by a directory.
+	root = t.TempDir()
+	os.MkdirAll(filepath.Join(root, netLinksScript), 0o755)
+	if err := NetLinks(root, "x"); err == nil || !strings.Contains(err.Error(), "write "+netLinksScript) {
+		t.Errorf("script path a directory: %v", err)
+	}
+	// rc.local is a directory.
+	root = t.TempDir()
+	os.MkdirAll(filepath.Join(root, "etc", "rc.local"), 0o755)
+	if err := NetLinks(root, "x"); err == nil {
+		t.Error("rc.local a directory, and no error")
+	}
+	// rc.local takes no write, as on a full disk.
+	if _, err := os.Stat("/dev/full"); err == nil {
+		root = t.TempDir()
+		os.MkdirAll(filepath.Join(root, "etc"), 0o755)
+		os.Symlink("/dev/full", filepath.Join(root, "etc", "rc.local"))
+		if err := NetLinks(root, "x"); err == nil || !strings.Contains(err.Error(), "write rc.local") {
+			t.Errorf("rc.local on a full disk: %v", err)
+		}
+	}
+	// On a slinit system, the service file's name is taken by a directory.
+	root = t.TempDir()
+	os.MkdirAll(filepath.Join(root, SlinitServicesDir, "boot"), 0o755)
+	os.MkdirAll(filepath.Join(root, "etc", "slinit.d", NetLinksServiceName), 0o755)
+	if err := NetLinks(root, "x"); err == nil || !strings.Contains(err.Error(), "write "+NetLinksServiceName) {
+		t.Errorf("service path a directory: %v", err)
 	}
 }
 

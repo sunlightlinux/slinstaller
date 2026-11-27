@@ -211,6 +211,31 @@ targetMedia:
 	}
 }
 
+// A key reached through a YAML alias is checked where the alias is used:
+// the anchored node is the same, and its typo is the second disk's too.
+func TestUnknownKeysThroughAnAlias(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	os.WriteFile(path, []byte(`
+targetMedia:
+- &disk
+  name: sda
+  type: disk
+  modle: x
+  children:
+  - {name: sda1, type: part, fstype: ext4, mountpoint: /, size: 0, mountpiont: /}
+- *disk
+`), 0o644)
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(c.UnknownKeys(), " ")
+	want := "targetMedia[0].modle targetMedia[0].children[0].mountpiont targetMedia[1].modle targetMedia[1].children[0].mountpiont"
+	if got != want {
+		t.Errorf("UnknownKeys = %q, want %q", got, want)
+	}
+}
+
 // clr-installer keys slinstaller knows and ignores are not reported.
 func TestClrImageKeysAreQuiet(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "c.yaml")
@@ -241,6 +266,71 @@ func TestEnvNamesValidation(t *testing.T) {
 		c.Environment = map[string]string{bad: "v"}
 		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "env:") {
 			t.Errorf("env name %q: %v", bad, err)
+		}
+	}
+}
+
+// Each limit Validate holds a value to lets the value at the limit through
+// and refuses the one just past it: an off-by-one either way refuses a
+// config that is fine, or writes what the kernel, GPT or dhcpcd cannot take.
+func TestValidationLimits(t *testing.T) {
+	// A domain of 253 characters: three labels of 63 and one of 61.
+	label := strings.Repeat("a", 63)
+	domain253 := strings.Join([]string{label, label, label, strings.Repeat("b", 61)}, ".")
+	intp := func(n int) *int { return &n }
+	for _, tc := range []struct {
+		name   string
+		change func(c *Config)
+		want   string
+	}{
+		{"VLAN id 1", func(c *Config) { c.NetworkInterfaces[2].VLAN.ID = 1 }, ""},
+		{"VLAN id 4094", func(c *Config) { c.NetworkInterfaces[2].VLAN.ID = 4094 }, ""},
+		{"VLAN id 0", func(c *Config) { c.NetworkInterfaces[2].VLAN.ID = 0 }, "VLAN id 0 is not between 1 and 4094"},
+		{"two domains", func(c *Config) { c.NetworkInterfaces[2].Domain = "example.com corp.example" }, ""},
+		{"domain of 253", func(c *Config) { c.NetworkInterfaces[2].Domain = domain253 }, ""},
+		{"domain of 254", func(c *Config) { c.NetworkInterfaces[2].Domain = domain253 + "b" }, "is not a domain name"},
+		{"domain after a line break", func(c *Config) { c.NetworkInterfaces[2].Domain = "\nscript /tmp/x" }, "domain is one line of names"},
+		{"console log level 0", func(c *Config) { c.ConsoleLogLevel = intp(0) }, ""},
+		{"console log level 7", func(c *Config) { c.ConsoleLogLevel = intp(7) }, ""},
+		{"console log level 8", func(c *Config) { c.ConsoleLogLevel = intp(8) }, "console-log-level: 8"},
+		{"console log level -1", func(c *Config) { c.ConsoleLogLevel = intp(-1) }, "console-log-level: -1"},
+		{"power-state delay 3600", func(c *Config) { c.PowerStateDelay = 3600 }, ""},
+		{"power-state delay 3601", func(c *Config) { c.PowerStateDelay = 3601 }, "power-state-delay: 3601"},
+		{"partition name of 36", func(c *Config) { c.TargetMedia[0].Children[2].PartitionName = strings.Repeat("n", 36) }, ""},
+		{"partition name of 37", func(c *Config) { c.TargetMedia[0].Children[2].PartitionName = strings.Repeat("n", 37) }, "partition-name"},
+		{"passno 2, freq 9", func(c *Config) { c.TargetMedia[0].Children[2].Passno, c.TargetMedia[0].Children[2].Freq = intp(2), 9 }, ""},
+		{"passno 3", func(c *Config) { c.TargetMedia[0].Children[2].Passno = intp(3) }, "passno is 0, 1 or 2"},
+		{"freq 10", func(c *Config) { c.TargetMedia[0].Children[2].Freq = 10 }, "passno is 0, 1 or 2"},
+	} {
+		c := linkedConfig()
+		tc.change(c)
+		validateWants(t, tc.name, c, tc.want)
+	}
+
+	if err := ValidHostname(strings.Repeat("h", 63)); err != nil {
+		t.Errorf("a hostname of 63: %v", err)
+	}
+	if err := ValidHostname(strings.Repeat("h", 64)); err == nil {
+		t.Error("a hostname of 64 accepted")
+	}
+	// Printable ASCII is space to tilde, both ends included.
+	if err := ValidPassphrase("~~~~ ~~~~"); err != nil {
+		t.Errorf("a passphrase of space and tilde: %v", err)
+	}
+	if err := ValidPassphrase("~~~~\x7f~~~~"); err == nil {
+		t.Error("a passphrase with DEL accepted")
+	}
+	if m, err := (&WriteFile{Permissions: "7777"}).Mode(); err != nil || m.Perm() != 0o777 {
+		t.Errorf("permissions 7777: %v, %v", m, err)
+	}
+	if _, err := (&WriteFile{Permissions: "10000"}).Mode(); err == nil {
+		t.Error("permissions 10000 accepted")
+	}
+	// A crypt(3) hash starts with $ and has three of them; a plaintext
+	// password with dollars in it is not one.
+	for s, want := range map[string]bool{"$6$salt$hash": true, "$y$j9T$a$b": true, "pa$$w$rd": false, "$plain": false, "$a$b": false} {
+		if looksHashed(s) != want {
+			t.Errorf("looksHashed(%q) = %v", s, !want)
 		}
 	}
 }

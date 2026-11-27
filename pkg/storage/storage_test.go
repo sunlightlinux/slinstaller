@@ -401,3 +401,46 @@ func TestMkfsDoesNotDiscardADiscardedDisk(t *testing.T) {
 		t.Errorf("nodiscard without a discarded disk: %v", cmds[1])
 	}
 }
+
+// An array with a table of its own is cut like a disk, but by
+// ArrayTableCommands alone — it exists only once mdadm has assembled it, so
+// the disks' TableCommands must not touch it, and the dry run lists it
+// after them.
+func TestArrayTableCommands(t *testing.T) {
+	pl := &Plan{
+		Disk: "/dev/sda", Disks: []string{"/dev/sda"}, RaidDisks: []string{"/dev/md0"}, Wipe: true,
+		Parts: []Partition{
+			{Number: 1, Device: "/dev/sda1", Disk: "/dev/sda", Size: SizeRest, IsRaidMember: true, RaidName: "md0"},
+			{Number: 2, Device: "/dev/md0p2", Disk: "/dev/md0", Size: SizeRest, Filesystem: "xfs", Mountpoint: "/srv"},
+			{Number: 1, Device: "/dev/md0p1", Disk: "/dev/md0", Size: "21474836480", Filesystem: "ext4", Mountpoint: "/"},
+		},
+	}
+	want := "parted -s /dev/md0 mklabel gpt\n" +
+		"parted -a optimal --script /dev/md0 mkpart / 0% 20480MiB\n" +
+		"parted -a optimal --script /dev/md0 mkpart /srv 20480MiB 100%\n" +
+		"partprobe /dev/md0\n"
+	if got := flatCmds(pl.ArrayTableCommands()); got != want {
+		t.Errorf("array table:\n%s\nwant:\n%s", got, want)
+	}
+	table := flatCmds(pl.TableCommands())
+	if strings.Contains(table, "/dev/md0") || !strings.Contains(table, "partprobe /dev/sda") {
+		t.Errorf("disk tables:\n%s", table)
+	}
+	cmds, err := pl.Commands()
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := flatCmds(cmds)
+	if a, b := strings.Index(all, "partprobe /dev/sda"), strings.Index(all, "parted -s /dev/md0 mklabel gpt"); a < 0 || b < a {
+		t.Errorf("the array is not cut after the disks:\n%s", all)
+	}
+	// Two arrays are each cut in turn; no array, nothing.
+	pl.RaidDisks = append(pl.RaidDisks, "/dev/md1")
+	pl.Parts = append(pl.Parts, Partition{Number: 1, Device: "/dev/md1p1", Disk: "/dev/md1", Size: SizeRest, Filesystem: "ext4", Mountpoint: "/home"})
+	if got := flatCmds(pl.ArrayTableCommands()); !strings.HasPrefix(got, want) || !strings.HasSuffix(got, "partprobe /dev/md1\n") {
+		t.Errorf("two arrays:\n%s", got)
+	}
+	if got := (&Plan{Disk: "/dev/sda", Wipe: true}).ArrayTableCommands(); got != nil {
+		t.Errorf("no array: %q", got)
+	}
+}

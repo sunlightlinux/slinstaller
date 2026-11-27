@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
+	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
 func serverConfig(array *config.RaidArray) *config.Config {
@@ -246,6 +247,21 @@ func TestCryptOptions(t *testing.T) {
 	if args := cmdlineArgs(t, in); !contains(args, "rd.luks.options=discard") || !strings.Contains(strings.Join(args, " "), "rd.luks.allow-discards=") {
 		t.Errorf("kernel arguments: %v", args)
 	}
+	// Other options are passed on, and only discard (under either name,
+	// anywhere in the list) asks for discards, once.
+	for opts, discards := range map[string]int{"no-read-workqueue": 0, "no-read-workqueue,allow-discards,discard": 1} {
+		c := cryptConfig("/boot")
+		c.TargetMedia[0].Children[1].CryptOptions = opts
+		in, _ = cryptInstaller(t, c, &r)
+		mkTarget(t, in, "etc", "default")
+		if err := in.bootloader(); err != nil {
+			t.Fatal(err)
+		}
+		args := strings.Join(cmdlineArgs(t, in), " ")
+		if !strings.Contains(args, "rd.luks.options="+opts) || strings.Count(args, "rd.luks.allow-discards=") != discards {
+			t.Errorf("crypt options %q: kernel arguments %s", opts, args)
+		}
+	}
 	// Without the option nothing of the kind is written.
 	in, _ = cryptInstaller(t, cryptConfig("/boot"), &r)
 	mkTarget(t, in, "etc", "default")
@@ -322,5 +338,50 @@ func TestKernelRemove(t *testing.T) {
 	os.WriteFile(filepath.Join(bin, "grub-install"), nil, 0o755)
 	if err := in.baseInstall(); err != nil || !strings.Contains(r.flat(), "xbps-remove -Ry linux6.18") {
 		t.Errorf("image install: %v\n%s", err, r.flat())
+	}
+}
+
+// rootDisk names the disk the root partition is cut on, and only when the
+// root is a plain partition: a root on a logical volume or straight on an
+// array has no disk of its own to name, and neither has a plan without a
+// root. Partitions mounted elsewhere are passed over.
+func TestRootDisk(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		parts []storage.Partition
+		want  string
+	}{
+		{"plain", []storage.Partition{{Disk: "/dev/sda", Mountpoint: "/boot"}, {Disk: "/dev/sdb", Mountpoint: "/"}}, "/dev/sdb"},
+		{"on a volume", []storage.Partition{{Disk: "/dev/sda", Mountpoint: "/", LV: true}}, ""},
+		{"on an array", []storage.Partition{{Disk: "/dev/sda", Mountpoint: "/", Raid: true}}, ""},
+		{"no root", []storage.Partition{{Disk: "/dev/sda", Mountpoint: "/home"}}, ""},
+		{"none", nil, ""},
+	} {
+		in := &installer{plan: &storage.Plan{Parts: c.parts}}
+		if got := in.rootDisk(); got != c.want {
+			t.Errorf("%s: rootDisk = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// Only a BootXXXX line (four hex digits) whose label is exactly the one
+// asked for is an entry of it: not BootCurrent or BootOrder, not a label
+// that only starts the same, and a line too short to hold a number is
+// passed over rather than read past its end.
+func TestEFIEntriesLabelled(t *testing.T) {
+	saved := efiBootList
+	defer func() { efiBootList = saved }()
+	efiBootList = func() string {
+		return "BootCurrent: 0001\nBootOrder: 0005,0007\nBoot\nBoot000\n" +
+			"Boot0005 Sunlight\n" + // inactive: no star
+			"Boot0006* Sunlight (sdb)\tHD(1,GPT,...)\n" +
+			"Bootxyz0* Sunlight\n" +
+			"Boot000a* Sunlight\tHD(1,GPT,...)/File(\\EFI\\Sunlight\\grubx64.efi)\n"
+	}
+	if got := strings.Join(efiEntriesLabelled("Sunlight"), ","); got != "0005,000a" {
+		t.Errorf("entries labelled Sunlight: %s", got)
+	}
+	if got := strings.Join(efiEntriesLabelled("Sunlight (sdb)"), ","); got != "0006" {
+		t.Errorf("entries labelled Sunlight (sdb): %s", got)
 	}
 }

@@ -45,6 +45,16 @@ func TestUnmountTreeReportsWhatItCannotDo(t *testing.T) {
 	if _, err := UnmountTree("/mnt"); err == nil {
 		t.Error("an unreadable mount table was not reported")
 	}
+	// The live system's root, or a relative path, is refused before the
+	// mount table is read: the table here is not there, so a refusal that
+	// came later would say so instead. (Against the real table, a guard that
+	// let "/" through still failed — as a user every unmount is refused —
+	// while as root it would have unmounted the host.)
+	for _, root := range []string{"/", "//", "/mnt/..", "mnt", "."} {
+		if _, err := UnmountTree(root); err == nil || !strings.Contains(err.Error(), "will not unmount everything under") {
+			t.Errorf("UnmountTree(%q): %v", root, err)
+		}
+	}
 	// A path the table lists but that is not a mount point cannot be
 	// unmounted: said, with what did work.
 	mountsFile = filepath.Join(dir, "mounts")

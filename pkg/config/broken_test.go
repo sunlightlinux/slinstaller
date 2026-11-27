@@ -722,6 +722,8 @@ func TestSkipValidationAllKeepsWrittenChecks(t *testing.T) {
 		},
 		"VLAN link":      func(c *Config) { c.NetworkInterfaces = []*Interface{{Name: "v5", VLAN: &VLAN{ID: 5, Link: "`id`"}}} },
 		"dns line break": func(c *Config) { c.NetworkInterfaces = []*Interface{{Name: "eth0", DNS: "1.1.1.1\nscript /tmp/x"}} },
+		// The break first: nothing before it to stop at.
+		"dns starting with a break": func(c *Config) { c.NetworkInterfaces = []*Interface{{Name: "eth0", DNS: "\nscript /tmp/x"}} },
 		"route": func(c *Config) {
 			c.NetworkInterfaces = []*Interface{{Name: "eth0", Routes: []*Route{{To: "10.0.0.0/8\nx", Via: "1.1.1.1"}}}}
 		},
@@ -741,8 +743,10 @@ func TestSkipValidationAllKeepsWrittenChecks(t *testing.T) {
 		}
 	}
 	// What it is for still goes through: a layout Validate would refuse.
+	// A space is no control character: two search domains pass.
 	c := linkedConfig()
 	c.SkipValidationAll = true
+	c.NetworkInterfaces[2].Domain = "example.com corp.example"
 	c.TargetMedia[0].Children = c.TargetMedia[0].Children[1:] // no ESP
 	if err := c.Validate(); err != nil {
 		t.Errorf("an unusual layout refused with skipValidationAll: %v", err)

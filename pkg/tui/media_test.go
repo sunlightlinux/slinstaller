@@ -427,7 +427,9 @@ func TestSafeInstallOffersToShrink(t *testing.T) {
 	}
 	// A size that is not one, that does not shrink, or that frees too little.
 	for size, want := range map[string]string{"lots": "not a size", "200G": "would not shrink it", "118G": "frees too little",
-		"60000": "not a size"} { // a bare number: bytes, refused at Install before
+		"60000":   "not a size",          // a bare number: bytes, refused at Install before
+		"121556M": "would not shrink it", // its own size, to the MiB
+		"119649M": "frees too little"} {  // 1907 MiB, just under 2 GB
 
 		got := send(typeText(m, size), enter)
 		if got.popup != popupShrink || !strings.Contains(got.popupErr, want) || len(got.parts) != 0 {
@@ -600,5 +602,30 @@ func TestRefusedSafeKeepsSafe(t *testing.T) {
 	nm, _ := m.confirmMedia()
 	if got := nm.(model); !got.safeInstall || got.popup != popupMessage {
 		t.Errorf("safeInstall %v popup %v", got.safeInstall, got.popup)
+	}
+}
+
+// Any one mark of a Safe install's entry — a name, kept, created in free
+// space, a start, a shrink — makes the layout a Safe one, which the editor
+// clears instead of numbering its entries as new partitions; a plain layout
+// it keeps.
+func TestHasSafeEntries(t *testing.T) {
+	plain := []partEntry{{Type: "part", FS: "vfat", Mount: "/boot", Size: "512M"}, {Type: "part", FS: "ext4", Mount: "/"}}
+	if hasSafeEntries(plain) || hasSafeEntries(nil) {
+		t.Error("a plain layout taken for a Safe one")
+	}
+	for _, e := range []partEntry{{Name: "sda1"}, {Preserve: true}, {Create: true}, {Start: "20000MiB"}, {Resize: "40G"}} {
+		if !hasSafeEntries(append(append([]partEntry{}, plain...), e)) {
+			t.Errorf("%+v not taken for a Safe entry", e)
+		}
+	}
+	var m model
+	m.parts = []partEntry{{Name: "sda1", Preserve: true, Mount: "/boot"}, {Create: true, FS: "ext4", Mount: "/"}}
+	if m.toEditor(); m.parts != nil || m.view != viewPartList {
+		t.Errorf("a Safe layout reached the editor: %+v", m.parts)
+	}
+	m.parts = plain
+	if m.toEditor(); len(m.parts) != 2 {
+		t.Errorf("a plain layout was cleared: %+v", m.parts)
 	}
 }

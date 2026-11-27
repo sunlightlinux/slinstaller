@@ -10,7 +10,9 @@ func TestDetectConsolesFromCmdline(t *testing.T) {
 	saved := procCmdline
 	defer func() { procCmdline = saved }()
 	f := filepath.Join(t.TempDir(), "cmdline")
-	os.WriteFile(f, []byte("BOOT_IMAGE=/vmlinuz root=UUID=x console=tty0 console=ttyS0,115200n8 quiet\n"), 0o644)
+	// A console named twice is passed on once. (The repeat is not the last
+	// console=: that one is the kernel's /dev/console.)
+	os.WriteFile(f, []byte("BOOT_IMAGE=/vmlinuz root=UUID=x console=tty0 console=tty0 console=ttyS0,115200n8 quiet\n"), 0o644)
 	procCmdline = f
 	got := DetectConsoles()
 	if len(got) != 2 || got[0] != "console=tty0" || got[1] != "console=ttyS0,115200n8" {

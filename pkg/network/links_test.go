@@ -90,7 +90,8 @@ func TestDhcpcdConfForLinks(t *testing.T) {
 }
 
 func TestLinkNamesAndModes(t *testing.T) {
-	for name, ok := range map[string]bool{"bond0": true, "bond0.100": true, "br-lan": true, "": false, "a b": false, "eth/0": false, "sixteen-chars-xx": false, ".": false} {
+	for name, ok := range map[string]bool{"bond0": true, "bond0.100": true, "br-lan": true, "": false, "a b": false, "eth/0": false, "sixteen-chars-xx": false, ".": false,
+		"fifteen-chars-x": true, "azAZ09": true, "a_b:c": true, "..": false, "a$b": false, "a\nb": false} {
 		if ValidIfName(name) != ok {
 			t.Errorf("ValidIfName(%q) = %v", name, !ok)
 		}
@@ -99,5 +100,19 @@ func TestLinkNamesAndModes(t *testing.T) {
 		if ValidBondMode(mode) != ok {
 			t.Errorf("ValidBondMode(%q) = %v", mode, !ok)
 		}
+	}
+}
+
+// A bond, a VLAN or a bridge alone makes the interfaces need the link
+// script; plain ones do not.
+func TestHasLinks(t *testing.T) {
+	plain := Interface{Name: "eth0"}
+	for _, i := range []Interface{{Name: "bond0", Bond: &Bond{}}, {Name: "eth0.5", VLAN: &VLAN{}}, {Name: "br0", Bridge: &Bridge{}}} {
+		if !HasLinks([]Interface{plain, i}) {
+			t.Errorf("%s not taken for a link", i.Name)
+		}
+	}
+	if HasLinks([]Interface{plain}) || HasLinks(nil) {
+		t.Error("plain interfaces taken for links")
 	}
 }

@@ -69,6 +69,10 @@ func TestHugepageBytes(t *testing.T) {
 		"hugepagesz=1G hugepages=10 hugepagesz=2M hugepages=0":   10 << 30,
 		"hugepagesz=2M hugepages=1024 hugepagesz=1G hugepages=2": 1024*(2<<20) + 2<<30,
 		"quiet": 0,
+		// A size that does not parse changes nothing: 2M pages still.
+		"hugepagesz=huge hugepages=2":             2 * (2 << 20),
+		"default_hugepagesz=0 hugepages=3":        3 * (2 << 20),
+		"hugepages=two hugepagesz=1G hugepages=1": 1 << 30,
 	} {
 		if got := hugepageBytes(strings.Fields(args)); got != want {
 			t.Errorf("hugepageBytes(%q) = %d, want %d", args, got, want)

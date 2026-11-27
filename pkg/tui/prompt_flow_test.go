@@ -101,6 +101,14 @@ func TestPromptInstall(t *testing.T) {
 			t.Errorf("defaults missing %q:\n%s", want, out.String())
 		}
 	}
+	// At "Proceed?" Enter, or input that ends, is no: the disk is not wiped
+	// on a keystroke that did not say yes.
+	for name, last := range map[string][]string{"Enter": {""}, "ended": nil} {
+		a := append([]string{"1", "", "", "", "", "", "", "correct horse", "correct horse"}, last...)
+		if cfg, _, err = Run(answers(a...), &out); err == nil || err.Error() != "cancelled" || cfg != nil {
+			t.Errorf("%s at Proceed?: cfg=%v err=%v", name, cfg, err)
+		}
+	}
 	// No swap: its size is not asked for.
 	out.Reset()
 	_, _, _ = Run(answers("1", "", "", "none", "", "", "correct horse", "correct horse", "n"), &out)

@@ -5,6 +5,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/system"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -205,6 +206,50 @@ func TestSeedSunlightKey(t *testing.T) {
 	want, _ := sunlightKeyFS.ReadFile("keys/sunlight-repo.plist")
 	if string(got) != string(want) {
 		t.Error("seeded Sunlight key differs from the embedded one")
+	}
+}
+
+// The keys directory is cp -a'd into the target's /var/db/xbps/keys, so its
+// mode becomes that directory's: it must be 0755 as xbps has it, not the
+// 0700 MkdirTemp gives. The keys are public and written 0644, whatever mode
+// the live medium's copy had.
+func TestSeedSunlightKeyModes(t *testing.T) {
+	live := t.TempDir()
+	if err := os.WriteFile(filepath.Join(live, "void-a.plist"), []byte("void key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := seedSunlightKey(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	for name, want := range map[string]os.FileMode{".": 0o755, "void-a.plist": 0o644, sunlightKeyFile: 0o644} {
+		st, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm() != want {
+			t.Errorf("%s: mode %v, want %v", name, st.Mode().Perm(), want)
+		}
+	}
+}
+
+// Each Go architecture maps to the name xbps gives it (the repodata file
+// is <arch>-repodata), and this machine's is looked up the same way.
+func TestXBPSArch(t *testing.T) {
+	for goarch, want := range map[string]string{
+		"amd64":   "x86_64",
+		"arm64":   "aarch64",
+		"386":     "i686",
+		"riscv64": "riscv64", // named the same by both
+		"ppc64le": "ppc64le",
+	} {
+		if got := xbpsArch(goarch); got != want {
+			t.Errorf("xbpsArch(%q) = %q, want %q", goarch, got, want)
+		}
+	}
+	if got := hostXBPSArch(); got != xbpsArch(runtime.GOARCH) {
+		t.Errorf("hostXBPSArch() = %q, not the xbps name of %s", got, runtime.GOARCH)
 	}
 }
 

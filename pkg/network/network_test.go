@@ -107,6 +107,13 @@ func TestValidAddr(t *testing.T) {
 	if err := ValidAddr("192.168.1.10", "not-a-mask", false); err == nil {
 		t.Error("bad netmask accepted")
 	}
+	// An IPv4-mapped IPv6 address is written as IPv6, and is one.
+	if err := ValidAddr("::ffff:192.0.2.1", "64", true); err != nil {
+		t.Errorf("an IPv4-mapped address marked IPv6: %v", err)
+	}
+	if err := ValidAddr("::ffff:192.0.2.1", "24", false); err == nil {
+		t.Error("an IPv4-mapped address marked IPv4 should be rejected")
+	}
 }
 
 func TestMaskToCIDR(t *testing.T) {
@@ -119,8 +126,11 @@ func TestMaskToCIDR(t *testing.T) {
 		{"255.255.0.0", false, 16},
 		{"255.255.255.128", false, 25},
 		{"24", false, 24}, // already a prefix length
-		{"", false, 24},   // default v4
-		{"", true, 64},    // default v6
+		{"0", false, 0},   // the ends of the range are in it
+		{"32", false, 32},
+		{"0", true, 0},
+		{"", false, 24}, // default v4
+		{"", true, 64},  // default v6
 	}
 	for _, c := range cases {
 		got, err := maskToCIDR(c.mask, c.v6)

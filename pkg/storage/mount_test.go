@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -210,5 +211,49 @@ func TestLookOptions(t *testing.T) {
 		if got := lookOptions(c.fs, c.opts, c.ro); got != c.want {
 			t.Errorf("lookOptions(%q, %q, %v) = %q, want %q", c.fs, c.opts, c.ro, got, c.want)
 		}
+	}
+}
+
+// A bind UnmountMeta cannot take off is reported, and stays on the lists:
+// what is still mounted must still be there for UnmountAll to release.
+// The target's own filesystems are left alone, in their order. (Nothing is
+// mounted at these directories, so the unmount fails as root too.)
+func TestUnmountMetaKeepsWhatFailed(t *testing.T) {
+	root := t.TempDir()
+	proc, boot := filepath.Join(root, "proc"), filepath.Join(root, "boot")
+	m := NewMounter(root)
+	m.mounted = []string{root, boot, proc}
+	m.meta = map[string]bool{proc: true}
+	err := m.UnmountMeta()
+	if err == nil || !strings.Contains(err.Error(), "failed to unmount: "+proc+" (") {
+		t.Errorf("UnmountMeta: %v", err)
+	}
+	if got := strings.Join(m.mounted, ","); got != root+","+boot+","+proc || !m.HasMeta() {
+		t.Errorf("after a failed UnmountMeta: mounted %s, HasMeta %v", got, m.HasMeta())
+	}
+	// With no binds there is nothing to take off, and nothing is dropped.
+	m.mounted, m.meta = []string{root, boot}, nil
+	if err := m.UnmountMeta(); err != nil || strings.Join(m.mounted, ",") != root+","+boot {
+		t.Errorf("UnmountMeta with no binds: %v, mounted %v", err, m.mounted)
+	}
+}
+
+// ReadRootFile fails, rather than reading, where it cannot mount the root:
+// no mount directory to be made (a file in the way), or no device. As a
+// user the mount fails with EPERM; as root with ENOENT, which must not
+// read as the file not being there — a resume would take that for "nothing
+// to resume". (A user namespace cannot check that: ext4 is refused there
+// before the device is looked up.)
+func TestReadRootFileCannotMount(t *testing.T) {
+	pl := &Plan{Parts: []Partition{{Device: filepath.Join(t.TempDir(), "no-such-disk"), Filesystem: "ext4", Mountpoint: "/"}}}
+	file := filepath.Join(t.TempDir(), "file")
+	os.WriteFile(file, nil, 0o644)
+	if _, err := NewMounter(filepath.Join(file, "look")).ReadRootFile(pl, "x"); err == nil || strings.Contains(err.Error(), "mount") {
+		t.Errorf("ReadRootFile with a file in the way: %v", err)
+	}
+	look := filepath.Join(t.TempDir(), "look")
+	_, err := NewMounter(look).ReadRootFile(pl, "x")
+	if err == nil || !strings.Contains(err.Error(), "read-only on "+look) || errors.Is(err, os.ErrNotExist) {
+		t.Errorf("ReadRootFile of a disk not there: %v", err)
 	}
 }

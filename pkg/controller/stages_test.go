@@ -608,6 +608,35 @@ func TestDhcpcdConfIsWrittenOnce(t *testing.T) {
 
 func ptr(s string) *string { return &s }
 
+// dhcpcd reads a global option only before the first block, and a block
+// starts at an interface, an ssid or a profile line. And with no global
+// option to place, the stanzas still start on a line of their own after a
+// file that ends without a newline.
+func TestDhcpcdConfBlocksAndLastLine(t *testing.T) {
+	global := "\n# members of a bond or bridge, configured by slinstaller\ndenyinterfaces eth0 eth1\n"
+	stanzas := "\n# static interfaces configured by slinstaller\ninterface bond0\nstatic ip_address=10.0.0.2/24\n"
+	for _, block := range []string{"ssid home", "profile static_eth0", "interface wlan0"} {
+		path := filepath.Join(t.TempDir(), "dhcpcd.conf")
+		os.WriteFile(path, []byte("hostname\n"+block+"\nenv x=1\n"), 0o644)
+		if err := writeDhcpcdConf(path, global, global+stanzas); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := os.ReadFile(path)
+		want := "hostname\n# members of a bond or bridge, configured by slinstaller\ndenyinterfaces eth0 eth1\n\n" + block + "\nenv x=1\n" + stanzas
+		if string(got) != want {
+			t.Errorf("%s:\n%s\nwant:\n%s", block, got, want)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "dhcpcd.conf")
+	os.WriteFile(path, []byte("hostname\nslaac private"), 0o644)
+	if err := writeDhcpcdConf(path, "", stanzas); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "hostname\nslaac private\n"+stanzas {
+		t.Errorf("no global, no last newline:\n%s", got)
+	}
+}
+
 // An init= the config adds is the one the system boots with.
 func TestConfigInitWins(t *testing.T) {
 	cfg := twoPartConfig()

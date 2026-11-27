@@ -266,6 +266,27 @@ func TestInstallerMessage(t *testing.T) {
 			t.Errorf("installerMessage(%q, %q) = %q", tc[0], tc[1], got)
 		}
 	}
+	// The ends of the C1 range go too (DEL, U+009F); Latin-1 text after it
+	// stays.
+	mux.HandleFunc("/msg/edges-msg.yaml", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "install-msg:\n- default: \"a\\x7fb\\u009fc\\u00a0d é\"\n")
+	})
+	if got := installerMessage(srv.URL+"/msg", "edges-msg.yaml"); got != "abc\u00a0d é" {
+		t.Errorf("C1 edges: %q", got)
+	}
+	// An https base that redirects to plain http is not followed: what is
+	// shown sits right above the confirmation of a destructive install.
+	// (The client is the default transport's; here it trusts the test
+	// server's certificate.)
+	secure := httptest.NewTLSServer(http.RedirectHandler(srv.URL+"/msg/pre-install-msg.yaml", http.StatusFound))
+	defer secure.Close()
+	savedTransport := http.DefaultTransport
+	http.DefaultTransport = secure.Client().Transport
+	got := installerMessage(secure.URL+"/msg", preInstallMessage)
+	http.DefaultTransport = savedTransport
+	if got != "" {
+		t.Errorf("an https message redirected to http was shown: %q", got)
+	}
 	dir := t.TempDir()
 	onlyTools(t, dir)
 	_, _, err := runWith(t, "", "--message-url", "ftp://example.org", writeConfig(t, dir, plainConfig()))

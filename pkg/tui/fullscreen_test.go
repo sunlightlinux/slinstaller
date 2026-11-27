@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"io"
@@ -1861,6 +1862,42 @@ func TestRefitLeavesTheWizardsOwnOutputAlone(t *testing.T) {
 					t.Errorf("%s on %s (pstate %q): install would rewrite %v to %v", p.name, vendor, mode, args, got)
 				}
 			}
+		}
+	}
+}
+
+// The connectivity check probes netTestTarget and reports either outcome as
+// the message the popup shows, with the reason a failure gives.
+func TestTestNetCmd(t *testing.T) {
+	saved := netVerify
+	defer func() { netVerify = saved }()
+	var asked string
+	netVerify = func(url, _ string) error { asked = url; return errors.New("network: cannot reach it: no route") }
+	if got := testNetCmd("")(); got != (netTestDoneMsg{result: "[FAIL] No connectivity: network: cannot reach it: no route"}) {
+		t.Errorf("unreachable: %+v", got)
+	}
+	if asked != netTestTarget {
+		t.Errorf("probed %q, not %q", asked, netTestTarget)
+	}
+	netVerify = func(string, string) error { return nil }
+	if got := testNetCmd("")(); got != (netTestDoneMsg{result: "[ OK ] Network is reachable.", ok: true}) {
+		t.Errorf("reachable: %+v", got)
+	}
+}
+
+// The hub shows as many three-row sections as fit the panel under its 7
+// rows of chrome; the panel stops growing at dialogHeight and never gets
+// shorter than 18 rows, nor does the count.
+func TestHubVisibleCount(t *testing.T) {
+	for _, c := range []struct{ height, want int }{
+		{0, (dialogHeight - 2 - 7) / 3}, // no size yet: the dialog's own
+		{dialogHeight, (dialogHeight - 2 - 7) / 3},
+		{200, (dialogHeight - 2 - 7) / 3},
+		{19, (18 - 7) / 3},
+		{1, (18 - 7) / 3},
+	} {
+		if got := hubVisibleCount(c.height); got != c.want {
+			t.Errorf("hubVisibleCount(%d) = %d, want %d", c.height, got, c.want)
 		}
 	}
 }

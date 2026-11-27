@@ -341,3 +341,54 @@ func TestParseVolumeGroupsNoPV(t *testing.T) {
 		t.Errorf("parseVolumeGroups = %v", vgs)
 	}
 }
+
+// A device is found by its path, or by /dev/ and its name where lsblk gave
+// no path (an older lsblk without -p); a device-mapper volume by its
+// /dev/mapper path, which is not /dev/ and its name.
+func TestFindByPathOrName(t *testing.T) {
+	devs := []Device{
+		{Name: "sda", Type: "disk", Children: []Device{{Name: "sda1", Type: "part"}}},
+		{Name: "nvme0n1", Path: "/dev/nvme0n1", Type: "disk", Children: []Device{
+			{Name: "vg-root", Path: "/dev/mapper/vg-root", Type: "lvm"}}},
+	}
+	for path, name := range map[string]string{"/dev/sda": "sda", "/dev/sda1": "sda1", "/dev/mapper/vg-root": "vg-root", "/dev/nvme0n1": "nvme0n1"} {
+		if d := FindByPath(devs, path); d == nil || d.Name != name {
+			t.Errorf("FindByPath(%s) = %+v, want %s", path, d, name)
+		}
+	}
+	if d := FindByPath(devs, "/dev/sdb"); d != nil {
+		t.Errorf("FindByPath(/dev/sdb) = %+v, want nil", d)
+	}
+}
+
+// An array with two members on the disk is listed under each, and reported
+// once: an operator reads each line as one more thing broken.
+func TestSharedReportsAnArrayOnce(t *testing.T) {
+	md := Device{Name: "md0", Path: "/dev/md0", Type: "raid5"}
+	part := func(n string) Device { return Device{Name: n, Path: "/dev/" + n, Type: "part", Children: []Device{md}} }
+	devs := []Device{
+		{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []Device{part("sda1"), part("sda2")}},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", Children: []Device{part("sdb1")}},
+	}
+	got := Shared(devs, "/dev/sda", []string{"/dev/sda"}, nil)
+	if len(got) != 1 || got[0] != "/dev/md0 (raid5) also uses /dev/sdb" {
+		t.Errorf("Shared = %q", got)
+	}
+}
+
+// A member seen twice inside the targets (a multipath partition, under each
+// path to its LUN, both wiped) with a fellow outside is reported once.
+func TestSharedMembersReportsAMemberOnce(t *testing.T) {
+	mp := Device{Name: "mpatha", Path: "/dev/mapper/mpatha", Type: "mpath", Children: []Device{
+		{Name: "mpatha1", Path: "/dev/mapper/mpatha1", Type: "part", FsType: "linux_raid_member", UUID: "r"}}}
+	devs := []Device{
+		{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []Device{mp}},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", Children: []Device{mp}},
+		{Name: "sdz", Path: "/dev/sdz", Type: "disk", Children: []Device{
+			{Name: "sdz1", Path: "/dev/sdz1", Type: "part", FsType: "linux_raid_member", UUID: "r"}}},
+	}
+	got := SharedMembers(devs, []string{"/dev/sda", "/dev/sdb"})
+	if len(got) != 1 || !strings.Contains(got[0], "/dev/mapper/mpatha1 (linux_raid_member r) has a fellow member on /dev/sdz1 ") {
+		t.Errorf("SharedMembers = %q", got)
+	}
+}

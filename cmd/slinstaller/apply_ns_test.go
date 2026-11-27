@@ -314,6 +314,21 @@ func applyChild(t *testing.T) {
 	e = newApplyEnv(t)
 	_, _, err = runWith(t, "", "--in-target", "true", "--root", filepath.Join(e.base, "empty"))
 	wantRunErr(t, "--in-target with no target", err, "does not look like a mounted target")
+	// On a mounted target (a /proc/self there) the command runs through
+	// chroot into it, by /bin/sh -c, and its failure is the run's. chroot
+	// is a stand-in recording its arguments.
+	e = newApplyEnv(t)
+	target := filepath.Join(e.base, "target")
+	os.MkdirAll(filepath.Join(target, "proc", "self"), 0o755)
+	if _, _, err = runWith(t, "", "--in-target", "xbps-query -l | wc -l", "--root", target); err != nil {
+		t.Errorf("--in-target on a mounted target: %v", err)
+	}
+	if got, want := e.ran("chroot"), target+" /bin/sh -c xbps-query -l | wc -l\n"; got != want {
+		t.Errorf("--in-target ran chroot %q, want %q", got, want)
+	}
+	os.WriteFile(filepath.Join(e.bin, "chroot"), []byte("#!/bin/sh\nexit 3\n"), 0o755)
+	_, _, err = runWith(t, "", "--in-target", "false", "--root", target)
+	wantRunErr(t, "--in-target with a failing command", err, "in the target: exit status 3")
 
 	// The config's proxy is in force for the run itself.
 	e = newApplyEnv(t)
@@ -499,6 +514,18 @@ func applyChild(t *testing.T) {
 	os.WriteFile(filepath.Join(e.bin, "pvs.out"), []byte("  "+testDisk+"p2:data\n  /dev/sdz1:data\n"), 0o644)
 	_, err = e.run(confirmed, formatPV)
 	e.refused("formatting a PV of a group spanning another disk", err, "is a physical volume of data")
+	// Kept as it is (neither formatted nor shrunk), the same member harms
+	// nothing: a reuse install alongside a multi-device btrfs goes on.
+	keepCfg := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{
+		{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Name: testName + "p2", Type: "part", FsType: "btrfs", Preserve: true},
+		{Name: testName + "p3", Type: "part", FsType: "ext4", Mountpoint: "/", Create: true},
+	}}}}
+	e = newApplyEnv(t)
+	setListing(t, e.bin, reuseListing)
+	if _, err = e.run(confirmed, keepCfg, "--through", "partition"); err != nil && strings.Contains(err.Error(), "member of") {
+		t.Errorf("a kept btrfs member was refused as harmed: %v", err)
+	}
 	// A group whose every PV this install formats harms nothing else.
 	bothPVs := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{
 		{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},

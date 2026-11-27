@@ -28,6 +28,23 @@ func TestCheckFit(t *testing.T) {
 	if err := pl.CheckFit(func(string) (uint64, bool) { return 0, false }, MinRootSize, "2 GB"); err != nil {
 		t.Errorf("an unknown disk is not checked: %v", err)
 	}
+	// To the byte: the fixed partitions and the GPT's space, plus the
+	// root's minimum, fit; a byte less does not.
+	need := uint64(512<<20) + 2<<30 + GPTReserveBytes
+	if err := pl.CheckFit(size(need+MinRootSize), MinRootSize, "2 GB"); err != nil {
+		t.Errorf("exactly the minimum: %v", err)
+	}
+	if err := pl.CheckFit(size(need+MinRootSize-1), MinRootSize, "2 GB"); err == nil || !strings.Contains(err.Error(), "below its 2 GB minimum") {
+		t.Errorf("a byte under the minimum: %v", err)
+	}
+	// With nothing filling the disk, the fixed partitions alone, to the byte.
+	fixed := &Plan{Wipe: true, Disk: "/dev/sda", Parts: pl.Parts[:2]}
+	if err := fixed.CheckFit(size(need), MinRootSize, "2 GB"); err != nil {
+		t.Errorf("exactly full: %v", err)
+	}
+	if err := fixed.CheckFit(size(need-1), MinRootSize, "2 GB"); err == nil || !strings.Contains(err.Error(), "layout needs") {
+		t.Errorf("a byte short: %v", err)
+	}
 	// A size too big to count saturates and fails, not wraps and fits.
 	pl.Parts[1].Size = "16000000000000000T"
 	if err := pl.CheckFit(size(64<<30), MinRootSize, "2 GB"); err == nil {

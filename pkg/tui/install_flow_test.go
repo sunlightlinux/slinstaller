@@ -477,6 +477,19 @@ func TestConfirmLines(t *testing.T) {
 	if strings.Contains(got, "ERASE:") {
 		t.Errorf("an install keeping the table says the disk is erased:\n%s", got)
 	}
+	// Nothing shrunk: no warning about an interrupted shrink. A logical
+	// volume or an array is no partition of the disk, and is not listed.
+	reuse := &storage.Plan{Disk: "/dev/sda", Parts: []storage.Partition{
+		{Device: "/dev/sda1", Preserve: true, Mountpoint: "/boot/efi"},
+		{Device: "/dev/sda2", Filesystem: "ext4", Mountpoint: "/"},
+		{Device: "/dev/vg0/home", Filesystem: "ext4", Mountpoint: "/home", LV: true},
+		{Device: "/dev/md/data", Filesystem: "xfs", Mountpoint: "/srv", Raid: true},
+	}}
+	got = strings.Join(confirmLines(reuse, devs), "\n")
+	if !strings.Contains(got, "FORMAT /dev/sda2 as ext4 -> /") || strings.Contains(got, "have a backup") || strings.Contains(got, "SHRINK") ||
+		strings.Contains(got, "/dev/vg0/home") || strings.Contains(got, "/dev/md/data") {
+		t.Errorf("a reuse with no shrink:\n%s", got)
+	}
 }
 
 // With Secure Boot on, the confirmation says the installed GRUB will not
