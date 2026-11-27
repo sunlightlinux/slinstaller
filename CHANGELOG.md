@@ -105,6 +105,13 @@ change.
   reported as typos.
 - Ctrl+C closes the stop before it says "Interrupted": in between, the
   next stage could begin.
+- **Found by new property fuzzers** over the partition commands, fstab
+  and crypttab: a disk name must be a kernel name (`sda;reboot` reached a
+  resize's `sh -c` unquoted); a reuse install's fstab fields are checked
+  as a wiping install's are; two devices of a layout at one path (a disk
+  `md0` beside an array `md0`, an LV declared twice) are refused.
+- A reuse partition marked both `create` and `preserve` is refused: it
+  was cut, never formatted, and failed at the mount.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 
