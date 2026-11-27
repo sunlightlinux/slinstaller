@@ -31,6 +31,10 @@ func printCompletion(w io.Writer, fs *flag.FlagSet, shell string) error {
 	case "bash":
 		var names []string
 		for _, f := range flags {
+			if len(f.name) == 1 {
+				names = append(names, "-"+f.name) // a short form, as fish has it
+				continue
+			}
 			names = append(names, "--"+f.name)
 		}
 		fmt.Fprintf(w, `# bash completion for slinstaller (slinstaller --completion bash)

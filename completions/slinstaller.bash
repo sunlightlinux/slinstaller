@@ -9,7 +9,7 @@ _slinstaller() {
 	--completion) COMPREPLY=($(compgen -W "bash fish" -- "$cur")); return ;;
 	esac
 	if [[ "$cur" == -* ]]; then
-		COMPREPLY=($(compgen -W "--allow-insecure-http --apply --arch --b --block-device --c --completion --config --copy-network --crypt-file --diagnostics --discover --extra-repo --force-destructive --genpass --image --in-target --j --json-yaml --keys --l --list-disks --local-repo --log --log-level --message-url --offline --packages --reboot --repo --report-url --resume --resume-from --root --skip-validation-all --skip-validation-size --swap-file-size --system-check --template --text --through --unmount --version" -- "$cur"))
+		COMPREPLY=($(compgen -W "--allow-insecure-http --apply --arch -b --block-device -c --completion --config --copy-network --crypt-file --diagnostics --discover --extra-repo --force-destructive --genpass --image --in-target -j --json-yaml --keys -l --list-disks --local-repo --log --log-level --message-url --offline --packages --reboot --repo --report-url --resume --resume-from --root --skip-validation-all --skip-validation-size --swap-file-size --system-check --template --text --through --unmount --version" -- "$cur"))
 		return
 	fi
 	COMPREPLY=($(compgen -f -X '!*.@(yaml|yml|json)' -- "$cur") $(compgen -d -- "$cur"))
