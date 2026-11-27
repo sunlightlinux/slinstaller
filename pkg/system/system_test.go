@@ -609,3 +609,30 @@ func TestCheckLocale(t *testing.T) {
 		}
 	}
 }
+
+// NetLinks writes its script and, on a runit system, runs it from rc.local
+// once; with no script it does nothing.
+func TestNetLinksRunit(t *testing.T) {
+	root := t.TempDir()
+	if err := NetLinks(root, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc")); err == nil {
+		t.Error("wrote something with no script")
+	}
+	for i := 0; i < 2; i++ {
+		if err := NetLinks(root, "#!/bin/sh\nip link add bond0 type bond\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rc, _ := os.ReadFile(filepath.Join(root, "etc", "rc.local"))
+	if strings.Count(string(rc), netLinksScript) != 1 {
+		t.Errorf("rc.local:\n%s", rc)
+	}
+	if fi, err := os.Stat(filepath.Join(root, netLinksScript)); err != nil || fi.Mode().Perm()&0o100 == 0 {
+		t.Errorf("script: %v %v", fi, err)
+	}
+	if MemTotalBytes() == 0 {
+		t.Log("no /proc/meminfo here")
+	}
+}
