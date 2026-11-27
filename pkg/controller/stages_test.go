@@ -405,7 +405,7 @@ func TestFirstBootConfiguresTheTarget(t *testing.T) {
 		"chroot " + root + " xbps-reconfigure -f glibc-locales",
 		"chroot " + root + " useradd -m -G wheel -c Ion -p $6$hash ion",
 		"chroot " + root + " useradd -m -p $6$other guest",
-		"chroot " + root + " chown -R ion:ion /home/ion/.ssh",
+		"chroot " + root + " chown ion:ion /home/ion/.ssh /home/ion/.ssh/authorized_keys",
 		// An administrator exists, so root's password login is locked.
 		"chroot " + root + " usermod --lock root",
 	} {

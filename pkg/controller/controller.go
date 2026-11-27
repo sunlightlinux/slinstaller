@@ -863,7 +863,12 @@ func (in *installer) forgetImageIdentity() error {
 	}
 	for _, f := range keys {
 		// Lstat, not Stat: a link (dbus's machine-id often is one) is
-		// removed itself, never followed out of the target.
+		// removed itself; and only in a directory that is in the target —
+		// an image whose /etc/ssh is an absolute link would otherwise have
+		// had the LIVE system's host keys removed.
+		if !insideTarget(root, filepath.Dir(f)) {
+			continue
+		}
 		if fi, err := os.Lstat(f); err == nil && !fi.IsDir() {
 			if err := os.Remove(f); err != nil {
 				return fmt.Errorf("image: %w", err)
@@ -1617,6 +1622,56 @@ func (in *installer) firstBoot() error {
 	return in.writeFiles()
 }
 
+// insideTarget reports whether dir, its links followed, is root or under
+// it: links in an image or a reused root point where they would on that
+// system, and from here an absolute one points into the live system.
+func insideTarget(root, dir string) bool {
+	r, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		r = root
+	}
+	d, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return false
+	}
+	return d == r || strings.HasPrefix(d, r+string(os.PathSeparator))
+}
+
+// ownFile makes path, a file the install is about to read and rewrite in
+// the target, an ordinary file in the target. A link there is resolved as
+// the installed system would resolve it (an absolute target taken inside
+// root), its content kept, and replaced by a file of that content: read
+// and written through, an absolute link reached the live system's file.
+// A directory that leads out of the target is refused.
+func ownFile(root, path string) error {
+	if !insideTarget(root, filepath.Dir(path)) {
+		return fmt.Errorf("%s leads outside the installed system", path)
+	}
+	fi, err := os.Lstat(path)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+	link, err := os.Readlink(path)
+	if err != nil {
+		return fmt.Errorf("read link %s: %w", path, err)
+	}
+	target := filepath.Join(filepath.Dir(path), link)
+	if filepath.IsAbs(link) {
+		target = filepath.Join(root, link)
+	}
+	var data []byte
+	if st, err := os.Stat(target); err == nil && st.Mode().IsRegular() && insideTarget(root, filepath.Dir(target)) {
+		data, _ = os.ReadFile(target)
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("replace link %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
 // writeDhcpcdConf adds conf (DhcpcdConf: the global part, then stanzas)
 // to the target's dhcpcd.conf, each part once, so a resumed install does
 // not write them twice. The global part goes before the file's first
@@ -1743,7 +1798,11 @@ func (in *installer) network() error {
 		return err
 	}
 	if conf != "" {
-		if err := writeDhcpcdConf(filepath.Join(in.opts.Root, "etc", "dhcpcd.conf"), network.DhcpcdGlobal(ifaces), conf); err != nil {
+		path := filepath.Join(in.opts.Root, "etc", "dhcpcd.conf")
+		if err := ownFile(in.opts.Root, path); err != nil {
+			return err
+		}
+		if err := writeDhcpcdConf(path, network.DhcpcdGlobal(ifaces), conf); err != nil {
 			return err
 		}
 	}

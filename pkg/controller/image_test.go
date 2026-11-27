@@ -213,3 +213,49 @@ func TestImageIdentityIsForgotten(t *testing.T) {
 		t.Errorf("host keys not made anew:\n%s", r.flat())
 	}
 }
+
+// Links in an image or a reused root are resolved as the installed system
+// would, never onto the live system: dhcpcd.conf made the target's own
+// file, host keys behind a linked /etc/ssh left alone.
+func TestNoWriteOrRemoveThroughTargetLinks(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	root := in.opts.Root
+	live := t.TempDir()
+	os.WriteFile(filepath.Join(live, "dhcpcd.conf"), []byte("live\n"), 0o644)
+	etc := mkTarget(t, in, "etc")
+	os.MkdirAll(filepath.Join(root, "usr", "share"), 0o755)
+	os.WriteFile(filepath.Join(root, "usr", "share", "dhcpcd.conf"), []byte("image\n"), 0o644)
+	// Absolute, as on the image: /usr/share/dhcpcd.conf — inside the target.
+	os.Symlink("/usr/share/dhcpcd.conf", filepath.Join(etc, "dhcpcd.conf"))
+	if err := ownFile(root, filepath.Join(etc, "dhcpcd.conf")); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(filepath.Join(etc, "dhcpcd.conf")); !fi.Mode().IsRegular() {
+		t.Error("the link was not replaced by a file")
+	}
+	if got, _ := os.ReadFile(filepath.Join(etc, "dhcpcd.conf")); string(got) != "image\n" {
+		t.Errorf("content = %q, want the image's", got)
+	}
+	// A directory leading out of the target is refused.
+	os.Symlink(live, filepath.Join(root, "out"))
+	if err := ownFile(root, filepath.Join(root, "out", "dhcpcd.conf")); err == nil {
+		t.Error("a path through a link out of the target was accepted")
+	}
+	if got, _ := os.ReadFile(filepath.Join(live, "dhcpcd.conf")); string(got) != "live\n" {
+		t.Error("the live file was touched")
+	}
+
+	// /etc/ssh an absolute link to the live system's: its keys stay.
+	in = stagedInstaller(t, twoPartConfig(), &r)
+	liveSSH := t.TempDir()
+	os.WriteFile(filepath.Join(liveSSH, "ssh_host_ed25519_key"), []byte("live key"), 0o600)
+	mkTarget(t, in, "etc")
+	os.Symlink(liveSSH, filepath.Join(in.opts.Root, "etc", "ssh"))
+	if err := in.forgetImageIdentity(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(liveSSH, "ssh_host_ed25519_key")); err != nil {
+		t.Error("the live system's host key was removed through the image's link")
+	}
+}

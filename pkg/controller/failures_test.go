@@ -460,10 +460,16 @@ func TestNetworkFailures(t *testing.T) {
 	blockWithDir(t, in, "etc", "dhcpcd.conf")
 	wantErr(t, in.network(), "write")
 
-	in = stagedInstaller(t, static("255.255.255.0"), &r)
-	fullDisk(t, in, "etc", "dhcpcd.conf")
-	if err := in.network(); err == nil {
-		t.Error("a failed dhcpcd.conf write was not reported")
+	// A write that fails is reported. (A link there — once /dev/full here —
+	// is replaced by a file of the target's own now; a read-only file
+	// stands in for the failure.)
+	if os.Geteuid() != 0 {
+		in = stagedInstaller(t, static("255.255.255.0"), &r)
+		conf := filepath.Join(mkTarget(t, in, "etc"), "dhcpcd.conf")
+		os.WriteFile(conf, []byte("hostname\n"), 0o444)
+		if err := in.network(); err == nil {
+			t.Error("a failed dhcpcd.conf write was not reported")
+		}
 	}
 
 	// A slinit target without an sshd service to enable: reported, not

@@ -705,7 +705,11 @@ func (u User) WriteSSHKeys(root string) ([]string, error) {
 	if werr != nil {
 		return nil, fmt.Errorf("system: write authorized_keys: %w", werr)
 	}
-	return []string{"chroot", root, "chown", "-R", u.Login + ":" + u.Login, "/home/" + u.Login + "/.ssh"}, nil
+	// The directory and the key file only, not -R: anything else in a
+	// preserved .ssh may be a hard link to another user's file (another
+	// home on the same filesystem), and chown -R would hand it over.
+	return []string{"chroot", root, "chown", u.Login + ":" + u.Login,
+		"/home/" + u.Login + "/.ssh", "/home/" + u.Login + "/.ssh/authorized_keys"}, nil
 }
 
 // has reports whether the file at path already contains text.

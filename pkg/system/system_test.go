@@ -79,7 +79,7 @@ func TestWriteSSHKeys(t *testing.T) {
 	if string(got) != "ssh-ed25519 AAAA\nssh-rsa BBBB\n" {
 		t.Errorf("authorized_keys = %q", got)
 	}
-	if strings.Join(chown, " ") != "chroot "+root+" chown -R ion:ion /home/ion/.ssh" {
+	if strings.Join(chown, " ") != "chroot "+root+" chown ion:ion /home/ion/.ssh /home/ion/.ssh/authorized_keys" {
 		t.Errorf("chown command = %v", chown)
 	}
 

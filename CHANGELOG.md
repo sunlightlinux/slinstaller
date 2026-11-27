@@ -55,6 +55,12 @@ change.
 
 ### Fixed
 
+- Links in an image or a reused root were followed onto the live system:
+  an absolute `/etc/dhcpcd.conf` link had the live file read and
+  rewritten, and an image whose `/etc/ssh` was an absolute link had the
+  live system's host keys removed. Such links are resolved inside the
+  target. The ssh-keys step no longer runs `chown -R` on a preserved
+  `.ssh`, where a hard link could hand another user's file over.
 - A volume group over an encrypted and a plain physical volume was
   accepted: its volumes — the root, and with an encrypted `/boot` the
   initramfs and the key it carries — could land on the plain one, and the
