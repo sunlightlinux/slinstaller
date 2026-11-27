@@ -588,3 +588,24 @@ func TestOwnFileChainModeAndUntouched(t *testing.T) {
 		t.Errorf("an untouched hostname link was replaced: %v %v", fi, err)
 	}
 }
+
+// A cycle of links is taken like a dangling one; a script's default mode
+// keeps it executable.
+func TestOwnFileCycleAndDefaultMode(t *testing.T) {
+	root := t.TempDir()
+	etc := filepath.Join(root, "etc")
+	os.MkdirAll(etc, 0o755)
+	os.Symlink("/etc/a", filepath.Join(etc, "rc.conf"))
+	os.Symlink("/etc/b", filepath.Join(etc, "a"))
+	os.Symlink("/etc/a", filepath.Join(etc, "b"))
+	if err := ownFile(root, filepath.Join(etc, "rc.conf")); err != nil {
+		t.Errorf("a cycle: %v", err)
+	}
+	os.Symlink("/usr/local/etc/rc.local", filepath.Join(etc, "rc.local")) // dangling
+	if err := ownFileMode(root, filepath.Join(etc, "rc.local"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(filepath.Join(etc, "rc.local")); fi.Mode().Perm()&0o100 == 0 {
+		t.Errorf("rc.local %v", fi.Mode())
+	}
+}

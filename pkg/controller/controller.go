@@ -1887,7 +1887,12 @@ func insideTarget(root, dir string) bool {
 // root), its content kept, and replaced by a file of that content: read
 // and written through, an absolute link reached the live system's file.
 // A directory that leads out of the target is refused.
-func ownFile(root, path string) error {
+func ownFile(root, path string) error { return ownFileMode(root, path, 0o644) }
+
+// ownFileMode is ownFile whose file, when nothing is copied into it (a link
+// to nothing, or to no regular file), has mode def: rc.local, appended to
+// next, has to stay executable.
+func ownFileMode(root, path string, def os.FileMode) error {
 	if root == "" {
 		return nil // no target: the caller says so
 	}
@@ -1909,7 +1914,8 @@ func ownFile(root, path string) error {
 			break
 		}
 		if i == 40 {
-			return fmt.Errorf("%s: too many links", path)
+			target = "" // a cycle: as unusable as a dangling link, and as safe
+			break
 		}
 		link, err := os.Readlink(target)
 		if err != nil {
@@ -1922,8 +1928,8 @@ func ownFile(root, path string) error {
 		}
 	}
 	var data []byte
-	mode := os.FileMode(0o644)
-	if st, err := os.Lstat(target); err == nil && st.Mode().IsRegular() && insideTarget(root, filepath.Dir(target)) {
+	mode := def
+	if st, err := os.Lstat(target); target != "" && err == nil && st.Mode().IsRegular() && insideTarget(root, filepath.Dir(target)) {
 		data, _ = os.ReadFile(target)
 		mode = st.Mode().Perm() // an executable rc.local stays executable
 	}
@@ -2064,12 +2070,16 @@ func (in *installer) network() error {
 	}
 	// Bonds, VLANs and bridges are made at each boot by a service of their
 	// own; dhcpcd then finds the new interfaces and addresses them.
-	// rc.local is appended to here (and a resume from network skips
-	// first-boot): not through a link.
-	if err := ownFile(in.opts.Root, filepath.Join(in.opts.Root, "etc", "rc.local")); err != nil {
-		return err
+	// rc.local is appended to here when there are links to make (and a
+	// resume from network skips first-boot): not through a link — and left
+	// alone when nothing is appended.
+	script := network.LinkScript(ifaces)
+	if script != "" && !system.IsSlinitSystem(in.opts.Root) { // as NetLinks appends
+		if err := ownFileMode(in.opts.Root, filepath.Join(in.opts.Root, "etc", "rc.local"), 0o755); err != nil {
+			return err
+		}
 	}
-	if err := system.NetLinks(in.opts.Root, network.LinkScript(ifaces)); err != nil {
+	if err := system.NetLinks(in.opts.Root, script); err != nil {
 		return err
 	}
 	if conf != "" {
