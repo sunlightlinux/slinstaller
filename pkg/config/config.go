@@ -744,7 +744,10 @@ func (c *Config) ResolveDisks(disks []DiskInfo) error {
 			// A named partition must be one of the disk's own: renamed by
 			// its position, sdb5 under a matched sda became nvme0n1p2 — an
 			// existing partition nobody named — and was formatted.
-			if ch.Name != "" && (old == "" || !partitionOf(old, ch.Name)) {
+			if ch.Name != "" && old == "" {
+				return fmt.Errorf("config: partition %s is named, but its disk (matched as /dev/%s) is not: name the disk too, or leave the partitions unnamed", ch.Name, name)
+			}
+			if ch.Name != "" && !partitionOf(old, ch.Name) {
 				return fmt.Errorf("config: partition %s is not one of disk %q (matched as /dev/%s): name it after the disk, or leave it unnamed", ch.Name, old, name)
 			}
 			if old != "" && strings.HasPrefix(ch.Name, old) {
