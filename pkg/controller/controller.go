@@ -1260,12 +1260,15 @@ func (in *installer) fstab() error {
 // opened it).
 func (in *installer) crypttab() error {
 	var enc, nonRoot []storage.Partition
+	rootEncrypted := false
 	for _, p := range in.plan.Parts {
 		if !p.Encrypted {
 			continue
 		}
 		enc = append(enc, p)
-		if !in.isRootCrypt(p) {
+		if in.isRootCrypt(p) {
+			rootEncrypted = true
+		} else {
 			nonRoot = append(nonRoot, p)
 		}
 	}
@@ -1276,8 +1279,10 @@ func (in *installer) crypttab() error {
 	// A keyfile is needed when there are non-root volumes (for the runit
 	// service) or when /boot is encrypted (for the initramfs to open root
 	// without re-prompting). A lone crypt root on an unencrypted /boot needs
-	// none — dracut just asks once.
-	if len(nonRoot) > 0 || in.bootOnEncrypted() {
+	// none — dracut just asks once. And none on a plain root, where it
+	// would lie in the clear beside the volumes it opens: those ask for
+	// their passphrase at boot instead.
+	if rootEncrypted && (len(nonRoot) > 0 || in.bootOnEncrypted()) {
 		if err := in.setupKeyfile(enc); err != nil {
 			return err
 		}

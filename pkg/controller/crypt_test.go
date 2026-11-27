@@ -277,3 +277,35 @@ func TestInstallsDKMS(t *testing.T) {
 		}
 	}
 }
+
+// A crypt /home beside a plain root: the keyfile would live on the root, in
+// the clear, and anyone with the disk would read the key to /home off it.
+// Nothing is gained by it either — no volume the initramfs opens shares a
+// passphrase with it — so /home is listed with no key and asks at boot.
+func TestCryptHomeOnPlainRootKeepsNoKeyfile(t *testing.T) {
+	dir := fakeCryptsetup(t)
+	var r recorder
+	cfg := &config.Config{TargetMedia: []*config.Media{{
+		Name: "sda", Type: "disk", Children: []*config.Media{
+			{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/", Size: "20G"},
+			{Name: "sda3", Type: "crypt", FsType: "ext4", Mountpoint: "/home"},
+		},
+	}}}
+	in, _ := cryptInstaller(t, cfg, &r)
+	if err := in.crypttab(); err != nil {
+		t.Fatalf("crypttab: %v", err)
+	}
+	if in.keyfile != "" {
+		t.Errorf("keyfile = %q on a plain root", in.keyfile)
+	}
+	if _, err := os.Stat(filepath.Join(in.opts.Root, keyfilePath)); err == nil {
+		t.Error("the key to /home was written to the unencrypted root")
+	}
+	if args, _ := os.ReadFile(filepath.Join(dir, "args")); strings.Contains(string(args), "luksAddKey") {
+		t.Errorf("a keyfile slot was added:\n%s", args)
+	}
+	if tab := readTarget(t, in, "etc", "crypttab"); !strings.Contains(tab, "UUID=uuid-sda3 none luks") {
+		t.Errorf("crypttab:\n%s", tab)
+	}
+}
