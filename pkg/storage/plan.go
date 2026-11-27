@@ -204,6 +204,18 @@ func (pl *Plan) DiskList() []string {
 	return []string{pl.Disk}
 }
 
+// VGNames is the volume groups the plan creates, one per physical volume
+// (a group on several is named as often).
+func (pl *Plan) VGNames() []string {
+	var out []string
+	for _, p := range pl.Parts {
+		if p.IsPV {
+			out = append(out, p.VGName)
+		}
+	}
+	return out
+}
+
 // FixedBytesByDisk sums, per disk, the bytes of the physical partitions
 // with a fixed size — ignoring fill partitions (SizeRest, which take only
 // what is left) and the logical volumes and RAID arrays that are not cut by

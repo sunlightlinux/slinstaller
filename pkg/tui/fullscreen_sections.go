@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
@@ -1286,6 +1287,18 @@ func (m model) installProblem() string {
 			return 0, false
 		}, rootMin, rootLabel)
 	}
+	// A volume group the layout creates must not have its name taken by
+	// one the wipe leaves, as the installer checks before the wipe:
+	// refused there, it ended the program, pointing at a config key the
+	// wizard does not show.
+	if err == nil && plan.Wipe {
+		if groups := plan.VGNames(); len(groups) > 0 {
+			devs, vgs := machineVolumes()
+			if clash := blockdev.VGNameClashes(devs, vgs, groups, plan.DiskList()); len(clash) > 0 {
+				err = fmt.Errorf("%s - give the LVM partition another Volume group name in Installation Media", strings.Join(clash, "; "))
+			}
+		}
+	}
 	// And what the installer checks against this machine before it starts:
 	// the kernel arguments (CPUs, memory) and the time zone, keymap and
 	// language. Refused after the wizard, they ended the program.
@@ -1301,6 +1314,14 @@ func (m model) installProblem() string {
 		return err.Error()
 	}
 	return ""
+}
+
+// machineVolumes is the machine's block devices and LVM volume groups, for
+// the wizard's check of the volume group names. A variable so a test can
+// give its own.
+var machineVolumes = func() ([]blockdev.Device, map[string][]string) {
+	devs, _ := blockdev.List()
+	return devs, blockdev.VolumeGroups()
 }
 
 // problemLines breaks a validation message into popup lines of a width

@@ -999,13 +999,7 @@ restart:
 			}
 			// A group this install creates must not have its name taken by
 			// one the wipe leaves: vgcreate would fail after the wipe.
-			var groups []string
-			for _, p := range plan.Parts {
-				if p.IsPV {
-					groups = append(groups, p.VGName)
-				}
-			}
-			if clash := blockdev.VGNameClashes(devs, vgs, groups, plan.DiskList()); len(clash) > 0 {
+			if clash := blockdev.VGNameClashes(devs, vgs, plan.VGNames(), plan.DiskList()); len(clash) > 0 {
 				return fmt.Errorf("the layout's volume groups clash with groups already on the machine:\n  %s\nname this install's group differently (volumeGroup:)",
 					strings.Join(clash, "\n  "))
 			}

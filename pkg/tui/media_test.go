@@ -643,3 +643,30 @@ func TestMediaDialogMarksTheDefaultDisk(t *testing.T) {
 		t.Errorf("the default disk is not marked:\n%s", v)
 	}
 }
+
+// A volume group the layout creates whose name the machine already has on a
+// disk the install does not wipe is refused in the wizard, as the installer
+// refuses it after: there, it ended the program with every answer lost, and
+// pointed at a volumeGroup: key the wizard does not show.
+func TestInstallProblemVGNameClash(t *testing.T) {
+	old := machineVolumes
+	t.Cleanup(func() { machineVolumes = old })
+	machineVolumes = func() ([]blockdev.Device, map[string][]string) {
+		devs := twoTestDisks()
+		devs[1].Children = []blockdev.Device{{Name: "sdb1", Path: "/dev/sdb1", Type: "part"}}
+		return devs, map[string][]string{"vg0": {"/dev/sdb1"}}
+	}
+	m := readyModel()
+	m.parts = []partEntry{
+		{Type: "part", FS: "vfat", Mount: "/boot", Size: "512M"},
+		{Type: "lvm", VG: "vg0", LVs: []lvEntry{{Name: "root", FS: "ext4", Mount: "/"}}},
+	}
+	p := m.installProblem()
+	if !strings.Contains(p, "volume group vg0 already exists, on /dev/sdb1") || !strings.Contains(p, "Volume group name") {
+		t.Errorf("problem %q", p)
+	}
+	m.parts[1].VG = "sunlight"
+	if p := m.installProblem(); p != "" {
+		t.Errorf("another name: %q", p)
+	}
+}
