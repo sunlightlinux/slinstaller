@@ -53,6 +53,30 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 **The config and its checks**
 
+- **The package set is dry-run before the disk is touched.** The base
+  install's own `xbps-install`, with `-n`, into a throwaway root with the
+  same repositories, keys, proxy and arch: a misspelt package, a kernel
+  no repository carries or an offline repository missing part of the
+  base used to fail at base-install, after the wipe. Only xbps's verdict
+  on the package set refuses; any other failure of the dry run is a
+  warning. A kernel that does not resolve is tried as `kernel-fallback`.
+- **The Sunlight mirror** is the default over https, is checked to be
+  reachable before anything is touched (xbps silently drops a
+  repository it cannot reach, and the install took dbus and the rest
+  from Void alone), and is enough on its own: a live medium without a
+  local repository no longer refuses a default install. Offline and
+  image installs record it in the target's `/etc/xbps.d` all the same,
+  and an image gets its signing key.
+- **`swupdMirror`** is an `https://` URL, `http://` with
+  `allowInsecureHTTP`, or an absolute directory; anything else was read
+  by xbps as a relative path, in place of the repository.
+- **`--arch`** other than this machine's is refused unless the run is
+  staged with `--through`: the installed packages cannot be configured
+  in a chroot here.
+- **clr-installer's image keys** (`iso`, `isoPublisher`,
+  `isoApplicationId`, `keepImage`) and `copySwupd` are ignored without a
+  warning; `postArchive: false` keeps the install log off the target.
+
 - **Config keys nothing reads are warned about**, with their path:
   `encryptd: true` used to load without a word and install unencrypted.
   The warnings come right after the config is read — before a validation
@@ -315,6 +339,10 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 **Security**
 
+- **Save Configuration** wrote with os.WriteFile, whose 0600 applies only
+  to a new file: an existing 0644 file kept its mode, with the accounts'
+  password hashes in it, and a link was written through. It writes a
+  new 0600 file and renames it into place.
 - The default install log in `/tmp` was opened as root with
   O_CREAT|O_TRUNC, so a link another user left there had root overwrite
   the file it pointed to (and a FIFO hung the install). A link is not
@@ -358,6 +386,12 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 **Full-screen and text front-ends**
 
+- The wizard checks what the installer would refuse after it — kernel
+  arguments this machine cannot meet, an unknown time zone, keymap or
+  language — at Install, where it can be fixed; these ended the program
+  with every answer lost. Esc and Cancel leave Kdump, Kernel Command
+  Line, Swupd Mirror and Bundles as they were opened; a colon in a full
+  name is refused at its step.
 - A very long output line (over 1 MiB) hung the full-screen install: the
   runner stopped reading and the command blocked on the pipe. The rest is
   drained.

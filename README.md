@@ -132,6 +132,11 @@ work:
   the config sees to sudo itself: a `write-files` entry under
   `/etc/sudoers*`, or post-install or stage hooks. (Root is locked once
   there is an administrator, and sudo asks for a password.)
+- **Packages.** With `xbps-install` on the live system, the package set
+  is dry-run against the repositories (`-n`, into a scratch root); a
+  package xbps cannot find or resolve is refused. The Sunlight mirror
+  and `swupdMirror` must be reachable; `swupdMirror` is an `https://`
+  URL (`http://` with `allowInsecureHTTP`) or an absolute directory.
 - **Network.** `gateway` and `routes` are IPv4 (IPv6 routes come from
   router advertisements); `dns` is IP addresses separated by spaces;
   interface names are letters, digits and `. _ : -`.
