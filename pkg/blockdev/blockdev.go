@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -296,6 +297,40 @@ func disksHolding(devs []Device, path string) []string {
 	return out
 }
 
+// resolveDev follows a device link to the node (filepath.EvalSymlinks; a
+// variable for tests).
+var resolveDev = filepath.EvalSymlinks
+
+// disksHoldingLink is disksHolding for a path lsblk does not print: pvs
+// names a physical volume as lvm.conf's preferred_names make it (a
+// /dev/disk/by-id link, /dev/dm-N), so the path and lsblk's are compared
+// by the node each leads to.
+func disksHoldingLink(devs []Device, path string) []string {
+	node, err := resolveDev(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	var has func(d Device) bool
+	has = func(d Device) bool {
+		if r, err := resolveDev(d.Path); err == nil && r == node {
+			return true
+		}
+		for _, c := range d.Children {
+			if has(c) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, d := range Disks(devs) {
+		if has(d) {
+			out = append(out, d.Path)
+		}
+	}
+	return out
+}
+
 // Shared lists what on disk would be broken on another disk by wiping it:
 // a RAID array or device-mapper volume that also draws on a disk outside
 // wiped, or an LVM volume group (vgs maps a group to its physical volumes)
@@ -493,6 +528,9 @@ func VGNameClashes(devs []Device, vgs map[string][]string, names, wiped []string
 		var kept []string
 		for _, pv := range vgs[vg] {
 			on := disksHolding(devs, pv)
+			if len(on) == 0 {
+				on = disksHoldingLink(devs, pv)
+			}
 			gone := len(on) > 0
 			for _, dk := range on {
 				gone = gone && slices.Contains(wiped, dk)

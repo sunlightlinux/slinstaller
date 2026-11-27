@@ -2,6 +2,7 @@ package blockdev
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -442,5 +443,37 @@ func TestVGNameClashesMultipath(t *testing.T) {
 	// The other way about: the LUN not wiped keeps its group.
 	if got := VGNameClashes(devs, vgs, []string{"vg0", "data"}, []string{"/dev/sdc"}); len(got) != 1 || !strings.Contains(got[0], "vg0") {
 		t.Errorf("the LUN kept: %q", got)
+	}
+}
+
+// pvs names a physical volume as lvm.conf's preferred_names make it — a
+// /dev/disk/by-id link, a /dev/dm-N — which need not be the path lsblk
+// gives it. Not found on any disk, the group counted as kept, and a
+// reinstall over the install's own vg0 was refused as a clash with itself,
+// with no way past it. The PV's link is followed before it is given up.
+func TestVGNameClashesFollowsPVLinks(t *testing.T) {
+	saved := resolveDev
+	defer func() { resolveDev = saved }()
+	links := map[string]string{
+		"/dev/disk/by-id/ata-X-part2": "/dev/sda2",
+		"/dev/dm-3":                   "/dev/dm-3",
+		"/dev/mapper/cryptold":        "/dev/dm-3",
+		"/dev/sda2":                   "/dev/sda2",
+	}
+	resolveDev = func(p string) (string, error) {
+		if r, ok := links[p]; ok {
+			return r, nil
+		}
+		return "", os.ErrNotExist
+	}
+	devs := []Device{
+		{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []Device{
+			{Name: "sda2", Path: "/dev/sda2", Type: "part", Children: []Device{
+				{Name: "cryptold", Path: "/dev/mapper/cryptold", Type: "crypt"}}}}},
+	}
+	vgs := parseVolumeGroups("  /dev/disk/by-id/ata-X-part2:vg0\n  /dev/dm-3:old\n  /dev/sdq9:ghost\n")
+	got := VGNameClashes(devs, vgs, []string{"vg0", "old", "ghost"}, []string{"/dev/sda"})
+	if want := "volume group ghost already exists, on /dev/sdq9"; strings.Join(got, "\n") != want {
+		t.Errorf("clashes %q, want only %q", got, want)
 	}
 }
