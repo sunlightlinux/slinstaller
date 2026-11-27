@@ -122,6 +122,7 @@ func mountStagesChild(t *testing.T) {
 	}
 
 	fillSpareESPsOnTmpfs(t, base)
+	unpackImageWithBinds(t, sub("img"))
 
 	if liveErr != nil {
 		return // nothing to copy, so the copy cannot be made to fail
@@ -216,4 +217,56 @@ func realRun(args []string) error {
 		return fmt.Errorf("%s: %v: %s", strings.Join(args, " "), err, out)
 	}
 	return nil
+}
+
+// unpackImageWithBinds unpacks an image holding dev/, proc/ and an
+// etc/resolv.conf into a target that has the live kernel filesystems bound
+// in: nothing of it may land on the live /dev, and the binds and the
+// install-time resolv.conf are back afterwards, with the image's own kept.
+func unpackImageWithBinds(t *testing.T, dir string) {
+	src := filepath.Join(dir, "src")
+	for _, d := range []string{"dev", "proc", "etc", "usr/bin"} {
+		os.MkdirAll(filepath.Join(src, d), 0o755)
+	}
+	os.WriteFile(filepath.Join(src, "dev", "slinstaller-probe"), nil, 0o644)
+	os.WriteFile(filepath.Join(src, "etc", "resolv.conf"), []byte("nameserver 203.0.113.9\n"), 0o644)
+	os.WriteFile(filepath.Join(src, "usr", "bin", "grub-install"), nil, 0o755)
+	tarball := filepath.Join(dir, "image.tar")
+	if out, err := exec.Command("tar", "-cf", tarball, "-C", src, ".").CombinedOutput(); err != nil {
+		t.Fatalf("tar: %v %s", err, out)
+	}
+	root := filepath.Join(dir, "root")
+	os.MkdirAll(root, 0o755)
+	in := nsInstaller(root)
+	in.cfg.Image = tarball
+	in.opts.Runner = realRun
+	defer in.mnt.UnmountAll()
+	if err := in.mount(); err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+	if err := in.mountMeta(); err != nil {
+		t.Fatalf("mountMeta: %v", err)
+	}
+	if err := in.unpackImage(); err != nil {
+		t.Fatalf("unpacking an image with dev/ in it: %v", err)
+	}
+	if _, err := os.Stat("/dev/slinstaller-probe"); err == nil {
+		os.Remove("/dev/slinstaller-probe")
+		t.Error("the image's dev/ was unpacked onto the live /dev")
+	}
+	if _, err := os.Stat(filepath.Join(root, "proc", "self", "status")); err != nil {
+		t.Errorf("/proc is not bound again after the unpack: %v", err)
+	}
+	if live, err := os.ReadFile("/etc/resolv.conf"); err == nil {
+		got, _ := os.ReadFile(filepath.Join(root, "etc", "resolv.conf"))
+		if string(got) != string(live) {
+			t.Errorf("install-time resolv.conf = %q", got)
+		}
+		if kept, _ := os.ReadFile(in.resolvSaved); string(kept) != "nameserver 203.0.113.9\n" {
+			t.Errorf("the image's resolv.conf was not kept aside: %q", kept)
+		}
+		if err := in.finish(); err != nil {
+			t.Fatalf("finish: %v", err)
+		}
+	}
 }

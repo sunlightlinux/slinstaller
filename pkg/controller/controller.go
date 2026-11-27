@@ -714,8 +714,28 @@ func (in *installer) unpackImage() error {
 	if !config.IsRemote(image) && !filepath.IsAbs(image) && in.opts.ConfigDir != "" {
 		image = filepath.Join(in.opts.ConfigDir, image)
 	}
+	// Unpacked with the live system's /proc, /sys and /dev bound in, the
+	// image's own dev/, proc/ and sys/ entries landed on the LIVE ones (a
+	// container export's empty dev/console replaced the live console), and
+	// its etc/resolv.conf over the install-time copy. They come off for the
+	// unpack and go back on after, setting the image's resolv.conf aside.
+	bound := in.mnt.HasMeta()
+	if bound {
+		if err := in.mnt.UnmountMeta(); err != nil {
+			return err
+		}
+	}
+	if err := removeIfPresent(in.resolvCopy); err != nil {
+		return err
+	}
+	in.resolvCopy = ""
 	if err := storage.RunCommands([][]string{ImageCommand(image, in.opts.Root)}, in.opts.Runner); err != nil {
 		return err
+	}
+	if bound {
+		if err := in.mountMeta(); err != nil {
+			return err
+		}
 	}
 	for _, dir := range []string{"usr/bin", "usr/sbin", "bin", "sbin"} {
 		if _, err := os.Stat(filepath.Join(in.opts.Root, dir, "grub-install")); err == nil {

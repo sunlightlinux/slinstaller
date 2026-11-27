@@ -12,6 +12,11 @@ change.
 
 ### Fixed
 
+- An install from an image unpacked it with the live system's `/proc`,
+  `/sys` and `/dev` bound into the target: the image's own `dev/`,
+  `proc/` and `sys/` entries landed on the live ones, and its
+  `etc/resolv.conf` was overwritten. The binds come off for the unpack
+  and go back after; the image's resolv.conf is kept.
 - Each install or resume added another set of firmware boot entries for
   the spare ESPs ("Sunlight (sdb)"), the new ones first in BootOrder.
   An entry with the same label is removed before it is made again.

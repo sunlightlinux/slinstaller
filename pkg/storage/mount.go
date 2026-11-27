@@ -120,6 +120,33 @@ func (m *Mounter) MountMeta() error {
 	return nil
 }
 
+// HasMeta reports whether MountMeta's binds are in place.
+func (m *Mounter) HasMeta() bool { return len(m.meta) > 0 }
+
+// UnmountMeta takes the /proc, /sys and /dev binds MountMeta made back off
+// the target, leaving its filesystems mounted.
+func (m *Mounter) UnmountMeta() error {
+	var kept, failed []string
+	for i := len(m.mounted) - 1; i >= 0; i-- {
+		target := m.mounted[i]
+		if !m.meta[target] {
+			kept = append([]string{target}, kept...)
+			continue
+		}
+		if err := syscall.Unmount(target, syscall.MNT_DETACH); err != nil {
+			failed = append(failed, fmt.Sprintf("%s (%v)", target, err))
+			kept = append([]string{target}, kept...)
+			continue
+		}
+		delete(m.meta, target)
+	}
+	m.mounted = kept
+	if len(failed) > 0 {
+		return fmt.Errorf("storage: failed to unmount: %s", strings.Join(failed, ", "))
+	}
+	return nil
+}
+
 // UnmountAll unmounts everything this Mounter mounted, in reverse order
 // so children come off before their parents. It reports the mounts it
 // could not release rather than stopping at the first.
