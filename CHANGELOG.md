@@ -38,6 +38,11 @@ change.
   skipped, partitions and all: a second disk written `type: Disk` (which
   clr-installer refuses) or `type: loop` installed without the `/home` it
   carried, and nothing said so.
+- **clr-installer's own keys are not warned about as typos.**
+  `targetBundles`, `userBundles`, `swupdFormat`, `swupdSkipOptional`,
+  `post-image`, and what clr-installer writes into a config it saves
+  (`preCheckDone`, `hypervisor`, an alias's `devicefile`) are known and
+  ignored like `bundles`. `legacyBios` is still named.
 - **The dry run shows the whole partition stage.** It printed the disk's
   own commands only: for an LVM, RAID or encrypted layout, `pvcreate`,
   `vgcreate`, `lvcreate`, `mdadm --create` and `cryptsetup luksFormat`

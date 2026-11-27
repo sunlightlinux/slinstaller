@@ -211,6 +211,36 @@ targetMedia:
 	}
 }
 
+// The keys clr-installer documents (InstallerYAMLSyntax.md) or writes into
+// a config it saves, for Clear's bundles, swupd and image making, were each
+// warned about as a likely typo, so a clr config came with a list of
+// warnings that hid a real one. legacyBios is still named: it asks for a
+// BIOS boot, which this installer does not do.
+func TestClrOnlyKeysAreNotTypos(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(path, []byte(`
+targetBundles: [vim]
+userBundles: [editors]
+swupdFormat: staging
+swupdSkipOptional: true
+preCheckDone: true
+hypervisor: kvm
+legacyBios: true
+post-image: [{cmd: "true"}]
+block-devices: [{name: d, file: /dev/sda, devicefile: true}]
+targetMedia: [{name: sda, type: disk}]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(c.UnknownKeys(), " "); got != "legacyBios" {
+		t.Errorf("UnknownKeys = %q, want legacyBios", got)
+	}
+}
+
 // A key reached through a YAML alias is checked where the alias is used:
 // the anchored node is the same, and its typo is the second disk's too.
 func TestUnknownKeysThroughAnAlias(t *testing.T) {

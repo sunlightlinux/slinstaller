@@ -253,6 +253,11 @@ var clrIgnored = map[string]bool{
 	// Image and ISO generation, and Clear's swupd: things this installer
 	// does not do (an image target is refused with its own message).
 	"iso": true, "isoPublisher": true, "isoApplicationId": true, "keepImage": true, "copySwupd": true,
+	"swupdFormat": true, "swupdSkipOptional": true, "post-image": true,
+	// Clear's bundle lists beside bundles, and what clr-installer writes
+	// into a config it saves (its pre-check, the hypervisor, an alias's
+	// devicefile flag).
+	"targetBundles": true, "userBundles": true, "preCheckDone": true, "hypervisor": true, "devicefile": true,
 }
 
 // unknownKeys walks a YAML node against the type it is decoded into and
