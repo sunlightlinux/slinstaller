@@ -374,3 +374,43 @@ func TestPostArchiveFalse(t *testing.T) {
 		t.Error("the log was archived with postArchive: false")
 	}
 }
+
+// The saved config and the archived log are private files in the target's
+// /root whatever was there: a link is replaced, not written through, an
+// existing loose mode does not stay, and a /root out of the target is refused.
+func TestRootFilesNotThroughLinks(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	victim := filepath.Join(outside, "shadow")
+	os.WriteFile(victim, []byte("keep\n"), 0o644)
+	os.MkdirAll(filepath.Join(root, "root"), 0o700)
+	os.Symlink(victim, filepath.Join(root, "root", "slinstaller.yaml"))
+	os.WriteFile(filepath.Join(root, "root", "slinstaller.log"), []byte("old"), 0o644)
+	live := filepath.Join(t.TempDir(), "live.log")
+	os.WriteFile(live, []byte("LOG\n"), 0o600)
+	in := &installer{cfg: &config.Config{Hostname: "box"}, opts: Options{Root: root, LogFile: live}}
+	if err := in.saveConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if err := in.archiveLog(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "keep\n" {
+		t.Errorf("written through the link: %q", got)
+	}
+	for _, n := range []string{"slinstaller.yaml", "slinstaller.log"} {
+		fi, err := os.Lstat(filepath.Join(root, "root", n))
+		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s: %v %v", n, fi.Mode(), err)
+		}
+	}
+
+	root2 := t.TempDir()
+	os.Symlink(outside, filepath.Join(root2, "root"))
+	in.opts.Root = root2
+	if err := in.saveConfig(); err == nil || !strings.Contains(err.Error(), "leads outside") {
+		t.Errorf("/root out of the target: %v", err)
+	}
+	if ents, _ := os.ReadDir(outside); len(ents) != 1 {
+		t.Errorf("written outside: %v", ents)
+	}
+}

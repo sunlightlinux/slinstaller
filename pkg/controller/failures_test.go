@@ -76,7 +76,9 @@ func TestSaveConfigAndLogFailures(t *testing.T) {
 	wantErr(t, in.saveConfig(), "mkdir")
 
 	in = stagedInstaller(t, twoPartConfig(), &r)
-	blockFile(t, in, "root", "slinstaller.yaml")
+	// (A link there is replaced, not written through — so the blocker is a
+	// non-empty directory, which no rename replaces.)
+	os.MkdirAll(filepath.Join(in.opts.Root, "root", "slinstaller.yaml", "x"), 0o755)
 	wantErr(t, in.saveConfig(), "save config")
 
 	// The install log: a missing source and an unwritable target both fail;

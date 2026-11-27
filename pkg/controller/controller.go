@@ -753,16 +753,43 @@ func (in *installer) saveConfig() error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	dir := filepath.Join(in.opts.Root, "root")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
-	}
 	header := "# Written by slinstaller — the config this system was installed from.\n"
-	path := filepath.Join(dir, "slinstaller.yaml")
-	if err := os.WriteFile(path, append([]byte(header), data...), 0o600); err != nil {
+	if err := writeRootPrivate(in.opts.Root, "slinstaller.yaml", append([]byte(header), data...)); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 	return nil
+}
+
+// writeRootPrivate writes name into the target's /root, 0600, as a new file
+// renamed into place. os.WriteFile followed a link there (an image's, a
+// reused root's, a resumed one's: /root/slinstaller.log -> /etc/shadow
+// overwrote the live system's file with the log, hashes and all) and kept
+// an existing file's looser mode. A /root that leads out of the target is
+// refused.
+func writeRootPrivate(root, name string, data []byte) error {
+	dir := filepath.Join(root, "root")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if !insideTarget(root, dir) {
+		return fmt.Errorf("%s leads outside the installed system", dir)
+	}
+	tmp, err := os.CreateTemp(dir, "."+name+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) // gone once renamed
+	_, err = tmp.Write(data)
+	if err == nil {
+		err = tmp.Chmod(0o600)
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), filepath.Join(dir, name))
+	}
+	return err
 }
 
 func (in *installer) baseInstall() error {
@@ -2117,11 +2144,7 @@ func (in *installer) archiveLog() error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(in.opts.Root, "root")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "slinstaller.log"), data, 0o600)
+	return writeRootPrivate(in.opts.Root, "slinstaller.log", data)
 }
 
 func removeIfPresent(path string) error {
