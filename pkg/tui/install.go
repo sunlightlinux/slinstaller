@@ -215,7 +215,10 @@ var installLogPath = "/tmp/slinstaller.log"
 // InstallLogPath is that path, for the text flow to write its log to.
 func InstallLogPath() string { return installLogPath }
 
-// OpenInstallLog opens the log at path for writing, empty, mode 0600. The
+// OpenInstallLog opens the log at path for writing, mode 0600, appending
+// after a line that marks the new run: a run refused in its checks (or a
+// second one beside a running install) emptied the log a failed install
+// left for its post-mortem. The
 // default path is in /tmp, where any user can plant something there first
 // for root to write through: a link, a hard link to another file, a file
 // of their own they can read. A link is never followed, and whatever is at
@@ -225,9 +228,12 @@ func OpenInstallLog(path string) (*os.File, error) {
 	if fi, err := os.Lstat(path); err == nil {
 		st, _ := fi.Sys().(*syscall.Stat_t)
 		if fi.Mode().IsRegular() && st != nil && int(st.Uid) == os.Geteuid() && st.Nlink == 1 {
-			f, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
+			f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW, 0o600)
 			if err == nil {
 				err = f.Chmod(0o600)
+			}
+			if err == nil && fi.Size() > 0 {
+				_, err = fmt.Fprintf(f, "\n==== slinstaller, a new run: %s ====\n", time.Now().Format(time.RFC3339))
 			}
 			return f, err
 		}

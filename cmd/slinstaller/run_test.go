@@ -334,6 +334,8 @@ func TestApplyNeedsRoot(t *testing.T) {
 	// root: a user is refused before the log is opened, which truncates it.)
 	asRoot := func() { geteuid = func() int { return 0 } }
 	defer func() { geteuid = os.Geteuid }()
+	defer func(p string) { lockPath = p }(lockPath)
+	lockPath = filepath.Join(dir, "slinstaller.lock") // taken before the log now
 	asRoot()
 	_, _, err = runWith(t, "", "--apply", "--log", filepath.Join(dir, "no-such-dir", "x.log"), path)
 	wantRunErr(t, "unwritable --log", err, "--log:")

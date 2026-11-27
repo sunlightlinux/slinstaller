@@ -718,8 +718,21 @@ restart:
 	}
 	// Refused before the log is opened: opening truncates it, and the one
 	// there may be a failed install's, wanted for its post-mortem.
+	// --arch again, now that the wizard or the text flow may have made this
+	// an install (the early check saw no --apply) and for --system-check,
+	// which said "passed" for what --apply refuses.
+	if arch != "" && through == "" && !strings.HasPrefix(arch, hostXBPSArch()) {
+		return fmt.Errorf("--arch %s is not this machine's (%s): its packages cannot be configured here; use it only with --through", arch, hostXBPSArch())
+	}
 	if !systemCheck && geteuid() != 0 {
 		return fmt.Errorf("--apply must run as root")
+	}
+	// And the lock before it too: a second run beside a running install
+	// opened (and wrote into) that install's log before the lock refused it.
+	if !systemCheck && lock == nil {
+		if lock, err = lockInstall(); err != nil {
+			return err
+		}
 	}
 	var quiet io.Writer // set when the commands' output goes to the file alone
 	if logPath != "" {
@@ -728,7 +741,14 @@ restart:
 		if logFile == "" {
 			lf, err = tui.OpenInstallLog(logPath) // the default, in /tmp
 		} else {
-			lf, err = os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+			// Appended to, after a mark: not emptied by a run that its
+			// checks then refuse.
+			lf, err = os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+			if err == nil {
+				if fi, serr := lf.Stat(); serr == nil && fi.Size() > 0 {
+					fmt.Fprintf(lf, "\n==== slinstaller, a new run: %s ====\n", time.Now().Format(time.RFC3339))
+				}
+			}
 		}
 		switch {
 		case err == nil:
@@ -890,7 +910,11 @@ restart:
 		// medium's repository or from the Sunlight mirror. With neither, the
 		// install would fail at base-install — after the disk is wiped — so
 		// fail here instead. (The mirror is checked to be reachable below.)
-		if len(extraRepos) == 0 {
+		// (Only for a run that installs packages: a resume past base-install
+		// fetches nothing, and was refused — or kept waiting a minute — on
+		// a network it no longer needs.)
+		fetches := reachesBaseInstall(through, resumeFrom)
+		if len(extraRepos) == 0 && fetches {
 			if err := checkLocalPackages(packages, localRepos, localRepo); err != nil {
 				return err
 			}
@@ -899,7 +923,7 @@ restart:
 		// Fetching the base system needs the repository; check it is
 		// reachable before wiping, not after. Local (non-http) repos are
 		// skipped.
-		if strings.HasPrefix(repo, "http") {
+		if strings.HasPrefix(repo, "http") && fetches {
 			waiting := func() { fmt.Fprintln(os.Stderr, "waiting for the network...") }
 			if err := network.WaitForConnectivity(repo, time.Minute, waiting); err != nil {
 				return fmt.Errorf("%w - check the network/proxy, or pass --repo", err)
@@ -909,7 +933,7 @@ restart:
 		// a word, and the install then took dbus and the rest from Void
 		// alone — the skew the mirror is there to prevent.
 		for _, r := range extraRepos {
-			if strings.HasPrefix(r, "http") {
+			if strings.HasPrefix(r, "http") && fetches {
 				waiting := func() { fmt.Fprintf(os.Stderr, "waiting for the Sunlight mirror %s...\n", r) }
 				if err := network.WaitForConnectivity(r, time.Minute, waiting); err != nil {
 					return fmt.Errorf("%w - the Sunlight mirror is needed; check the network/proxy, or pass --extra-repo", err)

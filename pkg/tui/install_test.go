@@ -365,7 +365,7 @@ func TestOpenInstallLogPlanted(t *testing.T) {
 		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o600 {
 			t.Errorf("%s: log is %v, %v; want a regular 0600 file", what, fi, err)
 		}
-		if data, _ := os.ReadFile(path); string(data) != "log line\n" {
+		if data, _ := os.ReadFile(path); !strings.HasSuffix(string(data), "log line\n") || strings.Contains(string(data), "secret") {
 			t.Errorf("%s: log = %q", what, data)
 		}
 	}
@@ -387,10 +387,14 @@ func TestOpenInstallLogPlanted(t *testing.T) {
 	}
 	check("fifo", fifo)
 
-	// Our own earlier log is reused, emptied and made private.
+	// Our own earlier log is reused, made private, and kept: the new run
+	// is appended after a mark (a run its checks refuse empties nothing).
 	own := filepath.Join(dir, "own.log")
 	os.WriteFile(own, []byte("last run\n"), 0o644)
 	check("own file", own)
+	if data, _ := os.ReadFile(own); !strings.HasPrefix(string(data), "last run\n") || !strings.Contains(string(data), "==== slinstaller, a new run") {
+		t.Errorf("own file: %q", data)
+	}
 }
 
 // BenchmarkDetailsView10k is the Details view over a full log, drawn on

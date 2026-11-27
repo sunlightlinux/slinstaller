@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
@@ -293,6 +294,14 @@ func applyChild(t *testing.T) {
 	wantRunErr(t, "resume from bootloader", err, "controller: mount")
 	if !strings.Contains(errOut, "from bootloader") || e.ran("parted") != "" {
 		t.Errorf("resume from bootloader:\n%s", errOut)
+	}
+	// Past base-install nothing is fetched: an unreachable mirror neither
+	// refuses nor holds the resume.
+	e = newApplyEnv(t)
+	start := time.Now()
+	_, err = e.run("", plainConfig(), "--resume-from", "bootloader", "--offline=false", "--repo", e.repo, "--extra-repo", "https://127.0.0.1:1/x")
+	if err == nil || strings.Contains(err.Error(), "mirror") || time.Since(start) > 10*time.Second {
+		t.Errorf("a late resume waited on the network: %v after %v", err, time.Since(start))
 	}
 	e = newApplyEnv(t)
 	_, err = e.run("", plainConfig(), "--resume-from", "partition")
