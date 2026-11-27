@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -296,7 +297,28 @@ func (pl *Plan) CheckFit(sizeOf func(disk string) (uint64, bool), rootMin uint64
 				humanBytes(size-need), disk, what)
 		}
 	}
-	return pl.checkVGFit(sizeOf)
+	return pl.checkVGFit(sizeOf, rootMin)
+}
+
+// parseLVSize reads an LV size as lvcreate takes it: ParseSize's forms, and
+// a decimal one ("500.5G") the config passes through.
+func parseLVSize(s string) (uint64, error) {
+	if n, err := ParseSize(s); err == nil {
+		return n, nil
+	}
+	num := strings.TrimRight(s, "bBkKmMgGtTpPeEiI")
+	f, err := strconv.ParseFloat(num, 64)
+	if err != nil || f < 0 || num == s {
+		return 0, fmt.Errorf("storage: size %q", s)
+	}
+	unit, err := ParseSize("1" + s[len(num):])
+	if err != nil {
+		return 0, err
+	}
+	if f*float64(unit) >= math.MaxUint64 {
+		return math.MaxUint64, nil
+	}
+	return uint64(f * float64(unit)), nil
 }
 
 // checkVGFit checks that each volume group's fixed-size logical volumes fit
@@ -305,7 +327,7 @@ func (pl *Plan) CheckFit(sizeOf func(disk string) (uint64, bool), rootMin uint64
 // that fills its disk is taken at what the disk leaves it, less LVM's and
 // (encrypted) LUKS's own space. A group on an array, or on a disk sizeOf
 // does not know, is not checked.
-func (pl *Plan) checkVGFit(sizeOf func(disk string) (uint64, bool)) error {
+func (pl *Plan) checkVGFit(sizeOf func(disk string) (uint64, bool), rootMin uint64) error {
 	fixed := pl.FixedBytesByDisk()
 	capacity, lvs := map[string]uint64{}, map[string]uint64{}
 	unknown := map[string]bool{}
@@ -341,13 +363,25 @@ func (pl *Plan) checkVGFit(sizeOf func(disk string) (uint64, bool)) error {
 			if n > over {
 				capacity[p.VGName] += n - over
 			}
-		case p.LV && p.Size != SizeRest && p.Size != "":
-			if v, err := ParseSize(p.Size); err == nil {
-				if lvs[p.VGName] > math.MaxUint64-v {
-					lvs[p.VGName] = math.MaxUint64
-				} else {
-					lvs[p.VGName] += v
+		case p.LV:
+			// A volume that fills the rest needs room left for it too:
+			// lvcreate -l 100%FREE fails on no free extents.
+			v := uint64(MinPartitionSize)
+			if p.Mountpoint == "/" {
+				v = rootMin
+			}
+			if p.Size != SizeRest && p.Size != "" {
+				n, err := parseLVSize(p.Size)
+				if err != nil {
+					unknown[p.VGName] = true // not read here: not judged
+					continue
 				}
+				v = n
+			}
+			if lvs[p.VGName] > math.MaxUint64-v {
+				lvs[p.VGName] = math.MaxUint64
+			} else {
+				lvs[p.VGName] += v
 			}
 		}
 	}

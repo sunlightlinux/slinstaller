@@ -580,3 +580,15 @@ func TestEncryptTickedLayoutPlain(t *testing.T) {
 		t.Errorf("unticked: %q", p)
 	}
 }
+
+// Esc after a rescan dropped the chosen disk chooses no other one.
+func TestEscAfterDiskVanished(t *testing.T) {
+	m := openSectionInTab(readyModel(), 0, secMedia)
+	m.diskIdx = 0
+	m.rescanned([]blockdev.Device{twoTestDisks()[1]}) // sda gone
+	m.popup = popupNone
+	m = send(m, escKey)
+	if m.diskSet {
+		t.Errorf("a disk is chosen after the chosen one vanished: %s", m.disks[m.diskIdx].Path)
+	}
+}

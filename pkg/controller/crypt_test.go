@@ -268,3 +268,12 @@ func TestDKMSRebuildsInitramfs(t *testing.T) {
 		t.Errorf("not rebuilt after a DKMS module:\n%s", r.flat())
 	}
 }
+
+func TestInstallsDKMS(t *testing.T) {
+	for pkgs, want := range map[string]bool{"base,vim": false, "base,nvidia-dkms>=550": true, "nvidia": true, "zfs": true, "zfs-utils": false} {
+		in := &installer{opts: Options{Packages: strings.Split(pkgs, ",")}}
+		if in.installsDKMS() != want {
+			t.Errorf("%s: %v", pkgs, !want)
+		}
+	}
+}

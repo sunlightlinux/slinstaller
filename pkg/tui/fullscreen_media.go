@@ -205,13 +205,13 @@ func (m *model) rescanned(disks []blockdev.Device) {
 
 // restoreMediaDisk puts back the disk chosen when the media dialog opened.
 func (m *model) restoreMediaDisk() {
-	m.diskSet = m.mediaWasSet
 	for i, d := range m.disks {
 		if d.Path == m.mediaWas {
-			m.diskIdx = i
+			m.diskIdx, m.diskSet = i, m.mediaWasSet
 			return
 		}
 	}
+	m.diskSet = false // gone (a rescan dropped it): nothing is chosen
 }
 
 // confirmMedia applies the chosen installation mode.

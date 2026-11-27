@@ -1483,7 +1483,12 @@ func (in *installer) bootloader() error {
 // (nvidia-dkms, zfs, …), whose module the initramfs may need.
 func (in *installer) installsDKMS() bool {
 	for _, p := range in.opts.Packages {
-		if strings.HasSuffix(p, "-dkms") || p == "zfs" {
+		// The name without a version pattern (nvidia-dkms>=550); nvidia*
+		// pulls its -dkms package in as a dependency.
+		if i := strings.IndexAny(p, "<>="); i > 0 {
+			p = p[:i]
+		}
+		if strings.HasSuffix(p, "-dkms") || p == "zfs" || strings.HasPrefix(p, "nvidia") {
 			return true
 		}
 	}

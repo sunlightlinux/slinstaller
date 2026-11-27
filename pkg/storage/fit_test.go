@@ -125,3 +125,32 @@ func TestCheckVGFit(t *testing.T) {
 		t.Errorf("unparsed PV size: %v", err)
 	}
 }
+
+// A decimal LV size is read, and a fill LV needs room left for it.
+func TestCheckVGFitDecimalAndFill(t *testing.T) {
+	size := func(string) (uint64, bool) { return 64 << 30, true }
+	pl := &Plan{Disk: "/dev/sda", Parts: []Partition{
+		{Device: "/dev/sda1", Disk: "/dev/sda", Filesystem: "vfat", Mountpoint: "/boot", Size: "512M"},
+		{Device: "/dev/sda2", Disk: "/dev/sda", IsPV: true, VGName: "vg0", Size: SizeRest},
+		{LV: true, VGName: "vg0", Mountpoint: "/home", Filesystem: "ext4", Size: "500.5G"},
+		{LV: true, VGName: "vg0", Mountpoint: "/", Filesystem: "ext4", Size: SizeRest},
+	}}
+	if err := pl.CheckFit(size, MinRootSize, "2 GB"); err == nil {
+		t.Error("500.5G on 64G passed")
+	}
+	pl.Parts[2].Size = "63G" // the fixed LV fits, but leaves the root less than its minimum
+	if err := pl.CheckFit(size, MinRootSize, "2 GB"); err == nil {
+		t.Error("a fill root with no room passed")
+	}
+	pl.Parts[2].Size = "50.5G"
+	if err := pl.CheckFit(size, MinRootSize, "2 GB"); err != nil {
+		t.Errorf("50.5G and a root: %v", err)
+	}
+	pl.Parts[2].Size = "lots"
+	if err := pl.CheckFit(size, MinRootSize, "2 GB"); err != nil {
+		t.Errorf("an unread size is not judged: %v", err)
+	}
+	if _, err := parseLVSize("1.5"); err == nil {
+		t.Error("a unitless decimal taken")
+	}
+}
