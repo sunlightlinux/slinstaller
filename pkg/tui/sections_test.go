@@ -179,6 +179,11 @@ func TestHubInstallButton(t *testing.T) {
 	if nm, _ = m.Update(enter); nm.(model).confirmed || !strings.Contains(viewOf(nm.(model)), "isolcpus") {
 		t.Errorf("impossible kernel arguments went through:\n%s", viewOf(nm.(model)))
 	}
+	// Unless the command line turned validation off, as main does.
+	m.skipAll = true
+	if nm, _ = m.Update(enter); !nm.(model).confirmed {
+		t.Errorf("--skip-validation-all not honoured for kernel arguments:\n%s", viewOf(nm.(model)))
+	}
 	m = onInstall(readyModel())
 	m.parts = append(m.parts, m.parts[len(m.parts)-1])
 	if nm, _ = m.Update(enter); nm.(model).confirmed {

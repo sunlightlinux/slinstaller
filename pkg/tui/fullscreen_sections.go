@@ -1265,7 +1265,7 @@ func (m model) installProblem() string {
 			err = fmt.Errorf("kernel command line: %s", strings.Join(probs, "; "))
 		}
 	}
-	if err == nil {
+	if err == nil && !cfg.SkipValidationAll {
 		err = system.CheckLocale(cfg.Timezone, cfg.Keyboard, cfg.Language)
 	}
 	if err != nil {
