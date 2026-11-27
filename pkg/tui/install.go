@@ -23,6 +23,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
+	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
 // doneAction is what the operator chose on the final screen.
@@ -848,6 +849,18 @@ func (m installModel) confirmView() string {
 // each partition shrunk, created, kept or formatted. A line starting "!"
 // is a warning.
 func confirmLines(plan *storage.Plan, devs []blockdev.Device) []string {
+	lines := confirmDiskLines(plan, devs)
+	if secureBoot() {
+		lines = append(lines, "", "!Secure Boot is on: the firmware will not start the unsigned GRUB",
+			"!this installs. Turn it off in the firmware setup before rebooting.")
+	}
+	return lines
+}
+
+// secureBoot is system.SecureBoot (a variable for tests).
+var secureBoot = system.SecureBoot
+
+func confirmDiskLines(plan *storage.Plan, devs []blockdev.Device) []string {
 	describe := func(path string) string {
 		if d := blockdev.FindByPath(devs, path); d != nil && d.Size > 0 {
 			return strings.TrimSpace(fmt.Sprintf("%-14s %-8s %s", path, gib(d.Size), d.Model))

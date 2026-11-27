@@ -478,3 +478,19 @@ func TestConfirmLines(t *testing.T) {
 		t.Errorf("an install keeping the table says the disk is erased:\n%s", got)
 	}
 }
+
+// With Secure Boot on, the confirmation says the installed GRUB will not
+// start until it is turned off.
+func TestConfirmWarnsOfSecureBoot(t *testing.T) {
+	saved := secureBoot
+	defer func() { secureBoot = saved }()
+	plan := &storage.Plan{Wipe: true, Disk: "/dev/sda"}
+	secureBoot = func() bool { return true }
+	if got := strings.Join(confirmLines(plan, nil), "\n"); !strings.Contains(got, "Secure Boot is on") {
+		t.Errorf("no warning:\n%s", got)
+	}
+	secureBoot = func() bool { return false }
+	if got := strings.Join(confirmLines(plan, nil), "\n"); strings.Contains(got, "Secure Boot") {
+		t.Errorf("a warning with Secure Boot off:\n%s", got)
+	}
+}

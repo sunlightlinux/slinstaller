@@ -12,6 +12,9 @@ change.
 
 ### Changed
 
+- With Secure Boot enforced, the installer says so — on the full-screen
+  confirmation and before a text install — since the firmware will not
+  start the unsigned GRUB it installs.
 - On a disk wiped with `wipe: discard`, mkfs is told not to
   discard it a second time (`-E nodiscard`, `-K`, `-t 0`).
 - The install log view (Details) wraps and classifies each line once, as

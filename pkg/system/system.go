@@ -583,6 +583,17 @@ var efiFirmwarePath = "/sys/firmware/efi"
 // install started there would fail at the bootloader stage — after the
 // disk is already wiped — so the installer checks this before touching
 // anything.
+// secureBootVar is the EFI variable that says whether Secure Boot is
+// enforced (a variable for tests): 4 bytes of attributes, then the value.
+var secureBootVar = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+
+// SecureBoot reports whether the firmware enforces Secure Boot. The
+// installer writes an unsigned GRUB, which such firmware will not start.
+func SecureBoot() bool {
+	data, err := os.ReadFile(secureBootVar)
+	return err == nil && len(data) >= 5 && data[4] == 1
+}
+
 func IsUEFI() bool {
 	fi, err := os.Stat(efiFirmwarePath)
 	return err == nil && fi.IsDir()

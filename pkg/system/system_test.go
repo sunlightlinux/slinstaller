@@ -562,3 +562,20 @@ func TestLocaleMatchesTheCodesetAsGlibcDoes(t *testing.T) {
 		t.Errorf("libc-locales:\n%s", got)
 	}
 }
+
+func TestSecureBoot(t *testing.T) {
+	saved := secureBootVar
+	defer func() { secureBootVar = saved }()
+	secureBootVar = filepath.Join(t.TempDir(), "SecureBoot")
+	if SecureBoot() {
+		t.Error("no variable: on")
+	}
+	os.WriteFile(secureBootVar, []byte{6, 0, 0, 0, 1}, 0o644)
+	if !SecureBoot() {
+		t.Error("enforced: off")
+	}
+	os.WriteFile(secureBootVar, []byte{6, 0, 0, 0, 0}, 0o644)
+	if SecureBoot() {
+		t.Error("not enforced: on")
+	}
+}
