@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -232,6 +233,14 @@ func run(args []string) error {
 			return fmt.Errorf("--root %s is in the live system's %s; use a directory of its own, e.g. /mnt", root, sys)
 		}
 	}
+	// A foreign architecture installs packages whose configure scripts
+	// cannot run in the chroot here (xbps-reconfigure, the bootloader):
+	// a full install failed at base-install, after the wipe. Only a staged
+	// run, which stops before them, may ask for one.
+	if arch != "" && through == "" && !strings.HasPrefix(arch, hostXBPSArch()) {
+		return fmt.Errorf("--arch %s is not this machine's (%s): its packages cannot be configured here; use it only with --through", arch, hostXBPSArch())
+	}
+
 	// Stage names are known now: a misspelt one was found only once the
 	// disk path had been retyped, or not at all in a dry run.
 	for flagName, stage := range map[string]string{"--through": through, "--resume-from": resumeFrom} {
@@ -1131,6 +1140,19 @@ func checkDiskFit(plan *storage.Plan, devs []blockdev.Device, rootMin uint64, ro
 		}
 		return d.Size, true
 	}, rootMin, rootMinLabel)
+}
+
+// hostXBPSArch is this machine's architecture as xbps names it.
+func hostXBPSArch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x86_64"
+	case "arm64":
+		return "aarch64"
+	case "386":
+		return "i686"
+	}
+	return runtime.GOARCH
 }
 
 // checkLocale rejects a timezone, keymap or language the live system does
