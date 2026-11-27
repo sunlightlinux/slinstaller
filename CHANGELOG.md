@@ -94,7 +94,10 @@ change.
   a swap file under 1 MiB, which mkswap refused.
 - A volume group name the machine already has on a disk the install does
   not wipe is refused before the wipe; `vgcreate` failed after it. The
-  wizard says so at Install, while its answers are still on screen.
+  wizard says so at Install, while its answers are still on screen, and
+  the dry run says it, and a disk shared with one the install leaves,
+  as "it will refuse" instead of inviting an `--apply` that refuses. A
+  physical volume `pvs` names by a link is found on its disk.
 - Ctrl+C closes the stop before it says "Interrupted": in between, the
   next stage could begin.
 - **Found by new property fuzzers** over the partition commands, fstab
