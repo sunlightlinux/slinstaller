@@ -29,7 +29,7 @@ import (
 // recorded by the Runner, and the ones whose output later stages read are
 // given that output: xbps-install lays down a small base tree, grub-mkconfig
 // writes a grub.cfg from /etc/default/grub. Those the controller runs
-// itself (blkid, cryptsetup, udevadm) are stand-ins first on PATH.
+// itself (blkid, cryptsetup, mdadm, udevadm) are stand-ins first on PATH.
 //
 // What it cannot do is go through Install itself: Install takes its plan
 // from the config, and a config's filesystems are ones the install can make
@@ -37,7 +37,9 @@ import (
 // the installer is built the way Install builds it, and for the mount stage
 // alone — from its start to the next stage's — the plan's filesystems read
 // tmpfs. Everything before and after (mkfs, fstab, the bootloader's ESP)
-// sees the configured ones.
+// sees the configured ones. The one other mount is a spare ESP's, which the
+// bootloader stage mounts to copy the loader onto: for that stage alone a
+// spare ESP reads tmpfs too.
 
 const (
 	e2eChildEnv = "SLINSTALLER_CTL_E2E_CHILD"
@@ -102,6 +104,11 @@ func e2eChild(t *testing.T) {
 
 	t.Run("plain", func(t *testing.T) { e2ePlain(t, filepath.Join(base, "plain")) })
 	t.Run("encrypted", func(t *testing.T) { e2eEncrypted(t, filepath.Join(base, "crypt")) })
+	t.Run("lvm", func(t *testing.T) { e2eLVM(t, filepath.Join(base, "lvm")) })
+	t.Run("lvm-on-luks", func(t *testing.T) { e2eLVMOnLUKS(t, filepath.Join(base, "lvmluks")) })
+	t.Run("raid1", func(t *testing.T) { e2eRAID1(t, filepath.Join(base, "raid1")) })
+	t.Run("crypt-home-plain-root", func(t *testing.T) { e2eCryptHomePlainRoot(t, filepath.Join(base, "crypthome")) })
+	t.Run("reuse", func(t *testing.T) { e2eReuse(t, filepath.Join(base, "reuse")) })
 }
 
 // e2e is one install run: its target, its stand-ins and what it saw.
@@ -130,7 +137,10 @@ func newE2E(t *testing.T, dir string) *e2e {
 	os.WriteFile(e.events, nil, 0o644)
 	// blkid answers with a UUID for each filesystem the install made;
 	// cryptsetup with one for each LUKS volume, after reading the passphrase
-	// as the real one does; udevadm settles nothing. Each says it was called.
+	// as the real one does; udevadm settles nothing. mdadm knows two running
+	// arrays: md0, the one a RAID install makes, and md127, a data array of
+	// the live system on a disk the install does not touch, which only a
+	// scan of every array lists. Each says it was called.
 	note := `echo "$(basename "$0") $*" >> "` + e.events + `"`
 	fakeBin(t, map[string]string{
 		"blkid": note + `
@@ -142,6 +152,20 @@ esac`,
 		"cryptsetup": note + `
 if [ "$1" = luksUUID ]; then echo "luks-$(basename "$2")"; exit 0; fi
 cat > "` + dir + `/cryptsetup.stdin"`,
+		"mdadm": note + `
+line() {
+	case "$1" in
+	/dev/md0) echo "ARRAY /dev/md0 metadata=1.2 name=e2e:0 UUID=` + e2eMdUUID + `" ;;
+	/dev/md127) echo "ARRAY /dev/md127 metadata=1.2 name=live:data UUID=deadbeef:00000000:00000000:0000d474" ;;
+	*) echo "mdadm: cannot open $1: No such file or directory" >&2; exit 1 ;;
+	esac
+}
+case "$1 $2" in
+"--detail --export") line "$3" > /dev/null && echo "MD_UUID=$(line "$3" | sed 's/.*UUID=//')" ;;
+"--detail --brief") shift 2; for d in "$@"; do line "$d"; done ;;
+"--detail --scan") line /dev/md0; line /dev/md127 ;;
+*) exit 1 ;;
+esac`,
 		"udevadm": "",
 	})
 	return e
@@ -170,6 +194,7 @@ func (e *e2e) install(cfg *config.Config, opts Options) error {
 	e.in = &installer{cfg: cfg, plan: plan, opts: opts, mnt: storage.NewMounter(opts.Root)}
 
 	var saved []storage.Partition
+	var spares []int
 	e.in.opts.Progress = func(done, total int, stage string) {
 		e.sync()
 		e.log = append(e.log, "== "+stage)
@@ -186,6 +211,18 @@ func (e *e2e) install(cfg *config.Config, opts Options) error {
 			}
 		case "meta-fs":
 			copy(plan.Parts, saved)
+		case "bootloader":
+			// A spare ESP, mounted by the stage to copy the loader onto.
+			for i := range plan.Parts {
+				if plan.Parts[i].SpareESP {
+					spares = append(spares, i)
+					plan.Parts[i].Filesystem = "tmpfs"
+				}
+			}
+		case "first-boot":
+			for _, i := range spares {
+				plan.Parts[i].Filesystem = saved[i].Filesystem
+			}
 		case "complete":
 			if e.atComplete != nil {
 				e.atComplete()
@@ -388,6 +425,101 @@ func (e *e2e) inOrder(steps ...string) {
 	}
 }
 
+// stage is what the log holds between the start of the stage named and the
+// next one, less the waits for udev, which carry no work of their own.
+func (e *e2e) stage(name string) []string {
+	var out []string
+	in := false
+	for _, l := range e.log {
+		if strings.HasPrefix(l, "== ") {
+			in = l == "== "+name
+			continue
+		}
+		if in && !strings.Contains(l, "udevadm settle") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// asPlanned checks that the partition stage ran what PartitionCommands —
+// the dry run's account of it — shows for the plan, in its order, and
+// nothing besides: run by the Runner or, cryptsetup, by the controller.
+func (e *e2e) asPlanned() {
+	e.t.Helper()
+	cmds, err := PartitionCommands(e.in.plan)
+	if err != nil {
+		e.t.Fatalf("PartitionCommands: %v", err)
+	}
+	var want []string
+	for _, c := range cmds {
+		want = append(want, strings.Join(c, " "))
+	}
+	var got []string
+	for _, l := range e.stage("partition") {
+		l, _ = strings.CutPrefix(l, "run ")
+		l, _ = strings.CutPrefix(l, "exec ")
+		got = append(got, l)
+	}
+	if g, w := strings.Join(got, "\n"), strings.Join(want, "\n"); g != w {
+		e.t.Errorf("the partition stage ran:\n%s\nPartitionCommands shows:\n%s", g, w)
+	}
+}
+
+// packages is what xbps-install was asked to install into the target.
+func (e *e2e) packages() []string {
+	e.t.Helper()
+	i := e.at("run xbps-install")
+	if i < 0 {
+		e.t.Fatal("xbps-install never ran")
+	}
+	f := strings.Fields(e.log[i])
+	return f[indexOf(f, "-r")+2:]
+}
+
+// noKeyfile checks that no LUKS key lies anywhere in the target (the live
+// /proc, /sys and /dev bound into it left out), that dracut is not told of
+// one, and that no volume was given a key slot for one.
+func (e *e2e) noKeyfile() {
+	e.t.Helper()
+	filepath.WalkDir(e.root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		switch rel, _ := filepath.Rel(e.root, path); {
+		case d.IsDir() && (rel == "proc" || rel == "sys" || rel == "dev"):
+			return filepath.SkipDir
+		case d.Name() == "cryptkeys" || strings.HasSuffix(d.Name(), ".key") || d.Name() == "10-slinstaller-keyfile.conf":
+			e.t.Errorf("a keyfile in the target: /%s", rel)
+		}
+		return nil
+	})
+	if i := e.at("luksAddKey"); i >= 0 {
+		e.t.Errorf("a key slot was added for a keyfile: %s", e.log[i])
+	}
+}
+
+// noCrypttab checks that the target's crypttab lists nothing.
+func (e *e2e) noCrypttab() {
+	e.t.Helper()
+	data, err := os.ReadFile(filepath.Join(e.root, "etc", "crypttab"))
+	if err == nil && strings.TrimSpace(string(data)) != "" {
+		e.t.Errorf("crypttab:\n%s", data)
+	}
+}
+
+// leftNothing checks, once the install is over, that nothing is mounted
+// and nothing was written beside the "disk".
+func (e *e2e) leftNothing() {
+	e.t.Helper()
+	if m := mountsUnder(e.t, e.root); len(m) > 0 {
+		e.t.Errorf("still mounted after the install: %v", m)
+	}
+	if ents, _ := os.ReadDir(e.root); len(ents) != 0 {
+		e.t.Errorf("written under the target's mount point, outside its filesystems: %d entries", len(ents))
+	}
+}
+
 // mountsUnder lists the mount points at or under dir in this namespace.
 func mountsUnder(t *testing.T, dir string) []string {
 	f, err := os.Open("/proc/self/mountinfo")
@@ -436,6 +568,9 @@ func grubLines(text string) (always, normal string) {
 }
 
 var hex32 = regexp.MustCompile(`^[0-9a-f]{32}\n$`)
+
+// e2eMdUUID is md0's UUID as the mdadm stand-in gives it.
+const e2eMdUUID = "0b1e2d3c:4f5a6b7c:8d9e0f1a:2b3c4d5e"
 
 func e2ePlain(t *testing.T, dir string) {
 	e := newE2E(t, dir)
@@ -837,4 +972,404 @@ func e2eEncrypted(t *testing.T, dir string) {
 	if ents, _ := os.ReadDir(e.root); len(ents) != 0 {
 		t.Errorf("written under the target's mount point, outside its filesystems: %d entries", len(ents))
 	}
+}
+
+// lvmHomeConfig is an ESP at /boot and a volume group vg0 on the rest of the
+// disk, holding the root and /home; encrypted puts the group's physical
+// volume in a LUKS container.
+func lvmHomeConfig(encrypted bool) *config.Config {
+	return &config.Config{TargetMedia: []*config.Media{{Name: "sda", Type: "disk", Children: []*config.Media{
+		{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+		{Name: "sda2", Type: "lvm", VolumeGroup: "vg0", Encrypted: encrypted, Children: []*config.Media{
+			{Name: "root", FsType: "ext4", Mountpoint: "/", Size: "20G"},
+			{Name: "home", FsType: "ext4", Mountpoint: "/home"}}}}}}}
+}
+
+// e2eConfig gives a layout the rest a config needs to pass Validate, which
+// it is held to: an install of a layout the installer refuses tests nothing.
+func e2eConfig(t *testing.T, cfg *config.Config, host string) *config.Config {
+	t.Helper()
+	cfg.Hostname = host
+	cfg.Users = []*config.User{{Login: "ion", Password: "$6$salt$the-hash", Admin: true}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("the layout does not validate: %v", err)
+	}
+	return cfg
+}
+
+func e2eLVM(t *testing.T, dir string) {
+	e := newE2E(t, dir)
+	cfg := e2eConfig(t, lvmHomeConfig(false), "e2e-lvm")
+	opts := Options{
+		Repo:     "https://repo.example.org/current",
+		Packages: []string{"base-system", "slinit", "slinit-services", "grub-x86_64-efi", "lvm2", "dracut"},
+		Devices:  noDevices,
+		Output:   io.Discard,
+	}
+
+	e.atComplete = func() {
+		mounts := strings.Join(mountsUnder(t, e.root), "\n") + "\n"
+		for _, want := range []string{e.root + " ", e.root + "/boot ", e.root + "/home "} {
+			if !strings.Contains(mounts, want) {
+				t.Errorf("not mounted: %s\n%s", want, mounts)
+			}
+		}
+		// The volumes by the UUIDs blkid gave for them, never by their
+		// /dev/vg0 paths.
+		fstab := e.read("etc", "fstab")
+		for _, want := range []string{
+			"UUID=fs-root\t/\text4\tdefaults\t0 1\n",
+			"UUID=7A3B-19C2\t/boot\tvfat\tdefaults\t0 2\n",
+			"UUID=fs-home\t/home\text4\tdefaults\t0 2\n",
+		} {
+			if !strings.Contains(fstab, want) {
+				t.Errorf("fstab lacks %q:\n%s", want, fstab)
+			}
+		}
+		if strings.Contains(fstab, "/dev/") {
+			t.Errorf("fstab names a device by path:\n%s", fstab)
+		}
+		// The initramfs activates the root's volume, and only that one.
+		always, _ := grubLines(e.read("etc", "default", "grub"))
+		if always != "init=/usr/bin/slinit rd.lvm.lv=vg0/root" {
+			t.Errorf("GRUB_CMDLINE_LINUX = %q", always)
+		}
+		e.noCrypttab()
+		e.noKeyfile()
+		if exists(filepath.Join(e.root, "etc", "mdadm.conf")) {
+			t.Error("an mdadm.conf on an install without RAID")
+		}
+	}
+
+	if err := e.install(cfg, opts); err != nil {
+		t.Fatalf("install: %v\n%s", err, strings.Join(e.log, "\n"))
+	}
+	if !contains(e.packages(), "lvm2") {
+		t.Errorf("lvm2 is not installed: %v", e.packages())
+	}
+	e.asPlanned()
+	e.inOrder(
+		"== partition", "run parted -s /dev/sda mklabel gpt", "run partprobe /dev/sda",
+		// The group on the partition, the fixed-size volume before the one
+		// that takes the rest, the filesystems on the volumes.
+		"run pvcreate -ff -y /dev/sda2", "run vgcreate vg0 /dev/sda2",
+		"run lvcreate -y -L 20G -n root vg0", "run lvcreate -y -l 100%FREE -n home vg0",
+		"run mkfs.vfat -F32 /dev/sda1", "run mkfs.ext4 -v -F -b 4096 /dev/vg0/root", "run mkfs.ext4 -v -F -b 4096 /dev/vg0/home",
+		"== mount", "== base-install", "run xbps-install",
+		"== fstab", "exec blkid -p -s UUID -o value /dev/vg0/root", "exec blkid -p -s UUID -o value /dev/vg0/home",
+		"== bootloader",
+		"run chroot "+e.root+" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Sunlight",
+		"run chroot "+e.root+" grub-mkconfig -o /boot/grub/grub.cfg",
+		// The initramfs is built again, with the lvm module in it.
+		"run chroot "+e.root+" dracut --regenerate-all --force",
+		"== first-boot", "== complete",
+	)
+	if i := e.at("blkid -p -s UUID -o value /dev/sda2"); i >= 0 {
+		t.Errorf("the physical volume was probed for a filesystem: %s", e.log[i])
+	}
+	if i := e.at("cryptsetup"); i >= 0 {
+		t.Errorf("cryptsetup on an unencrypted group: %s", e.log[i])
+	}
+	e.leftNothing()
+}
+
+func e2eLVMOnLUKS(t *testing.T, dir string) {
+	e := newE2E(t, dir)
+	// /boot on the unencrypted ESP: dracut asks for the passphrase once,
+	// so no keyfile is called for.
+	cfg := e2eConfig(t, lvmHomeConfig(true), "e2e-lvmluks")
+	opts := Options{
+		Repo:       "https://repo.example.org/current",
+		Packages:   []string{"base-system", "slinit", "slinit-services", "grub-x86_64-efi", "lvm2", "cryptsetup", "dracut"},
+		Passphrase: testPassphrase,
+		Devices:    noDevices,
+		Output:     io.Discard,
+	}
+
+	e.atComplete = func() {
+		fstab := e.read("etc", "fstab")
+		for _, want := range []string{
+			"UUID=fs-root\t/\text4\tdefaults\t0 1\n",
+			"UUID=7A3B-19C2\t/boot\tvfat\tdefaults\t0 2\n",
+			"UUID=fs-home\t/home\text4\tdefaults\t0 2\n",
+		} {
+			if !strings.Contains(fstab, want) {
+				t.Errorf("fstab lacks %q:\n%s", want, fstab)
+			}
+		}
+		// The root's physical volume is the initramfs's to open: crypttab
+		// lists nothing, the command line names the container and the
+		// volume, and nothing in it is told of a key.
+		e.noCrypttab()
+		e.noKeyfile()
+		grub := e.read("etc", "default", "grub")
+		always, normal := grubLines(grub)
+		if always != "init=/usr/bin/slinit rd.luks.uuid=luks-sda2 rd.lvm.lv=vg0/root rd.luks.crypttab=0" {
+			t.Errorf("GRUB_CMDLINE_LINUX = %q", always)
+		}
+		if strings.Contains(always+normal, "rd.luks.key") || strings.Contains(grub, "GRUB_ENABLE_CRYPTODISK") {
+			t.Errorf("/etc/default/grub on an unencrypted /boot:\n%s", grub)
+		}
+	}
+
+	if err := e.install(cfg, opts); err != nil {
+		t.Fatalf("install: %v\n%s", err, strings.Join(e.log, "\n"))
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "cryptsetup.stdin")); string(got) != testPassphrase {
+		t.Errorf("cryptsetup was given %q on stdin", got)
+	}
+	for _, p := range []string{"lvm2", "cryptsetup"} {
+		if !contains(e.packages(), p) {
+			t.Errorf("%s is not installed: %v", p, e.packages())
+		}
+	}
+	e.asPlanned()
+	e.inOrder(
+		"== partition", "run parted -s /dev/sda mklabel gpt", "run partprobe /dev/sda",
+		// GRUB opens nothing here: cryptsetup's own key derivation.
+		"exec cryptsetup --batch-mode luksFormat /dev/sda2 -",
+		"exec cryptsetup --batch-mode luksOpen /dev/sda2 cryptvg0 -",
+		"run pvcreate -ff -y /dev/mapper/cryptvg0", "run vgcreate vg0 /dev/mapper/cryptvg0",
+		"run lvcreate -y -L 20G -n root vg0", "run lvcreate -y -l 100%FREE -n home vg0",
+		"run mkfs.ext4 -v -F -b 4096 /dev/vg0/root",
+		"== fstab", "exec blkid -p -s UUID -o value /dev/vg0/root",
+		"== bootloader", "exec cryptsetup luksUUID /dev/sda2",
+		"run chroot "+e.root+" grub-mkconfig -o /boot/grub/grub.cfg",
+		"run chroot "+e.root+" dracut --regenerate-all --force",
+		"== first-boot", "== complete",
+	)
+	e.leftNothing()
+}
+
+func e2eRAID1(t *testing.T, dir string) {
+	e := newE2E(t, dir)
+	// The root on md0, mirrored over sda2 and sdb2; the ESP on sda, a spare
+	// on sdb for when sda is gone.
+	cfg := e2eConfig(t, serverConfig(&config.RaidArray{Name: "md0", Level: "1", FsType: "ext4", Mountpoint: "/"}), "e2e-raid")
+	opts := Options{
+		Repo:     "https://repo.example.org/current",
+		Packages: []string{"base-system", "slinit", "slinit-services", "grub-x86_64-efi", "mdadm", "dracut"},
+		Devices:  noDevices,
+		Output:   io.Discard,
+	}
+	// The firmware has an entry for the spare from an earlier install,
+	// which is replaced, and others, which are left alone.
+	saved := efiBootList
+	defer func() { efiBootList = saved }()
+	efiBootList = func() string {
+		return "BootCurrent: 0001\nBootOrder: 0001,0004,0003\n" +
+			"Boot0001* Sunlight\tHD(1,GPT,...)/File(\\EFI\\Sunlight\\grubx64.efi)\n" +
+			"Boot0003* Windows Boot Manager\tHD(1,GPT,...)\n" +
+			"Boot0004* Sunlight (sdb)\tHD(1,GPT,...)/File(\\EFI\\Sunlight\\grubx64.efi)\n"
+	}
+
+	e.atComplete = func() {
+		mounts := strings.Join(mountsUnder(t, e.root), "\n") + "\n"
+		for _, want := range []string{e.root + " ", e.root + "/boot/efi "} {
+			if !strings.Contains(mounts, want) {
+				t.Errorf("not mounted: %s\n%s", want, mounts)
+			}
+		}
+		// The array's filesystem and the ESP; not the spare, never mounted.
+		fstab := e.read("etc", "fstab")
+		want := "# /etc/fstab — generated by slinstaller\n" +
+			"UUID=fs-md0\t/\text4\tdefaults\t0 1\n" +
+			"UUID=7A3B-19C2\t/boot/efi\tvfat\tdefaults\t0 2\n"
+		if fstab != want {
+			t.Errorf("fstab:\n%s\nwant:\n%s", fstab, want)
+		}
+		// The install's array, and not the live system's other one.
+		conf := e.read("etc", "mdadm.conf")
+		if want := "# Written by slinstaller — the RAID arrays this system assembles at boot.\n" +
+			"ARRAY /dev/md0 metadata=1.2 name=e2e:0 UUID=" + e2eMdUUID + "\n"; conf != want {
+			t.Errorf("mdadm.conf:\n%s\nwant:\n%s", conf, want)
+		}
+		if got := e.read("etc", "dracut.conf.d", "10-slinstaller-mdraid.conf"); !strings.Contains(got, `add_dracutmodules+=" mdraid "`) {
+			t.Errorf("dracut mdraid conf = %q", got)
+		}
+		always, _ := grubLines(e.read("etc", "default", "grub"))
+		if always != "init=/usr/bin/slinit rd.md.uuid="+e2eMdUUID {
+			t.Errorf("GRUB_CMDLINE_LINUX = %q", always)
+		}
+		e.noCrypttab()
+	}
+
+	if err := e.install(cfg, opts); err != nil {
+		t.Fatalf("install: %v\n%s", err, strings.Join(e.log, "\n"))
+	}
+	if !contains(e.packages(), "mdadm") {
+		t.Errorf("mdadm is not installed: %v", e.packages())
+	}
+	e.asPlanned()
+	e.inOrder(
+		"== partition", "run parted -s /dev/sda mklabel gpt", "run partprobe /dev/sda",
+		"run parted -s /dev/sdb mklabel gpt", "run partprobe /dev/sdb",
+		// The array from its two members, once both disks are cut.
+		"run mdadm --create /dev/md0 --run --force --metadata=1.2 --level=1 --raid-devices=2 /dev/sda2 /dev/sdb2",
+		"run mkfs.vfat -F32 /dev/sda1", "run mkfs.vfat -F32 /dev/sdb1", "run mkfs.ext4 -v -F -b 4096 /dev/md0",
+		"== mount", "== base-install", "run xbps-install",
+		"== fstab", "exec blkid -p -s UUID -o value /dev/md0",
+		"== bootloader", "exec mdadm --detail --export /dev/md0",
+		// The firmware's entry for the ESP is grub-install's; the spare
+		// gets the loader copied onto it and an entry of its own, the stale
+		// one removed first.
+		"run chroot "+e.root+" grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=Sunlight",
+		"run chroot "+e.root+" grub-mkconfig -o /boot/grub/grub.cfg",
+		"run cp -a "+e.root+"/boot/efi/EFI ",
+		"run cp "+e.root+"/boot/efi/EFI/Sunlight/grubx64.efi ",
+		"run chroot "+e.root+" efibootmgr --bootnum 0004 --delete-bootnum",
+		"run chroot "+e.root+` efibootmgr --create --disk /dev/sdb --part 1 --label Sunlight (sdb) --loader \EFI\Sunlight\grubx64.efi`,
+		"exec mdadm --detail --brief /dev/md0",
+		"run chroot "+e.root+" dracut --regenerate-all --force",
+		"== first-boot", "== complete",
+	)
+	if i := e.at("cp " + e.root + "/boot/efi/EFI/Sunlight/grubx64.efi "); i < 0 || !strings.HasSuffix(e.log[i], "/EFI/BOOT/BOOTX64.EFI") {
+		t.Error("the loader is not at the spare's removable-media path")
+	}
+	for i, l := range e.log {
+		if strings.Contains(l, "grub-install") && strings.Contains(l, "--no-nvram") {
+			t.Errorf("the ESP got no firmware entry: %s", l)
+		}
+		if strings.Contains(l, "efibootmgr") && (strings.Contains(l, "0001") || strings.Contains(l, "0003")) {
+			t.Errorf("another entry was touched: %s", l)
+		}
+		// Members and the spare carry no filesystem of the root's.
+		for _, d := range []string{"/dev/sda2", "/dev/sdb2", "/dev/sdb1"} {
+			if strings.HasPrefix(l, "exec blkid") && strings.HasSuffix(l, " "+d) {
+				t.Errorf("probed for fstab: %s (line %d)", l, i)
+			}
+		}
+	}
+	if n := strings.Count(strings.Join(e.log, "\n"), "efibootmgr --create"); n != 1 {
+		t.Errorf("%d efibootmgr entries made, want the spare's one", n)
+	}
+	e.leftNothing()
+}
+
+func e2eCryptHomePlainRoot(t *testing.T, dir string) {
+	e := newE2E(t, dir)
+	// A plain root and an encrypted /home: the key to /home must not lie
+	// in the clear on the root beside it; /home asks for its passphrase.
+	cfg := e2eConfig(t, &config.Config{TargetMedia: []*config.Media{{Name: "sda", Type: "disk", Children: []*config.Media{
+		{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+		{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/", Size: "20G"},
+		{Name: "sda3", Type: "crypt", FsType: "ext4", Mountpoint: "/home"}}}}}, "e2e-crypthome")
+	opts := Options{
+		Repo:       "https://repo.example.org/current",
+		Packages:   []string{"base-system", "slinit", "slinit-services", "grub-x86_64-efi", "cryptsetup", "dracut"},
+		Passphrase: testPassphrase,
+		Devices:    noDevices,
+		Output:     io.Discard,
+	}
+
+	e.atComplete = func() {
+		fstab := e.read("etc", "fstab")
+		for _, want := range []string{
+			"UUID=3f1c0a52-8d2e-4c4b-9e0e-5b8f1a2c3d4e\t/\text4\tdefaults\t0 1\n",
+			"UUID=fs-crypthome\t/home\text4\tdefaults\t0 2\n",
+		} {
+			if !strings.Contains(fstab, want) {
+				t.Errorf("fstab lacks %q:\n%s", want, fstab)
+			}
+		}
+		e.noKeyfile()
+		if tab := e.read("etc", "crypttab"); tab != "crypthome UUID=luks-sda3 none luks\n" || e.mode("etc", "crypttab") != 0o600 {
+			t.Errorf("crypttab (mode %v):\n%s", e.mode("etc", "crypttab"), tab)
+		}
+		// The initramfs opens nothing: root needs no unlocking.
+		grub := e.read("etc", "default", "grub")
+		always, normal := grubLines(grub)
+		if always != "init=/usr/bin/slinit rd.luks.crypttab=0" {
+			t.Errorf("GRUB_CMDLINE_LINUX = %q", always)
+		}
+		if strings.Contains(always+normal, "rd.luks.key") || strings.Contains(always+normal, "rd.luks.uuid") || strings.Contains(grub, "GRUB_ENABLE_CRYPTODISK") {
+			t.Errorf("/etc/default/grub:\n%s", grub)
+		}
+	}
+
+	if err := e.install(cfg, opts); err != nil {
+		t.Fatalf("install: %v\n%s", err, strings.Join(e.log, "\n"))
+	}
+	e.asPlanned()
+	e.inOrder(
+		"== partition", "run parted -s /dev/sda mklabel gpt", "run partprobe /dev/sda",
+		"exec cryptsetup --batch-mode luksFormat /dev/sda3 -",
+		"exec cryptsetup --batch-mode luksOpen /dev/sda3 crypthome -",
+		"run mkfs.vfat -F32 /dev/sda1", "run mkfs.ext4 -v -F -b 4096 /dev/sda2",
+		"run mkfs.ext4 -v -F -b 4096 /dev/mapper/crypthome",
+		"== mount", "== base-install",
+		"== fstab", "exec blkid -p -s UUID -o value /dev/mapper/crypthome", "exec cryptsetup luksUUID /dev/sda3",
+		"== bootloader", "== first-boot", "== complete",
+	)
+	e.leftNothing()
+}
+
+func e2eReuse(t *testing.T, dir string) {
+	e := newE2E(t, dir)
+	// Into the partitions already there: the ESP and /home kept as they
+	// are, the root formatted afresh. The table is not touched.
+	cfg := e2eConfig(t, &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: "sda", Type: "disk", Children: []*config.Media{
+		{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Preserve: true},
+		{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+		{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: "/home", Preserve: true}}}}}, "e2e-reuse")
+	devices := func() ([]blockdev.Device, error) {
+		return []blockdev.Device{{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []blockdev.Device{
+			{Name: "sda1", Path: "/dev/sda1", Type: "part", FsType: "vfat"},
+			{Name: "sda2", Path: "/dev/sda2", Type: "part", FsType: "ext4"},
+			{Name: "sda3", Path: "/dev/sda3", Type: "part", FsType: "ext4"}}}}, nil
+	}
+	opts := Options{
+		Repo:     "https://repo.example.org/current",
+		Packages: []string{"base-system", "slinit", "slinit-services", "grub-x86_64-efi"},
+		Devices:  devices,
+		Output:   io.Discard,
+	}
+
+	e.atComplete = func() {
+		mounts := strings.Join(mountsUnder(t, e.root), "\n") + "\n"
+		for _, want := range []string{e.root + " ", e.root + "/boot ", e.root + "/home "} {
+			if !strings.Contains(mounts, want) {
+				t.Errorf("not mounted: %s\n%s", want, mounts)
+			}
+		}
+		// Kept or formatted, all three are the system's.
+		fstab := e.read("etc", "fstab")
+		for _, want := range []string{
+			"UUID=3f1c0a52-8d2e-4c4b-9e0e-5b8f1a2c3d4e\t/\text4\tdefaults\t0 1\n",
+			"UUID=7A3B-19C2\t/boot\tvfat\tdefaults\t0 2\n",
+			"UUID=fs-sda3\t/home\text4\tdefaults\t0 2\n",
+		} {
+			if !strings.Contains(fstab, want) {
+				t.Errorf("fstab lacks %q:\n%s", want, fstab)
+			}
+		}
+		always, _ := grubLines(e.read("etc", "default", "grub"))
+		if always != "init=/usr/bin/slinit" {
+			t.Errorf("GRUB_CMDLINE_LINUX = %q", always)
+		}
+		e.noCrypttab()
+	}
+
+	if err := e.install(cfg, opts); err != nil {
+		t.Fatalf("install: %v\n%s", err, strings.Join(e.log, "\n"))
+	}
+	// The partition stage formats the root and does nothing else: no
+	// table, no signature erased, the kept partitions not formatted.
+	if got := strings.Join(e.stage("partition"), "\n"); got != "run mkfs.ext4 -v -F -b 4096 /dev/sda2" {
+		t.Errorf("the partition stage of a reuse install ran:\n%s", got)
+	}
+	e.asPlanned()
+	for _, l := range e.log {
+		if strings.Contains(l, "parted") || strings.Contains(l, "wipefs") || strings.Contains(l, "mkfs.vfat") || strings.Contains(l, "/dev/sda3") && strings.Contains(l, "mkfs") {
+			t.Errorf("a reuse install touched what it keeps: %s", l)
+		}
+	}
+	e.inOrder(
+		"== partition", "run mkfs.ext4 -v -F -b 4096 /dev/sda2",
+		"== mount", "== base-install", "run xbps-install",
+		"== fstab", "exec blkid -p -s UUID -o value /dev/sda1", "exec blkid -p -s UUID -o value /dev/sda2", "exec blkid -p -s UUID -o value /dev/sda3",
+		"== bootloader", "run chroot "+e.root+" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Sunlight",
+		"== first-boot", "== complete",
+	)
+	e.leftNothing()
 }
