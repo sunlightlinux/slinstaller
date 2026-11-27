@@ -1177,9 +1177,24 @@ func (c *Config) Validate() error {
 				continue
 			}
 			checkDetails(ch.Name, ch, true)
+			// `encrypted` is read on an lvm partition only. Anywhere else it
+			// was dropped without a word and the volume installed in the
+			// clear — refused, with what does encrypt it.
+			if ch.Encrypted && !c.ReusePartitions {
+				switch ch.Type {
+				case "lvm", "crypt":
+				case "raid":
+					add("%s: encrypted is not read on a RAID member; set encrypted on raid %q instead", ch.Name, ch.Raid)
+				default:
+					add("%s: encrypted is read only on an lvm partition; use type: crypt to encrypt this partition", ch.Name)
+				}
+			}
 			for _, lv := range ch.Children {
 				if lv != nil {
 					checkDetails(ch.Name+"/"+lv.Name, lv, false)
+					if lv.Encrypted {
+						add("%s/%s: a logical volume is not encrypted on its own; set encrypted on the lvm partition %s", ch.Name, lv.Name, ch.Name)
+					}
 				}
 			}
 		}

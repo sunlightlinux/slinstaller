@@ -319,3 +319,36 @@ func TestAnAdministratorNeedsAPassword(t *testing.T) {
 		t.Errorf("no administrator at all (root left as it is): %v", err)
 	}
 }
+
+// `encrypted: true` where nothing reads it installed the volume in the
+// clear without a word; it is refused, saying what does encrypt it.
+func TestEncryptedWhereNotReadIsRefused(t *testing.T) {
+	for name, tc := range map[string]struct {
+		mutate func(c *Config)
+		want   string
+	}{
+		"plain partition": {func(c *Config) { c.TargetMedia[0].Children[2].Encrypted = true }, "use type: crypt"},
+		"logical volume": {func(c *Config) {
+			c.TargetMedia[0].Children[2] = &Media{Name: "sda3", Type: "lvm", VolumeGroup: "vg0",
+				Children: []*Media{{Name: "root", FsType: "ext4", Mountpoint: "/", Encrypted: true}}}
+		}, "set encrypted on the lvm partition"},
+	} {
+		c := btrfsConfig()
+		tc.mutate(c)
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", name, err, tc.want)
+		}
+	}
+	// Where it is read, it is fine.
+	c := btrfsConfig()
+	c.TargetMedia[0].Children[2] = &Media{Name: "sda3", Type: "lvm", VolumeGroup: "vg0", Encrypted: true,
+		Children: []*Media{{Name: "root", FsType: "ext4", Mountpoint: "/"}}}
+	if err := c.Validate(); err != nil {
+		t.Errorf("LVM on LUKS: %v", err)
+	}
+	raid := raidWithSpare("1", 2)
+	raid.TargetMedia[1].Children[0].Encrypted = true
+	if err := raid.Validate(); err == nil || !strings.Contains(err.Error(), `set encrypted on raid "md0"`) {
+		t.Errorf("RAID member: %v", err)
+	}
+}

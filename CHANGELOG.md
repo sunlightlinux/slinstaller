@@ -12,6 +12,10 @@ change.
 
 ### Fixed
 
+- `encrypted: true` on a plain partition, a RAID member or a logical
+  volume was ignored and the volume installed unencrypted. It is read on
+  an `lvm` partition (and a RAID array) only; elsewhere it is refused,
+  pointing at `type: crypt` or at the array.
 - **No planted file in /tmp is written through as root.** The default
   install log `/tmp/slinstaller.log` was opened with O_CREAT|O_TRUNC, so
   a symlink or hard link another user left there had root truncate and
