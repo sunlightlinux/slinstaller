@@ -97,7 +97,11 @@ func onlyTools(t *testing.T, dir string, names ...string) string {
 		body := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"" + bin + "/" + n + ".args\"\n"
 		switch n {
 		case "lsblk":
-			body += "exec " + cat + " \"" + bin + "/lsblk.json\"\n"
+			// lsblk.2.json, when there, from the call after the count in
+			// lsblk.switch on: a disk that changes under a prompt.
+			body += "i=0; while read -r _; do i=$((i+1)); done < \"" + bin + "/lsblk.args\"\n" +
+				"if [ -f \"" + bin + "/lsblk.2.json\" ] && [ \"$i\" -gt \"$(" + cat + " \"" + bin + "/lsblk.switch\")\" ]; then exec " + cat + " \"" + bin + "/lsblk.2.json\"; fi\n" +
+				"exec " + cat + " \"" + bin + "/lsblk.json\"\n"
 		case "pvs":
 			body += "[ -f \"" + bin + "/pvs.out\" ] && exec " + cat + " \"" + bin + "/pvs.out\"\nexit 0\n"
 		case "cryptsetup":

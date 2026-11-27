@@ -179,6 +179,23 @@ func applyDiskImage(t *testing.T, confirmed string) {
 	if !strings.Contains(errOut, "disk.raw is written to "+testDisk) {
 		t.Errorf("not reported:\n%s", errOut)
 	}
+	// The disk is checked again after the confirmation: swapped (another
+	// serial) or mounted while the prompt waited, nothing is written.
+	for what, after := range map[string]string{
+		"swapped": `{"name":"slitest0","path":"` + testDisk + `","size":64000000000,"type":"disk","model":"Test","serial":"OTHER"}`,
+		"in use":  `{"name":"slitest0","path":"` + testDisk + `","size":64000000000,"type":"disk","model":"Test","mountpoint":"/media/x"}`,
+	} {
+		e = newApplyEnv(t, "sh", "dd", "cat")
+		os.WriteFile(filepath.Join(e.bin, "lsblk.2.json"), []byte(`{"blockdevices":[`+after+`]}`), 0o644)
+		os.WriteFile(filepath.Join(e.bin, "lsblk.switch"), []byte("2\n"), 0o644) // the listing, the prompt's, then this
+		_, err = run(confirmed)
+		if err == nil || !strings.Contains(err.Error(), "nothing was written") {
+			t.Errorf("%s after the confirmation: %v", what, err)
+		}
+		if got := e.ran("sh"); got != "" {
+			t.Errorf("%s: written anyway:\n%s", what, got)
+		}
+	}
 	// The disk is checked as any target is: in use, absent, a missing tool.
 	e = newApplyEnv(t, "sh", "dd", "cat")
 	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":1000,"type":"disk","mountpoint":"/data"}`)
