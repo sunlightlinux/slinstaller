@@ -122,25 +122,36 @@ rather than passwords), these are refused before any disk is touched,
 because each used to fail after the wipe or install a system that did not
 work:
 
+- **Disk names** are kernel device names (`sda`, `nvme0n1`, `dm-0`):
+  letters, digits and `. _ : + -`; to name a disk by serial or path use
+  `match:`. No two devices of the layout may end up at one path (a disk
+  `md0` beside an array `md0`).
 - **Partition names.** On a new table a disk's partitions are named 1..n,
   in order, on their own disk (`sda1`, `sda2`, …), and the partition that
   fills the disk is the last on it. On a Safe/`reusePartitions` install, a
   `create` partition is named with the number parted will give it (the
-  lowest free one); the dry run says so when it is not.
+  lowest free one); the dry run says so when it is not. A partition is
+  not both `create` (cut now) and `preserve` (kept).
 - **Encryption.** `encrypted:` is read on `type: lvm` partitions and on
   raid arrays only; a plain partition is encrypted with `type: crypt`. A
-  volume group's physical volumes are all encrypted or none.
+  volume group's physical volumes are all encrypted or none. A keyfile
+  is only made on an encrypted root: an encrypted `/home`, swap or
+  `/boot` on a plain root asks for its passphrase at boot.
 - **LVM.** Volume group and logical volume names are ones LVM accepts
   (letters, digits, `+ _ . -`, not starting with `-`, not a name LVM keeps
   for itself). Logical volume sizes are checked; a number without a unit
-  is bytes, as everywhere else in the config.
+  is bytes, as everywhere else in the config. A group name the machine
+  already has on a disk the install does not wipe is refused.
 - **Sizes** are bytes, or a number with a unit as clr-installer reads it:
   `K`, `M`, `G`, `T`, `P`, alone or followed by `B` or `iB`, any case, all
   powers of 1024 (`512M`, `150MiB`, `2.6GiB`, `10GB` = 10 × 2^30).
-  `swapFileSize: 0` makes no swap file.
+  `swapFileSize: 0` makes no swap file; otherwise it is at least 1 MiB.
+  An xfs filesystem is at least 300 MiB (mkfs.xfs's minimum), on the LUKS
+  mapper when it is encrypted.
 - **Mountpoints** are clean absolute paths without spaces (`/home`, not
   `/home/`), not under `/proc`, `/sys`, `/dev` or `/run`. A swap has no
-  mountpoint, and vfat cannot be the root.
+  mountpoint, and vfat cannot be the root. `mount-options` and
+  `crypt-options` are comma-separated without spaces.
 - **Administrators.** At least one administrator has a password, unless
   the config sees to sudo itself: a `write-files` entry under
   `/etc/sudoers*`, or post-install or stage hooks. (Root is locked once
@@ -160,6 +171,10 @@ work:
 - **Network.** `gateway` and `routes` are IPv4 (IPv6 routes come from
   router advertisements); `dns` is IP addresses separated by spaces;
   interface names are letters, digits and `. _ : -`.
+- **Packages and hooks.** `packages`, `kernel`, `kernel-fallback` and
+  `kernel-remove` are package names (not beginning with `-`, no space or
+  `/`); an `env:` name is not empty and holds no `=`, space or control
+  character, nor begins with `-`.
 - **Kernel arguments.** An argument holding `'`, `$`, `;`, `\`, `` ` ``
   or a line break is refused: GRUB's own parser of `grub.cfg` breaks it.
 - **Plain http.** A `report-url`, an `image` or a `disk-image` over
@@ -172,9 +187,10 @@ off the rest of the config check, the package dry run, and the time zone,
 keymap, language and kernel arguments checked against this machine. It
 does not turn off what keeps a value from reaching a device or a boot
 script it should not: disk, RAID, volume group and logical volume names,
-interface names, bond modes, and control characters (a line break) in
-the hostname and network fields are still checked, and so are the other
-disks and a plain http repository.
+interface names, bond modes, package and env names, fstab and crypttab
+fields, and control characters (a line break) in the hostname and network
+fields are still checked, and so are the other disks and a plain http
+repository.
 
 Config keys nothing reads are not refused, but each is named in a warning
 (`encryptd: true` would otherwise install unencrypted without a word).
