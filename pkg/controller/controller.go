@@ -1223,7 +1223,13 @@ func (in *installer) bootloader() error {
 	// choice explicit and keeps it when a base from elsewhere owns
 	// /usr/bin/init. A config opts out by listing it under
 	// kernel-arguments: remove.
-	if bootsSlinit(in.opts.Root, remove) {
+	// An init= the config adds itself is the one it means: appended after
+	// it, slinit's would have won (the kernel takes the last).
+	ownInit := false
+	for _, a := range kargs {
+		ownInit = ownInit || strings.HasPrefix(a, "init=")
+	}
+	if !ownInit && bootsSlinit(in.opts.Root, remove) {
 		kargs = append(kargs, slinitInitArg)
 	}
 
@@ -2042,7 +2048,20 @@ func bootsSlinit(root string, remove map[string]bool) bool {
 		return false
 	}
 	st, err := os.Stat(filepath.Join(root, "usr", "bin", "slinit"))
-	return err == nil && st.Mode().IsRegular()
+	if err != nil || !st.Mode().IsRegular() {
+		return false
+	}
+	// The binary alone is not a system slinit can boot: with no boot
+	// service (a Void base with the slinit package added) init=slinit came
+	// up to a failed boot, while every other stage set the system up for
+	// runit. The service set's or the distribution's boot service has to
+	// be there.
+	for _, dir := range []string{"usr/lib/slinit.d", "etc/slinit.d"} {
+		if _, err := os.Stat(filepath.Join(root, dir, "boot")); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // removeIfPresent removes path; an empty path or a file already gone is

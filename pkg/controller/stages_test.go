@@ -83,11 +83,12 @@ func TestBootloaderWritesKernelCommandLine(t *testing.T) {
 	var r recorder
 	in := stagedInstaller(t, cfg, &r)
 	mkTarget(t, in, "etc", "default")
-	// The base install put slinit in the target.
+	// The base install put slinit in the target, and its boot service.
 	bin := mkTarget(t, in, "usr", "bin")
 	if err := os.WriteFile(filepath.Join(bin, "slinit"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "lib", "slinit.d"), "boot"), nil, 0o644)
 
 	if err := in.bootloader(); err != nil {
 		t.Fatalf("bootloader: %v", err)
@@ -603,3 +604,20 @@ func TestDhcpcdConfIsWrittenOnce(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// An init= the config adds is the one the system boots with.
+func TestConfigInitWins(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.KernelArguments = &config.KernelArguments{Add: []string{"init=/usr/bin/runit-init"}}
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	mkTarget(t, in, "etc", "default")
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "bin"), "slinit"), nil, 0o755)
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "lib", "slinit.d"), "boot"), nil, 0o644)
+	if err := in.bootloader(); err != nil {
+		t.Fatal(err)
+	}
+	if line := grubCmdline(t, in); !strings.Contains(line, "init=/usr/bin/runit-init") || strings.Contains(line, slinitInitArg) {
+		t.Errorf("kernel command line: %s", line)
+	}
+}

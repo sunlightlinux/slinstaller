@@ -55,6 +55,11 @@ change.
 
 ### Fixed
 
+- `init=/usr/bin/slinit` was added whenever the slinit binary was in the
+  target, even with no slinit boot service (a Void base with the slinit
+  package added): the system did not boot, and the other stages had set it
+  up for runit. It now needs the boot service too. An `init=` the config
+  adds itself is no longer overridden by slinit's.
 - Links in an image or a reused root were followed onto the live system:
   an absolute `/etc/dhcpcd.conf` link had the live file read and
   rewritten, and an image whose `/etc/ssh` was an absolute link had the

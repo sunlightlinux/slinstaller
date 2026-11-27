@@ -156,6 +156,18 @@ func TestBootsSlinit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "slinit"), []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The binary alone, with no boot service: not a system slinit boots.
+	binaryOnly := t.TempDir()
+	os.MkdirAll(filepath.Join(binaryOnly, "usr", "bin"), 0o755)
+	os.WriteFile(filepath.Join(binaryOnly, "usr", "bin", "slinit"), []byte("x"), 0o755)
+	os.MkdirAll(filepath.Join(withSlinit, "usr", "lib", "slinit.d"), 0o755)
+	os.WriteFile(filepath.Join(withSlinit, "usr", "lib", "slinit.d", "boot"), nil, 0o644)
+	// The service set in /etc, as sunlight-slinit-services ships it.
+	etcBoot := t.TempDir()
+	os.MkdirAll(filepath.Join(etcBoot, "usr", "bin"), 0o755)
+	os.WriteFile(filepath.Join(etcBoot, "usr", "bin", "slinit"), []byte("x"), 0o755)
+	os.MkdirAll(filepath.Join(etcBoot, "etc", "slinit.d"), 0o755)
+	os.WriteFile(filepath.Join(etcBoot, "etc", "slinit.d", "boot"), nil, 0o644)
 
 	cases := []struct {
 		name   string
@@ -167,6 +179,8 @@ func TestBootsSlinit(t *testing.T) {
 		{"slinit not installed (runit-only base)", t.TempDir(), nil, false},
 		{"config removes init=", withSlinit, map[string]bool{slinitInitArg: true}, false},
 		{"unrelated removal", withSlinit, map[string]bool{"quiet": true}, true},
+		{"the binary without a boot service", binaryOnly, nil, false},
+		{"the boot service in /etc/slinit.d", etcBoot, nil, true},
 	}
 	for _, c := range cases {
 		if got := bootsSlinit(c.root, c.remove); got != c.want {
