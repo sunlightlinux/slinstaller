@@ -472,3 +472,17 @@ func TestCopyPathMakesNoDirsOutside(t *testing.T) {
 		t.Errorf("made outside: %v", ents)
 	}
 }
+
+// writeSynced makes a new file of the mode asked, never through what is there.
+func TestWriteSynced(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "key")
+	if err := writeSynced(p, []byte("k"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o400 {
+		t.Errorf("mode %v", fi.Mode().Perm())
+	}
+	if err := writeSynced(p, []byte("k"), 0o400); err == nil {
+		t.Error("written over an existing file")
+	}
+}

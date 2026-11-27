@@ -1132,7 +1132,7 @@ func (in *installer) crypttab() error {
 		tab.WriteString(luks.CrypttabLineWith(p.MapName, uuid, in.keyfile, p.CryptOptions))
 	}
 	path := filepath.Join(in.opts.Root, "etc", "crypttab")
-	if err := os.WriteFile(path, []byte(tab.String()), 0o600); err != nil {
+	if err := writeInTarget(in.opts.Root, path, []byte(tab.String()), 0o600); err != nil { // an image's 0644 file not kept
 		return fmt.Errorf("write crypttab: %w", err)
 	}
 	return nil
@@ -1200,7 +1200,7 @@ func (in *installer) setupKeyfile(enc []storage.Partition) error {
 			return fmt.Errorf("mkdir %s: %w", filepath.Dir(full), err)
 		}
 		_ = os.Remove(full) // read-only once written
-		if err := os.WriteFile(full, key, 0o400); err != nil {
+		if err := writeSynced(full, key, 0o400); err != nil {
 			return fmt.Errorf("write keyfile: %w", err)
 		}
 		for _, p := range enc {
@@ -2054,6 +2054,25 @@ func copyPath(root, src, dst string, fi os.FileInfo) error {
 	// the Wi-Fi key kept 0644; and a link there, or a directory leading
 	// out of the target, was written through onto the live system.
 	return writeInTarget(root, dst, data, fi.Mode().Perm())
+}
+
+// writeSynced writes a new file and syncs it before returning. For the LUKS
+// keyfile: its key goes into the volumes' slots next, and a power cut in
+// the writeback window left the file empty on disk while the slots held a
+// key no copy of which survived.
+func writeSynced(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // existingInside reports whether the deepest existing directory on the way

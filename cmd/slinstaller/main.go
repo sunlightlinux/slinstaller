@@ -1023,6 +1023,15 @@ restart:
 		if opts.Passphrase == "" {
 			opts.Passphrase = envPassphrase
 		}
+		// An unattended passphrase is not refused (cryptsetup takes it),
+		// but what the prompts would refuse is said: one GRUB's console
+		// cannot type (non-ASCII, over 94 characters) locks an encrypted
+		// /boot out at the first boot.
+		if opts.Passphrase != "" && interactivePass == "" {
+			if err := config.ValidPassphrase(opts.Passphrase); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: the LUKS passphrase: %v\n", err)
+			}
+		}
 
 		if opts.Passphrase == "" {
 			// Read it with echo off so the passphrase is not shown on screen,
