@@ -36,6 +36,12 @@ func FuzzMaskWriterChunks(f *testing.F) {
 		if len(secret) < 4 || strings.ContainsAny(secret, "\r\n") || strings.Contains(secret, "***") {
 			t.Skip() // AddSecret keeps only these; a secret never spans lines
 		}
+		if strings.HasPrefix(secret, "*") || strings.HasSuffix(secret, "*") {
+			// The mask beside the text after it spells such a secret
+			// again ("*000" in "*000000" is masked to "***000") without
+			// a byte of it shown: not a leak this check can tell apart.
+			t.Skip()
+		}
 		withSecrets(t, []string{secret}, func() {
 			var b strings.Builder
 			m := &maskWriter{w: &b}
