@@ -1906,9 +1906,16 @@ func (in *installer) firstBoot() error {
 			Admin:        cu.Admin,
 			SSHKeys:      cu.SSHKeys,
 		}
-		// An account the first attempt already made is not made again.
-		if !hasAccount(root, cu.Login) {
-			if err := storage.RunCommands([][]string{u.AddCommand(root)}, in.opts.Runner); err != nil {
+		// An account the first attempt already made is not made again; one
+		// the target already had (an image's) is given what the config
+		// says of it all the same: skipped, it kept the image's password
+		// and stayed out of wheel while root was locked below.
+		add := u.AddCommand(root)
+		if hasAccount(root, cu.Login) {
+			add = u.ModCommand(root)
+		}
+		if add != nil {
+			if err := storage.RunCommands([][]string{add}, in.opts.Runner); err != nil {
 				return err
 			}
 		}

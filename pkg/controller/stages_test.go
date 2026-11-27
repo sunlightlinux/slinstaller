@@ -644,3 +644,29 @@ func TestSwapfileReplacesALink(t *testing.T) {
 		t.Error("the file behind the link was touched")
 	}
 }
+
+// An account the target already has (an image that carries it, or the first
+// attempt of a resumed install) is not made again; but what the config says
+// of it is still applied. Skipped whole, an image's "ion" kept the image's
+// password and stayed out of wheel while root was locked for there being an
+// administrator: nobody could become root on the installed system.
+func TestFirstBootAppliesTheConfigToAnExistingAccount(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.Users = []*config.User{{Login: "ion", UserName: "Ion", Password: "$6$hash", Admin: true}}
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	etc := mkTarget(t, in, "etc")
+	if err := os.WriteFile(filepath.Join(etc, "passwd"), []byte("root:x:0:0::/root:/bin/sh\nion:x:1000:1000::/home/ion:/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := in.firstBoot(); err != nil {
+		t.Fatalf("firstBoot: %v", err)
+	}
+	flat := r.flat()
+	if strings.Contains(flat, "useradd") {
+		t.Errorf("useradd ran for an account that exists:\n%s", flat)
+	}
+	if want := "chroot " + in.opts.Root + " usermod -a -G wheel -c Ion -p $6$hash ion"; !strings.Contains(flat, want) {
+		t.Errorf("the existing account was not given the config's settings: want %q\n%s", want, flat)
+	}
+}

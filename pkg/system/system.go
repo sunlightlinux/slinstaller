@@ -703,6 +703,30 @@ func (u User) AddCommand(root string) []string {
 	return append(args, u.Login)
 }
 
+// ModCommand returns the chrooted usermod command that gives an account the
+// target already has (an image's, or a resumed install's) what AddCommand
+// would have given it: the wheel group, the full name and the password.
+// nil when there is nothing to give.
+func (u User) ModCommand(root string) []string {
+	args := []string{"chroot", root, "usermod"}
+	if u.Admin {
+		args = append(args, "-a", "-G", "wheel")
+	}
+	if u.Shell != "" {
+		args = append(args, "-s", u.Shell)
+	}
+	if u.FullName != "" {
+		args = append(args, "-c", u.FullName)
+	}
+	if u.PasswordHash != "" {
+		args = append(args, "-p", u.PasswordHash)
+	}
+	if len(args) == 3 {
+		return nil
+	}
+	return append(args, u.Login)
+}
+
 // WriteSSHKeys writes the user's authorized_keys into the target and
 // returns the chrooted command that hands the .ssh directory to them.
 // With no keys it writes nothing and returns nil.
