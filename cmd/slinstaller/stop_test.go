@@ -208,3 +208,22 @@ func TestSystemCheckForeignArch(t *testing.T) {
 		t.Errorf("--system-check --arch riscv64: %v", err)
 	}
 }
+
+// --unmount and --in-target do one thing and exit too: given with another
+// such mode, one of them was dropped without a word (--in-target with
+// --unmount unmounted the target and never ran the command).
+func TestUnmountAndInTargetAreOneShotModes(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"--root", dir, "--unmount", "--in-target", "true"},
+		{"--root", dir, "--in-target", "true", "--template", filepath.Join(dir, "t.yaml")},
+		{"--root", dir, "--unmount", "--template", filepath.Join(dir, "u.yaml")},
+	} {
+		if err := run(args); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "t.yaml")); err == nil {
+		t.Error("a template was written beside another mode")
+	}
+}

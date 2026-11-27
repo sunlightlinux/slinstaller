@@ -288,7 +288,7 @@ func run(args []string) error {
 	// nothing).
 	var modes []string
 	for name, on := range map[string]bool{"--list-disks": listDisks, "--genpass": genpass != "", "--template": template != "",
-		"--json-yaml": jsonYAML != "", "--discover": discover != ""} {
+		"--json-yaml": jsonYAML != "", "--discover": discover != "", "--unmount": unmount, "--in-target": inTargetCmd != ""} {
 		if on {
 			modes = append(modes, name)
 		}
