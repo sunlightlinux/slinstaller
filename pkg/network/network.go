@@ -35,13 +35,26 @@ func VerifyConnectivityVia(url, proxy string) error {
 	if strings.TrimSpace(proxy) == "" {
 		return VerifyConnectivity(url)
 	}
-	pu, err := neturl.Parse(strings.TrimSpace(proxy))
+	pu, err := parseProxy(strings.TrimSpace(proxy))
 	if err != nil {
 		return errors.New("network: the proxy is not a URL") // its text may hold a password
 	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = http.ProxyURL(pu)
 	return verifyWith(&http.Client{Timeout: 10 * time.Second, Transport: tr}, url)
+}
+
+// parseProxy reads a proxy setting as the install's https_proxy is read
+// (Go's ProxyFromEnvironment, and xbps): one without a scheme - host:port,
+// an address, user:pw@host - is an http:// one.
+func parseProxy(proxy string) (*neturl.URL, error) {
+	pu, err := neturl.Parse(proxy)
+	if err != nil || pu.Scheme == "" || pu.Host == "" {
+		if pu, err := neturl.Parse("http://" + proxy); err == nil {
+			return pu, nil
+		}
+	}
+	return pu, err
 }
 
 // verify makes one request, a GET whose body is not read: a server that
