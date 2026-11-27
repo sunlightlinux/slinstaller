@@ -77,6 +77,7 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 		// ASCII frames: the console font has no braille or box spinner glyphs.
 		spin: spinner.New(spinner.WithSpinner(spinner.Line), spinner.WithStyle(stepRun)),
 	}
+	queryTerminal()
 	// Without bubbletea's own signal handler: it reacts to SIGTERM with a
 	// blocking send that the SIGTERM abandonChildren sends its own group
 	// could leave stuck as the program quits — Run never returned and the

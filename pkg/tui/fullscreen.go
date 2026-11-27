@@ -8,11 +8,19 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
+
+// queryTerminal asks the terminal for its background colour, once, before
+// a full-screen program takes the terminal over: asked while the program
+// runs, the reply would go to the program and the query would wait out its
+// timeout. bubbletea did this in an init() of its own, at every start of
+// the installer, the text flow included (see third_party/bubbletea).
+func queryTerminal() { _ = lipgloss.HasDarkBackground() }
 
 // RunFullscreen drives the install as a full-screen menu styled after the
 // Clear Linux minimal-ISO installer: a filled panel with [R] Required / [A]
@@ -49,6 +57,7 @@ func RunFullscreen(skipSize, skipAll bool) (*config.Config, string, error) {
 	start.vmName, start.vm = system.VirtualMachine()
 	start.cpuVendor = system.CPUVendor() // rewrite vendor-specific kernel args (intel/amd)
 	start.epp = system.EPPCapable()      // EPP (active-mode) CPUs use only performance/powersave
+	queryTerminal()
 	final, err := tea.NewProgram(start, tea.WithAltScreen()).Run()
 	if err != nil {
 		return nil, "", err
