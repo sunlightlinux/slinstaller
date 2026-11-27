@@ -304,3 +304,29 @@ func TestKernelRemoveValidation(t *testing.T) {
 		t.Errorf("removing the installed kernel: %v", err)
 	}
 }
+
+// A package, kernel or fallback kernel the config names is handed to
+// xbps-install as an argument: one that begins with "-" was taken as an
+// option (packages: [-r, /] installed into the live system's root), and one
+// with a space was one argument no repository has.
+func TestPackageNamesValidation(t *testing.T) {
+	c := btrfsConfig()
+	c.Kernel, c.KernelFallback, c.Packages = "linux6.12", "linux-lts", []string{"vim", "git"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	for _, bad := range []string{"-r", "--repository=http://x", "vim git", "a/b"} {
+		for field, set := range map[string]func(*Config){
+			"packages":        func(c *Config) { c.Packages = []string{"vim", bad} },
+			"kernel":          func(c *Config) { c.Kernel = bad },
+			"kernel-fallback": func(c *Config) { c.KernelFallback = bad },
+		} {
+			c := btrfsConfig()
+			c.Kernel = "linux6.12"
+			set(c)
+			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "is not a package name") {
+				t.Errorf("%s %q: %v", field, bad, err)
+			}
+		}
+	}
+}

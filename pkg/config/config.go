@@ -1444,6 +1444,17 @@ func (c *Config) Validate() error {
 			add("kernel-remove: %s is the kernel the config installs", k)
 		}
 	}
+	// What xbps-install is handed as a package: one beginning with "-" is
+	// an option to it (packages: [-r, /] installed into the live root).
+	// (An empty entry is dropped where the packages are gathered.)
+	pkgs := map[string][]string{"packages": c.Packages, "kernel": {c.KernelPackage()}, "kernel-fallback": {c.KernelFallback}}
+	for _, key := range []string{"packages", "kernel", "kernel-fallback"} {
+		for _, p := range pkgs[key] {
+			if p = strings.TrimSpace(p); p != "" && (strings.ContainsAny(p, " \t/") || strings.HasPrefix(p, "-")) {
+				add("%s: %q is not a package name", key, p)
+			}
+		}
+	}
 	if c.KernelFallback != "" && c.KernelPackage() == "" {
 		add("kernel-fallback: there is no kernel named for %s to fall back from", c.KernelFallback)
 	}
