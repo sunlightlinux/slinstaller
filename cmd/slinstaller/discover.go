@@ -122,11 +122,15 @@ func roleFromLabel(label string, ch *config.Media) (bool, string) {
 		break
 	}
 	var said string
-	// A role on a partition with no filesystem (one slinstaller knows) is
-	// formatted, as clr-installer does: kept, it was refused at --apply
-	// ("to be kept as swap, but holds -"), or failed validation outright.
-	if ch.FsType == "" || !storage.KnownFilesystem(ch.FsType) {
+	// A role on a partition with no filesystem at all is formatted, as
+	// clr-installer does: kept, it was refused at --apply ("to be kept as
+	// swap, but holds -"), or failed validation outright. One that holds
+	// something slinstaller does not make (LUKS, a RAID or LVM member,
+	// BitLocker) is never set to be formatted by its name alone.
+	if ch.FsType == "" {
 		format = true
+	} else if !storage.KnownFilesystem(ch.FsType) && !format {
+		return false, "named for a role, but holds " + ch.FsType + ", which slinstaller does not format by a name; left as it is"
 	}
 	switch {
 	case name == "CLR_BOOT":

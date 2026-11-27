@@ -188,6 +188,12 @@ func TestRoleFromLabelUnformatted(t *testing.T) {
 	if ok, _ := roleFromLabel("CLR_BOOT", ch); !ok || ch.Preserve || ch.FsType != "vfat" {
 		t.Errorf("empty CLR_BOOT: %+v", ch)
 	}
+	for _, held := range []string{"crypto_LUKS", "linux_raid_member", "LVM2_member", "BitLocker"} {
+		ch = &config.Media{Name: "sda3", FsType: held, Preserve: true}
+		if ok, _ := roleFromLabel("CLR_ROOT", ch); ok || !ch.Preserve {
+			t.Errorf("CLR_ROOT on %s set to be formatted: %+v", held, ch)
+		}
+	}
 	ch = &config.Media{Name: "sda2", FsType: "ext4", Preserve: true}
 	if ok, said := roleFromLabel("CLR_SWAP", ch); ok || !ch.Preserve || ch.FsType != "ext4" || !strings.Contains(said, "holds ext4") {
 		t.Errorf("CLR_SWAP on ext4: %v %+v %s", ok, ch, said)
