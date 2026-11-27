@@ -367,3 +367,25 @@ func TestStopBetweenStages(t *testing.T) {
 		t.Errorf("went on past the stop: stages %v\n%s", stages, r.flat())
 	}
 }
+
+// A run that fails or is stopped after meta-fs puts the target's own
+// resolv.conf back, as finish does: rebooted into, the disk is not left
+// pinned to the live medium's DNS.
+func TestCleanupPutsTheTargetsResolvConfBack(t *testing.T) {
+	live := filepath.Join(t.TempDir(), "resolv.conf")
+	os.WriteFile(live, []byte("nameserver 10.0.0.1\n"), 0o644)
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	dst := filepath.Join(mkTarget(t, in, "etc"), "resolv.conf")
+	os.WriteFile(dst, []byte("nameserver 203.0.113.1\n"), 0o644)
+	if err := in.copyResolv(live); err != nil {
+		t.Fatal(err)
+	}
+	in.cleanup()
+	if got, _ := os.ReadFile(dst); string(got) != "nameserver 203.0.113.1\n" {
+		t.Errorf("after a failed run, resolv.conf = %q", got)
+	}
+	if _, err := os.Stat(dst + ".slinstaller-saved"); err == nil {
+		t.Error("the set-aside copy was left behind")
+	}
+}

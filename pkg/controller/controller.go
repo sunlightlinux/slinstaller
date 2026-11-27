@@ -254,7 +254,7 @@ func (in *installer) run() error {
 	for i, s := range stages[:limit] {
 		select {
 		case <-in.opts.Stop:
-			_ = in.mnt.UnmountAll()
+			in.cleanup()
 			return fmt.Errorf("controller: %w before %s", ErrStopped, s.name)
 		default:
 		}
@@ -267,12 +267,12 @@ func (in *installer) run() error {
 		if err := s.run(); err != nil {
 			// Best-effort cleanup: release whatever got mounted so a
 			// failed run does not leave the target half-assembled.
-			_ = in.mnt.UnmountAll()
+			in.cleanup()
 			return fmt.Errorf("controller: %s: %w", s.name, err)
 		}
 		// The config's own commands for after this stage, if any.
 		if err := in.runHooks(in.cfg.StageHooks[s.name]); err != nil {
-			_ = in.mnt.UnmountAll()
+			in.cleanup()
 			return fmt.Errorf("controller: hooks after %s: %w", s.name, err)
 		}
 	}
@@ -286,6 +286,34 @@ func (in *installer) run() error {
 		return in.finish()
 	}
 	return nil
+}
+
+// cleanup is what a failed or stopped run does before it returns: the
+// target's own resolv.conf goes back in place of the live system's copy
+// (only finish did that, so a run that failed after meta-fs left the
+// installed disk pinned to the live medium's DNS), and the target is
+// unmounted. Nothing here hides the error the run returns; what goes
+// wrong is said in the log, where it explains a re-run that then finds
+// the disk busy.
+func (in *installer) cleanup() {
+	warn := func(format string, a ...any) {
+		if in.opts.Log != nil {
+			fmt.Fprintf(in.opts.Log, "warning: "+format+"\n", a...)
+		}
+	}
+	if err := removeIfPresent(in.resolvCopy); err != nil {
+		warn("%v", err)
+	} else if in.resolvSaved != "" {
+		if err := os.Rename(in.resolvSaved, in.resolvCopy); err != nil {
+			warn("put back the target's resolv.conf: %v", err)
+		}
+	}
+	if err := in.mnt.UnmountAll(); err != nil {
+		warn("%v", err)
+	}
+	if len(in.mnt.Lazy) > 0 {
+		warn("still in use, detached instead of unmounted: %s", strings.Join(in.mnt.Lazy, ", "))
+	}
 }
 
 // finish ends a full run: it takes the install-time resolv.conf back out of
