@@ -1750,6 +1750,12 @@ func (c *Config) Validate() error {
 			add("users[%d]: login %q is used more than once", i, u.Login)
 		}
 		logins[u.Login] = true
+		// The full name goes to useradd -c, which refuses a colon or a
+		// line break ("invalid comment") — at first boot, after the disk
+		// was wiped and the base installed.
+		if strings.ContainsAny(u.UserName, ":\n\r") {
+			add("users[%d] (%s): the full name %q cannot hold a colon or a line break", i, u.Login, u.UserName)
+		}
 		if u.Password != "" && !looksHashed(u.Password) {
 			add("users[%d] (%s): password does not look like a crypt(3) hash - a config must carry a hash, not a plaintext password", i, u.Login)
 		}

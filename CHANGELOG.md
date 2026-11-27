@@ -37,6 +37,9 @@ change.
 
 ### Fixed
 
+- A user's full name with a colon in it was refused by `useradd` at first
+  boot, after the disk was wiped; it is refused by the config check now
+  (the wizard's included).
 - Replaying a profile on a CPU of the other vendor turned an explicit
   `intel_iommu=off` into `amd_iommu=on` (and back): an IOMMU switched off
   to get past broken firmware came back on. Off stays off now, and

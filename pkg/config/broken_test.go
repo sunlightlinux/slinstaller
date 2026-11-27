@@ -372,3 +372,17 @@ func TestValidSwapSize(t *testing.T) {
 		}
 	}
 }
+
+// useradd refuses a full name with a colon in it; that is caught before
+// the disk is wiped, not at first boot.
+func TestFullNameUseraddAccepts(t *testing.T) {
+	c := btrfsConfig()
+	c.Users = []*User{{Login: "ion", UserName: "Doe: J", Admin: true, Password: "$6$s$h"}}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "cannot hold a colon") {
+		t.Errorf("Validate = %v", err)
+	}
+	c.Users[0].UserName = "Ion Doe"
+	if err := c.Validate(); err != nil {
+		t.Errorf("a plain full name: %v", err)
+	}
+}
