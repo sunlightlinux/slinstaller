@@ -309,3 +309,55 @@ func TestCryptHomeOnPlainRootKeepsNoKeyfile(t *testing.T) {
 		t.Errorf("crypttab:\n%s", tab)
 	}
 }
+
+// An encrypted /boot and an encrypted swap beside a plain root: no
+// keyfile (it would lie on the plain root, and in the initramfs on /boot,
+// beside what it opens), so nothing tells dracut of one either; GRUB still
+// unlocks /boot, and /boot and the swap are crypttab's, asking at boot. The
+// initramfs opens nothing: root needs no unlocking.
+func TestEncryptedBootAndSwapOnPlainRoot(t *testing.T) {
+	dir := fakeCryptsetup(t)
+	var r recorder
+	cfg := &config.Config{TargetMedia: []*config.Media{{
+		Name: "sda", Type: "disk", Children: []*config.Media{
+			{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
+			{Name: "sda2", Type: "crypt", FsType: "ext4", Mountpoint: "/boot", Size: "1G"},
+			{Name: "sda3", Type: "crypt", FsType: "swap", Size: "4G"},
+			{Name: "sda4", Type: "part", FsType: "ext4", Mountpoint: "/"},
+		},
+	}}}
+	in, _ := cryptInstaller(t, cfg, &r)
+	if err := in.crypttab(); err != nil {
+		t.Fatalf("crypttab: %v", err)
+	}
+	if in.keyfile != "" {
+		t.Errorf("keyfile = %q on a plain root", in.keyfile)
+	}
+	for _, rel := range []string{keyfilePath, "etc/dracut.conf.d/10-slinstaller-keyfile.conf"} {
+		if _, err := os.Stat(filepath.Join(in.opts.Root, rel)); err == nil {
+			t.Errorf("%s written on a plain root", rel)
+		}
+	}
+	if args, _ := os.ReadFile(filepath.Join(dir, "args")); strings.Contains(string(args), "luksAddKey") {
+		t.Errorf("a keyfile slot was added:\n%s", args)
+	}
+	tab := readTarget(t, in, "etc", "crypttab")
+	for _, dev := range []string{"sda2", "sda3"} {
+		if !strings.Contains(tab, "UUID=uuid-"+dev+" none luks") {
+			t.Errorf("crypttab does not ask for %s:\n%s", dev, tab)
+		}
+	}
+
+	if err := in.bootloader(); err != nil {
+		t.Fatalf("bootloader: %v", err)
+	}
+	if grub := readTarget(t, in, "etc", "default", "grub"); !strings.Contains(grub, "GRUB_ENABLE_CRYPTODISK=y") {
+		t.Errorf("GRUB cannot unlock /boot:\n%s", grub)
+	}
+	cmd := cmdlineArgs(t, in)
+	for _, arg := range []string{"rd.luks.key=", "rd.luks.uuid="} {
+		if n, _ := count(cmd, arg); n != 0 {
+			t.Errorf("%s on the command line of a plain root: %v", arg, cmd)
+		}
+	}
+}

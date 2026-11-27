@@ -216,3 +216,43 @@ func TestDefaultRunnerReportsWhatTheCommandPrinted(t *testing.T) {
 		t.Error("VerboseRunner ran an empty command")
 	}
 }
+
+// Every line fstab writes names its device by UUID: what ProbeUUIDs leaves
+// out must be only what fstab does not list. An encrypted /home and an
+// encrypted swap are listed by their mapper (crypttab names the LUKS
+// partition under them, by the UUID luks.UUID reads, not this one), a swap
+// volume and a filesystem on an array by theirs, btrfs subvolumes by
+// their filesystem's.
+func TestProbeUUIDsCoversEveryFstabLine(t *testing.T) {
+	fakeTool(t, "blkid", `for a; do last=$a; done; echo "uuid-of-$last"`)
+	pl := &Plan{Parts: []Partition{
+		{Device: "/dev/sda1", Filesystem: "vfat", Mountpoint: "/boot/efi"},
+		{Device: "/dev/sda2", Filesystem: "btrfs", Mountpoint: "/", Subvolumes: []Subvolume{{"@", "/"}, {"@var", "/var"}}},
+		{Device: "/dev/sda3", Filesystem: "ext4", Mountpoint: "/home", Encrypted: true, MapName: "crypthome"},
+		{Device: "/dev/sda4", Filesystem: "swap", Encrypted: true, MapName: "cryptswap"},
+		{Device: "/dev/sda5", IsPV: true, VGName: "vg0"},
+		{LV: true, VGName: "vg0", LVName: "swap", Filesystem: "swap"},
+		{LV: true, VGName: "vg0", LVName: "data", Filesystem: "xfs", Mountpoint: "/data"},
+		{Device: "/dev/sdb1", IsRaidMember: true, RaidName: "md0"},
+		{Raid: true, RaidName: "srv", Filesystem: "ext4", Mountpoint: "/srv"},
+		{Device: "/dev/sdb2", Filesystem: "vfat", SpareESP: true},
+	}}
+	uuids, err := ProbeUUIDs(pl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab := pl.Fstab(uuids)
+	lines := 0
+	for _, l := range strings.Split(tab, "\n") {
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		lines++
+		if !strings.HasPrefix(l, "UUID=uuid-of-/dev/") {
+			t.Errorf("fstab line without a probed UUID: %q", l)
+		}
+	}
+	if lines != 8 {
+		t.Errorf("%d fstab lines, want 8:\n%s", lines, tab)
+	}
+}
