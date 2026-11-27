@@ -420,3 +420,27 @@ func TestVGNameClashes(t *testing.T) {
 		t.Errorf("all wiped: %q", got)
 	}
 }
+
+// A group on a multipath LUN the install wipes goes with the wipe, though
+// lsblk shows the LUN's map under each path to it: the other path is the
+// same disk, not one the wipe leaves (Shared counts it the same way).
+// Reported, an install over a former install's vg0 on such a LUN was
+// refused.
+func TestVGNameClashesMultipath(t *testing.T) {
+	mp := Device{Name: "mpatha", Path: "/dev/mapper/mpatha", Type: "mpath", Children: []Device{
+		{Name: "mpatha2", Path: "/dev/mapper/mpatha2", Type: "part"}}}
+	devs := []Device{
+		{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []Device{mp}},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", Children: []Device{mp}},
+		{Name: "sdc", Path: "/dev/sdc", Type: "disk", Children: []Device{
+			{Name: "sdc1", Path: "/dev/sdc1", Type: "part"}}},
+	}
+	vgs := parseVolumeGroups("  /dev/mapper/mpatha2:vg0\n  /dev/sdc1:data\n")
+	if got := VGNameClashes(devs, vgs, []string{"vg0"}, []string{"/dev/sda"}); len(got) != 0 {
+		t.Errorf("the wiped LUN's own group: %q", got)
+	}
+	// The other way about: the LUN not wiped keeps its group.
+	if got := VGNameClashes(devs, vgs, []string{"vg0", "data"}, []string{"/dev/sdc"}); len(got) != 1 || !strings.Contains(got[0], "vg0") {
+		t.Errorf("the LUN kept: %q", got)
+	}
+}

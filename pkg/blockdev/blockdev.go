@@ -469,6 +469,23 @@ func SharedMembers(devs []Device, targets []string) []string {
 // remove that group, so vgcreate fails ("already exists"), after the wipe.
 // vgs maps a group to its physical volumes (VolumeGroups).
 func VGNameClashes(devs []Device, vgs map[string][]string, names, wiped []string) []string {
+	// A multipath map under a wiped disk is under each path to its LUN:
+	// those paths are the same disk, wiped with it (as Shared counts them).
+	wiped = slices.Clone(wiped)
+	var paths func(d Device)
+	paths = func(d Device) {
+		if d.Type == "mpath" {
+			wiped = append(wiped, disksHolding(devs, d.Path)...)
+		}
+		for _, c := range d.Children {
+			paths(c)
+		}
+	}
+	for _, w := range slices.Clone(wiped) {
+		if d := FindByPath(devs, w); d != nil {
+			paths(*d)
+		}
+	}
 	var out []string
 	sorted := slices.Clone(names)
 	sort.Strings(sorted)
