@@ -974,7 +974,9 @@ restart:
 				// A resize only ever shrinks. (That the partition holds what
 				// the config says, and so something that can be shrunk, was
 				// checked just above.)
-				if p.ResizeMiB<<20 >= d.Size {
+				// Resuming, the first attempt shrank it already (a resume
+				// never resizes): at its new size it is not refused.
+				if p.ResizeMiB<<20 >= d.Size && !((resume || resumeFrom != "") && p.ResizeMiB<<20 == d.Size) {
 					return fmt.Errorf("resize: %s is %s; resizing it to %s would not shrink it", p.Device, humanSize(d.Size), humanSize(p.ResizeMiB<<20))
 				}
 			}

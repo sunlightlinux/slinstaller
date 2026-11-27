@@ -416,6 +416,24 @@ func Locale(root, lang string) (bool, error) {
 	return changed, nil
 }
 
+// LocaleEnabled reports whether lang's line in the target's
+// /etc/default/libc-locales is enabled (uncommented) — by this install or
+// before it. A resumed first-boot regenerates then: the attempt that
+// enabled the line may have stopped before generating it, and Locale,
+// finding it enabled, reports no change.
+func LocaleEnabled(root, lang string) bool {
+	data, err := os.ReadFile(filepath.Join(root, "etc", "default", "libc-locales"))
+	if err != nil || lang == "" {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if fields := strings.Fields(line); len(fields) > 0 && !strings.HasPrefix(line, "#") && normLocale(fields[0]) == normLocale(lang) {
+			return true
+		}
+	}
+	return false
+}
+
 // WheelSudo gives the wheel group sudo by writing a sudoers drop-in in
 // the target. Admin accounts are put in wheel, so this is what turns
 // their sudo on — with a password; passwordless is a separate choice.

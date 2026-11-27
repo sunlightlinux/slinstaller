@@ -458,7 +458,10 @@ func e2ePlain(t *testing.T, dir string) {
 	cfg.PostInstall = []*config.Hook{{Cmd: "touch $chrootDir/root/post-install-ran"}}
 	// A hook after fstab sees the file it wrote, on the mounted target;
 	// failing, it fails the install.
-	cfg.StageHooks = map[string][]*config.Hook{"fstab": {{Cmd: "grep -q 'UUID=7A3B-19C2' ${chrootDir}/etc/fstab"}}}
+	cfg.StageHooks = map[string][]*config.Hook{"fstab": {{Cmd: "grep -q 'UUID=7A3B-19C2' ${chrootDir}/etc/fstab"}},
+		// The install is marked as in progress from the mount on (a resume
+		// requires the mark) ...
+		"mount": {{Cmd: "test -f ${chrootDir}/var/lib/slinstaller/in-progress"}}}
 
 	keys := filepath.Join(dir, "keys")
 	os.MkdirAll(keys, 0o755)
@@ -650,8 +653,20 @@ func e2ePlain(t *testing.T, dir string) {
 		}
 	}
 
+	// ... and no longer once it is complete: nothing is left to resume.
+	markGone := false
+	prev := e.atComplete
+	e.atComplete = func() {
+		markGone = !exists(filepath.Join(e.root, resumeMark))
+		if prev != nil {
+			prev()
+		}
+	}
 	if err := e.install(cfg, opts); err != nil {
 		t.Fatalf("install: %v\n%s", err, strings.Join(e.log, "\n"))
+	}
+	if !markGone {
+		t.Error("the resume mark is still there when the install is complete")
 	}
 
 	if got, want := strings.Join(e.stages, " "), strings.Join(append(StageNames(), "complete"), " "); got != want {

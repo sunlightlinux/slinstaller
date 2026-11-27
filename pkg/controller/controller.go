@@ -262,6 +262,11 @@ func (in *installer) run() error {
 		select {
 		case <-in.opts.Stop:
 			in.cleanup()
+			// Where it can go on from, said: a stop past the mount left
+			// the mark a resume needs.
+			if slices.Contains(ResumableStages(), s.name) {
+				return fmt.Errorf("controller: %w before %s (go on later with --apply --resume-from %s)", ErrStopped, s.name, s.name)
+			}
 			return fmt.Errorf("controller: %w before %s", ErrStopped, s.name)
 		default:
 		}
@@ -281,6 +286,13 @@ func (in *installer) run() error {
 		if err := in.runHooks(in.cfg.StageHooks[s.name]); err != nil {
 			in.cleanup()
 			return fmt.Errorf("controller: hooks after %s: %w", s.name, err)
+		}
+	}
+	// Finished: nothing left to resume. (A staged run keeps the mark: it
+	// is meant to be resumed.)
+	if in.opts.Through == "" {
+		if err := removeIfPresent(filepath.Join(in.opts.Root, resumeMark)); err != nil && in.opts.Log != nil {
+			fmt.Fprintf(in.opts.Log, "warning: %v\n", err)
 		}
 	}
 	if in.opts.Progress != nil {
@@ -635,12 +647,41 @@ func (in *installer) mount() error {
 	if err := in.mnt.MountAll(in.plan); err != nil {
 		return err
 	}
+	// The mark that this target is an install of ours left unfinished:
+	// made here, removed when the install completes, and required by a
+	// resume. Without it --resume mounted whatever the disk held — another
+	// system, an old install of the same layout after a stop in the
+	// pre-install hooks — and installed into it with no confirmation.
+	mark := filepath.Join(in.opts.Root, resumeMark)
+	if in.opts.ResumeFrom == "" {
+		if err := writeMark(in.opts.Root, mark); err != nil {
+			return fmt.Errorf("mark the install as in progress: %w", err)
+		}
+	} else if !exists(mark) || !insideTarget(in.opts.Root, filepath.Dir(mark)) {
+		return fmt.Errorf("resume: the target holds no install this installer left unfinished (no /%s) - nothing to resume; run the install without --resume", resumeMark)
+	}
 	// Resuming past the stage that made it, the keyfile the first attempt
 	// put in the target is the one the bootloader stage has to point at.
 	if in.opts.ResumeFrom != "" && exists(filepath.Join(in.opts.Root, keyfilePath)) {
 		in.keyfile = keyfilePath
 	}
 	return nil
+}
+
+// resumeMark, in the target, marks an install in progress (see mount).
+const resumeMark = "var/lib/slinstaller/in-progress"
+
+// writeMark makes the resume mark, not through a link out of the target.
+func writeMark(root, mark string) error {
+	dir := filepath.Dir(mark)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if !insideTarget(root, dir) {
+		return fmt.Errorf("%s leads outside the installed system", dir)
+	}
+	os.Remove(mark) // a link there is replaced, not followed
+	return os.WriteFile(mark, []byte("slinstaller: an install in progress; removed when it completes\n"), 0o600)
 }
 
 func exists(path string) bool {
@@ -1643,7 +1684,7 @@ func (in *installer) firstBoot() error {
 	}
 	if generated, err := system.Locale(root, in.cfg.Language); err != nil {
 		return err
-	} else if generated {
+	} else if generated || (in.opts.ResumeFrom != "" && system.LocaleEnabled(root, in.cfg.Language)) {
 		// Regenerate glibc locales so the one just enabled exists.
 		if err := storage.RunCommands(
 			[][]string{{"chroot", root, "xbps-reconfigure", "-f", "glibc-locales"}},

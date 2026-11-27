@@ -367,6 +367,10 @@ func TestStopBetweenStages(t *testing.T) {
 	if len(stages) != 1 || strings.Contains(r.flat(), "parted") {
 		t.Errorf("went on past the stop: stages %v\n%s", stages, r.flat())
 	}
+	// Before partition there is nothing to resume, and it says nothing of it.
+	if strings.Contains(err.Error(), "--resume-from") {
+		t.Errorf("a resume offered before partitioning: %v", err)
+	}
 }
 
 // A run that fails or is stopped after meta-fs puts the target's own
@@ -458,5 +462,42 @@ func TestCleanupWarns(t *testing.T) {
 	in.cleanup()
 	if !strings.Contains(log.String(), "warning: put back the target's resolv.conf") {
 		t.Errorf("log = %q", log.String())
+	}
+}
+
+// A resume needs the mark a first attempt leaves in the target: without it
+// the disk holds no install of ours left unfinished, and nothing is done to it.
+func TestResumeNeedsTheMark(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.plan.Parts = nil // nothing to mount for real: the mark is what is tested
+	if err := in.mount(); err != nil {
+		t.Fatalf("first mount: %v", err)
+	}
+	mark := filepath.Join(in.opts.Root, resumeMark)
+	if !exists(mark) {
+		t.Fatal("no mark after the first mount")
+	}
+	in.opts.ResumeFrom = "bootloader"
+	if err := in.mount(); err != nil {
+		t.Errorf("resume with the mark: %v", err)
+	}
+	os.Remove(mark)
+	wantErr(t, in.mount(), "nothing to resume")
+}
+
+// A resumed first-boot generates the locale its first attempt enabled but
+// may not have generated.
+func TestResumedFirstBootGeneratesLocale(t *testing.T) {
+	var r recorder
+	cfg := twoPartConfig()
+	cfg.Language = "en_US.UTF-8"
+	in := stagedInstaller(t, cfg, &r)
+	os.MkdirAll(filepath.Join(in.opts.Root, "etc", "default"), 0o755)
+	os.WriteFile(filepath.Join(in.opts.Root, "etc", "default", "libc-locales"), []byte("en_US.UTF-8 UTF-8\n"), 0o644)
+	in.opts.ResumeFrom = "first-boot"
+	in.firstBoot()
+	if !strings.Contains(r.flat(), "xbps-reconfigure -f glibc-locales") {
+		t.Errorf("not regenerated on resume:\n%s", r.flat())
 	}
 }

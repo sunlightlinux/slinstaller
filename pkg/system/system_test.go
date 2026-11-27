@@ -579,3 +579,12 @@ func TestSecureBoot(t *testing.T) {
 		t.Error("not enforced: on")
 	}
 }
+
+func TestLocaleEnabled(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "etc", "default"), 0o755)
+	os.WriteFile(filepath.Join(root, "etc", "default", "libc-locales"), []byte("#de_DE.UTF-8 UTF-8\nen_US.UTF-8 UTF-8\n"), 0o644)
+	if !LocaleEnabled(root, "en_US.utf8") || LocaleEnabled(root, "de_DE.UTF-8") || LocaleEnabled(t.TempDir(), "en_US.UTF-8") {
+		t.Error("LocaleEnabled")
+	}
+}
