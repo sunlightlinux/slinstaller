@@ -1,10 +1,12 @@
 package config
 
 import (
+	"math"
 	"os"
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -146,4 +148,34 @@ func flat(cmds [][]string) []string {
 		out = append(out, strings.Join(c, " "))
 	}
 	return out
+}
+
+// FuzzParseSize checks clr-installer's size grammar is read without a
+// panic ("B" alone once sliced past its start) and that a size taken is
+// the number times its unit: K, M, G, T, P with an optional B or iB, any
+// case, all powers of 1024, or bytes.
+func FuzzParseSize(f *testing.F) {
+	for _, s := range []string{"512M", "150MiB", "2.6GiB", "10GB", "1P", "157286400", "512B", "B", "iB", "kib", "0", "1e3", "-1G", ""} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		got, err := parseSize(s)
+		if err != nil {
+			return
+		}
+		num, mult := strings.ToLower(strings.TrimSpace(s)), 1.0
+		num = strings.TrimSuffix(strings.TrimSuffix(num, "ib"), "b")
+		if num != "" {
+			if i := strings.IndexByte("kmgtp", num[len(num)-1]); i >= 0 {
+				num, mult = num[:len(num)-1], math.Pow(1024, float64(i+1))
+			}
+		}
+		v, perr := strconv.ParseFloat(num, 64)
+		if perr != nil {
+			t.Fatalf("%q taken as %d, but %q is not a number", s, got, num)
+		}
+		if want := math.Round(v * mult); math.Abs(float64(got)-want) > want/1e12+1 {
+			t.Errorf("%q = %d, want %.0f", s, got, want)
+		}
+	})
 }
