@@ -1239,7 +1239,9 @@ func looksHashed(s string) bool {
 // rejects layouts that cannot install or boot.
 func (c *Config) Validate() error {
 	if c.SkipValidationAll {
-		return nil
+		// What a layout can be forced past is skipped; what keeps a value
+		// from being run as code on the installed system is not.
+		return problems(c.checkWritten())
 	}
 	if c.DiskImage != "" {
 		_, err := c.DiskImageTarget()
@@ -2091,6 +2093,11 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	return problems(probs)
+}
+
+// problems is the error Validate reports for probs, nil for none.
+func problems(probs []string) error {
 	switch len(probs) {
 	case 0:
 		return nil
@@ -2099,6 +2106,71 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("config: %d problems:\n  - %s", len(probs), strings.Join(probs, "\n  - "))
 	}
+}
+
+// checkWritten is the part of Validate that skipValidationAll does not
+// turn off: the values written into files the installed system runs or
+// reads as configuration at every boot. An interface name or bond mode
+// goes unquoted into /etc/rc.local, a root shell script ("eth0;cmd" ran
+// cmd); a line break in an address, gateway, DNS or domain starts a new
+// directive in dhcpcd.conf (a "script" line names what dhcpcd runs as
+// root); one in the hostname a new entry in /etc/hosts.
+func (c *Config) checkWritten() []string {
+	var probs []string
+	add := func(format string, a ...any) { probs = append(probs, fmt.Sprintf(format, a...)) }
+	control := func(v string) bool {
+		return strings.IndexFunc(v, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
+	}
+	if control(c.Hostname) {
+		add("hostname %q holds a control character", c.Hostname)
+	}
+	ifName := func(who, what, n string) {
+		if !network.ValidIfName(n) {
+			add("%s: %s %q is not an interface name (1 to 15 letters, digits and . _ : -)", who, what, n)
+		}
+	}
+	for i, ni := range c.NetworkInterfaces {
+		if ni == nil {
+			continue
+		}
+		who := fmt.Sprintf("networkInterfaces[%d]", i)
+		if ni.Name != "" || ni.Bond != nil || ni.VLAN != nil || ni.Bridge != nil {
+			ifName(who, "name", ni.Name)
+		}
+		if ni.Bond != nil {
+			for _, m := range ni.Bond.Members {
+				ifName(who, "bond member", m)
+			}
+			if !network.ValidBondMode(ni.Bond.Mode) {
+				add("%s: bond mode %q is not one of %s", who, ni.Bond.Mode, strings.Join(network.BondModes, ", "))
+			}
+		}
+		if ni.Bridge != nil {
+			for _, m := range ni.Bridge.Members {
+				ifName(who, "bridge member", m)
+			}
+		}
+		if ni.VLAN != nil {
+			ifName(who, "VLAN link", ni.VLAN.Link)
+		}
+		fields := []string{ni.Name, ni.Gateway, ni.DNS, ni.Domain}
+		for _, a := range ni.Addrs {
+			if a != nil {
+				fields = append(fields, a.IP, a.Netmask)
+			}
+		}
+		for _, r := range ni.Routes {
+			if r != nil {
+				fields = append(fields, r.To, r.Via)
+			}
+		}
+		for _, f := range fields {
+			if control(f) {
+				add("%s: %q holds a control character", who, f)
+			}
+		}
+	}
+	return probs
 }
 
 // Plan turns the target disk's layout into a storage plan.

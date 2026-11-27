@@ -704,3 +704,47 @@ func TestPlanDiskNameSkipValidationAll(t *testing.T) {
 		}
 	}
 }
+
+// skipValidationAll does not let a value reach a file the installed
+// system runs as code: an interface name or bond mode goes unquoted into
+// /etc/rc.local, a line break in a network field starts a new dhcpcd.conf
+// directive, one in the hostname a new /etc/hosts entry.
+func TestSkipValidationAllKeepsWrittenChecks(t *testing.T) {
+	for what, mod := range map[string]func(c *Config){
+		"interface name": func(c *Config) {
+			c.NetworkInterfaces = []*Interface{{Name: "br0;reboot", Bridge: &Bridge{Members: []string{"eth0"}}}}
+		},
+		"bond member": func(c *Config) {
+			c.NetworkInterfaces = []*Interface{{Name: "bond0", Bond: &Bond{Members: []string{"eth0$(id)"}}}}
+		},
+		"bond mode": func(c *Config) {
+			c.NetworkInterfaces = []*Interface{{Name: "bond0", Bond: &Bond{Members: []string{"eth0"}, Mode: "802.3ad;id"}}}
+		},
+		"VLAN link":      func(c *Config) { c.NetworkInterfaces = []*Interface{{Name: "v5", VLAN: &VLAN{ID: 5, Link: "`id`"}}} },
+		"dns line break": func(c *Config) { c.NetworkInterfaces = []*Interface{{Name: "eth0", DNS: "1.1.1.1\nscript /tmp/x"}} },
+		"route": func(c *Config) {
+			c.NetworkInterfaces = []*Interface{{Name: "eth0", Routes: []*Route{{To: "10.0.0.0/8\nx", Via: "1.1.1.1"}}}}
+		},
+		"hostname break": func(c *Config) { c.Hostname = "box\n1.2.3.4 mirror.example" },
+		"address netmask": func(c *Config) {
+			c.NetworkInterfaces = []*Interface{{Name: "eth0", Addrs: []*Address{{IP: "10.0.0.2", Netmask: "8\r"}}}}
+		},
+	} {
+		c := linkedConfig()
+		c.SkipValidationAll = true
+		if err := c.Validate(); err != nil {
+			t.Fatalf("%s: the plain config refused: %v", what, err)
+		}
+		mod(c)
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: passed with skipValidationAll", what)
+		}
+	}
+	// What it is for still goes through: a layout Validate would refuse.
+	c := linkedConfig()
+	c.SkipValidationAll = true
+	c.TargetMedia[0].Children = c.TargetMedia[0].Children[1:] // no ESP
+	if err := c.Validate(); err != nil {
+		t.Errorf("an unusual layout refused with skipValidationAll: %v", err)
+	}
+}
