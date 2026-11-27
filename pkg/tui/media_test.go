@@ -529,3 +529,54 @@ func TestSafeLayoutStaysOutOfTheEditor(t *testing.T) {
 		t.Error("left ticked over an unencrypted layout")
 	}
 }
+
+// A rescan keeps the chosen disk by path, not by index; a chosen disk that
+// is gone is chosen no longer.
+func TestRescanKeepsTheDiskByPath(t *testing.T) {
+	m := readyModel()
+	m.diskIdx = 1 // sdb
+	usb := blockdev.Device{Name: "sdc", Path: "/dev/sdc", Size: 16 << 30}
+	m.rescanned(append([]blockdev.Device{usb}, twoTestDisks()...))
+	if got := m.disks[m.diskIdx].Path; got != "/dev/sdb" || !m.diskSet {
+		t.Errorf("after a rescan the target is %s", got)
+	}
+	m.rescanned([]blockdev.Device{usb, twoTestDisks()[0]})
+	if m.diskSet || m.parts != nil || m.popup != popupMessage {
+		t.Errorf("a vanished disk is still chosen: set %v parts %d", m.diskSet, len(m.parts))
+	}
+}
+
+// Esc and Cancel on the media dialog leave the disk it was opened with.
+func TestMediaCancelKeepsTheDisk(t *testing.T) {
+	for _, leave := range []string{"esc", "cancel"} {
+		m := openSectionInTab(readyModel(), 0, secMedia)
+		m.mediaCursor = len(mediaModes) + 1 // the sdb row
+		m = send(m, enter)
+		if m.diskIdx != 1 {
+			t.Fatalf("sdb not picked: %d", m.diskIdx)
+		}
+		if leave == "esc" {
+			m = send(m, escKey)
+		} else {
+			m.mediaCursor = m.mediaEncIndex() + 1 + 3
+			m = send(m, enter)
+		}
+		if m.diskIdx != 0 || m.view != viewHub {
+			t.Errorf("%s kept the disk picked: %d", leave, m.diskIdx)
+		}
+	}
+}
+
+// Encryption ticked and a layout that encrypts nothing is not installed as if
+// it were encrypted.
+func TestEncryptTickedLayoutPlain(t *testing.T) {
+	m := readyModel()
+	m.encrypt = true
+	if p := m.installProblem(); !strings.Contains(p, "encrypts nothing") {
+		t.Errorf("problem %q", p)
+	}
+	m.encrypt = false
+	if p := m.installProblem(); strings.Contains(p, "encrypts nothing") {
+		t.Errorf("unticked: %q", p)
+	}
+}

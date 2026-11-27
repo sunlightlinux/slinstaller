@@ -446,6 +446,10 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		// Installation Media: clr's front dialog (mode + disk + encryption).
 		m.view = viewMedia
 		m.mediaCursor = 0
+		m.mediaWas, m.mediaWasSet = "", m.diskSet
+		if m.diskIdx < len(m.disks) {
+			m.mediaWas = m.disks[m.diskIdx].Path
+		}
 		return m, nil
 	case secUser:
 		// Manage User: the clr-style table of accounts.
@@ -1234,6 +1238,11 @@ func (m model) textView() string {
 // the config's own validation and its partition plan. "" when there is
 // nothing.
 func (m model) installProblem() string {
+	// Enable Encryption ticked, then a layout from the editor that encrypts
+	// nothing: installed unencrypted, and nothing on screen said so.
+	if m.encrypt && m.diskSet && len(m.parts) > 0 && !layoutEncrypted(m.parts) {
+		return "Enable Encryption is ticked, but the partition layout encrypts nothing - give a partition type crypt (or encrypted LVM) in Installation Media, or untick Enable Encryption"
+	}
 	cfg, err := m.buildConfig()
 	if err == nil {
 		cfg.SkipValidationSize = cfg.SkipValidationSize || m.skipSize

@@ -123,6 +123,7 @@ func (m model) updateMedia(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		m.encrypt = layoutEncrypted(m.parts)
+		m.restoreMediaDisk()
 		m.view = viewHub
 	case "up", "k", "shift+tab", "left", "h":
 		if m.mediaCursor > 0 {
@@ -165,20 +166,52 @@ func (m model) updateMedia(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case 2: // Rescan Media
 				if devs, err := blockdev.List(); err == nil {
 					if disks := blockdev.Available(devs); len(disks) > 0 {
-						m.disks = disks
-						if m.diskIdx >= len(m.disks) {
-							m.diskIdx = 0
-						}
+						m.rescanned(disks)
 					}
 				}
 				m.mediaCursor = 0
 			case 3: // Cancel
 				m.encrypt = layoutEncrypted(m.parts)
+				m.restoreMediaDisk()
 				m.view = viewHub
 			}
 		}
 	}
 	return m, nil
+}
+
+// rescanned takes a new disk list, keeping the chosen disk by its path: by
+// index, a USB stick plugged in ahead of it in lsblk's order moved the
+// target — and the layout made for it — to another disk. A chosen disk that
+// is gone is chosen no longer, and its layout dropped.
+func (m *model) rescanned(disks []blockdev.Device) {
+	was := ""
+	if m.diskIdx < len(m.disks) {
+		was = m.disks[m.diskIdx].Path
+	}
+	m.disks, m.diskIdx = disks, 0
+	for i, d := range disks {
+		if d.Path == was {
+			m.diskIdx = i
+			return
+		}
+	}
+	if m.diskSet {
+		m.diskSet, m.parts, m.safeInstall = false, nil, false
+		m.popup = popupMessage
+		m.popupMsg = []string{"Rescan Media", "", was + " is no longer there: choose the disk again."}
+	}
+}
+
+// restoreMediaDisk puts back the disk chosen when the media dialog opened.
+func (m *model) restoreMediaDisk() {
+	m.diskSet = m.mediaWasSet
+	for i, d := range m.disks {
+		if d.Path == m.mediaWas {
+			m.diskIdx = i
+			return
+		}
+	}
 }
 
 // confirmMedia applies the chosen installation mode.

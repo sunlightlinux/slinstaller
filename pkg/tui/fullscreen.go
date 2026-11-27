@@ -282,8 +282,12 @@ type model struct {
 
 	disks []blockdev.Device
 
-	diskIdx            int
-	diskSet            bool
+	diskIdx int
+	diskSet bool
+	// mediaWas is the disk chosen when the media dialog opened, by path —
+	// put back by its Esc and Cancel, which kept a disk picked in it.
+	mediaWas           string
+	mediaWasSet        bool
 	keyboard, language string
 	timezone, hostname string
 	passphrase         string
