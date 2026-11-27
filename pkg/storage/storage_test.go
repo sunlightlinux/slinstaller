@@ -363,3 +363,36 @@ func TestWithStderr(t *testing.T) {
 		t.Error("WithStderr should pass other errors through")
 	}
 }
+
+// After blkdiscard took the whole disk, mkfs does not discard it again.
+func TestMkfsDoesNotDiscardADiscardedDisk(t *testing.T) {
+	pl := &Plan{Wipe: true, Disk: "/dev/sda", DiskWipe: map[string]string{"/dev/sda": "discard"}, Parts: []Partition{
+		{Number: 1, Device: "/dev/sda1", Filesystem: "vfat", Mountpoint: "/boot", Size: "512M"},
+		{Number: 2, Device: "/dev/sda2", Filesystem: "ext4", Mountpoint: "/", Size: SizeRest},
+		{Number: 3, Device: "/dev/sda3", Filesystem: "btrfs", Mountpoint: "/srv", Size: "1G"},
+		{Number: 4, Device: "/dev/sda4", Filesystem: "ext4", Mountpoint: "/data", Options: []string{"-E", "lazy_itable_init=0"}},
+	}}
+	cmds, err := pl.MkfsCommands()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range cmds {
+		got = append(got, strings.Join(c, " "))
+	}
+	want := []string{
+		"mkfs.vfat -F32 /dev/sda1",
+		"mkfs.ext4 -v -F -b 4096 -E nodiscard /dev/sda2",
+		"mkfs.btrfs -f -K /dev/sda3",
+		"mkfs.ext4 -v -F -b 4096 -E lazy_itable_init=0 /dev/sda4",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("mkfs:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	// Without the wipe, mkfs keeps its default.
+	pl.DiskWipe = nil
+	cmds, _ = pl.MkfsCommands()
+	if strings.Contains(strings.Join(cmds[1], " "), "nodiscard") {
+		t.Errorf("nodiscard without a discarded disk: %v", cmds[1])
+	}
+}

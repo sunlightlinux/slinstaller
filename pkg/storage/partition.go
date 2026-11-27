@@ -189,9 +189,53 @@ func (pl *Plan) MkfsCommands() ([][]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		if pl.discarded(p) {
+			mkfs = noDiscard(mkfs, p)
+		}
 		cmds = append(cmds, mkfs)
 	}
 	return cmds, nil
+}
+
+// discarded reports whether p is a plain partition of a disk the install
+// has just discarded or zeroed whole (wipe: discard / zero, blkdiscard).
+func (pl *Plan) discarded(p Partition) bool {
+	if p.Encrypted || p.LV || p.Raid {
+		return false
+	}
+	disk := p.Disk
+	if disk == "" {
+		disk = pl.Disk
+	}
+	w := pl.DiskWipe[disk]
+	return w == "discard" || w == "zero"
+}
+
+// noDiscard tells mkfs not to discard the device again: mke2fs, mkfs.xfs,
+// mkfs.btrfs and mkfs.f2fs discard all of it by default, a second pass
+// over a disk blkdiscard has just done (tens of seconds on some USB and
+// SATA bridges). An ext filesystem whose options set -E themselves is left
+// as it is, rather than guess how two -E would combine.
+func noDiscard(cmd []string, p Partition) []string {
+	var flag []string
+	switch p.Filesystem {
+	case "ext2", "ext3", "ext4":
+		for _, o := range p.Options {
+			if strings.HasPrefix(o, "-E") {
+				return cmd
+			}
+		}
+		flag = []string{"-E", "nodiscard"}
+	case "xfs", "btrfs":
+		flag = []string{"-K"}
+	case "f2fs":
+		flag = []string{"-t", "0"}
+	default:
+		return cmd
+	}
+	dev := cmd[len(cmd)-1]
+	out := append(append([]string{}, cmd[:len(cmd)-1]...), flag...)
+	return append(out, dev)
 }
 
 // SizeRest is the Partition.Size value meaning "all remaining space".
