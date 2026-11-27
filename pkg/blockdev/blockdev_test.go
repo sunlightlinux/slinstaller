@@ -192,3 +192,42 @@ func TestTeardownAllReleasesASharedArrayOnce(t *testing.T) {
 		t.Errorf("TeardownAll:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// An Intel RST array: the volume, then the container beside it (whatever
+// order lsblk lists them in), before any signature is erased.
+func TestTeardownRSTContainer(t *testing.T) {
+	disk := Device{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 1 << 40, Children: []Device{
+		{Name: "md127", Path: "/dev/md127", Type: "container"},
+		{Name: "md126", Path: "/dev/md126", Type: "raid1"},
+	}}
+	got := fmt.Sprint(Teardown(disk))
+	if got != "[[mdadm --stop /dev/md126] [mdadm --stop /dev/md127] [wipefs -a /dev/sda]]" {
+		t.Errorf("teardown: %s", got)
+	}
+}
+
+// Multipath: the kpartx partition, then the map, are removed; the map is a
+// holder another path shares.
+func TestTeardownMultipath(t *testing.T) {
+	mp := Device{Name: "mpatha", Path: "/dev/mapper/mpatha", Type: "mpath", Children: []Device{
+		{Name: "mpatha1", Path: "/dev/mapper/mpatha1", Type: "part", FsType: "ext4"}}}
+	sda := Device{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 1 << 40, Children: []Device{mp}}
+	sdb := Device{Name: "sdb", Path: "/dev/sdb", Type: "disk", Size: 1 << 40, Children: []Device{mp}}
+	if got := fmt.Sprint(Teardown(sda)); got != "[[dmsetup remove mpatha1] [dmsetup remove mpatha] [wipefs -a /dev/sda]]" {
+		t.Errorf("teardown: %s", got)
+	}
+	if got := Shared([]Device{sda, sdb}, "/dev/sda", []string{"/dev/sda"}, nil); len(got) == 0 {
+		t.Error("a multipath map on two disks is not shared")
+	}
+}
+
+func TestInstallable(t *testing.T) {
+	for _, d := range []Device{{Name: "zram0", Size: 8 << 30}, {Name: "mmcblk0boot0", Size: 4 << 20}, {Name: "mmcblk0rpmb", Size: 4 << 20}, {Name: "sdc"}} {
+		if Installable(d) {
+			t.Errorf("%s offered", d.Name)
+		}
+	}
+	if !Installable(Device{Name: "mmcblk0", Size: 64 << 30}) || !Installable(Device{Name: "nvme0n1", Size: 1 << 40}) {
+		t.Error("a real disk refused")
+	}
+}

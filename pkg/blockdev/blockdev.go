@@ -170,18 +170,29 @@ func (d Device) InUse() string {
 func Available(devs []Device) []Device {
 	var out []Device
 	for _, d := range Disks(devs) {
-		if d.InUse() == "" {
+		if d.InUse() == "" && Installable(d) {
 			out = append(out, d)
 		}
 	}
 	return out
 }
 
+// Installable reports whether a disk lsblk lists can hold an install at
+// all: not a compressed-RAM swap device (zram), not an eMMC's boot or RPMB
+// area (mmcblk0boot0: a few MiB, read-only), not an empty card reader
+// (size 0). Offered, they were picked and failed later.
+func Installable(d Device) bool {
+	return d.Size > 0 && !strings.HasPrefix(d.Name, "zram") &&
+		!(strings.HasPrefix(d.Name, "mmcblk") && (strings.Contains(d.Name, "boot") || strings.Contains(d.Name, "rpmb")))
+}
+
 // isHolder reports whether a device is something the live system runs on
-// top of a disk: a RAID array or a device-mapper volume (LVM, LUKS).
+// top of a disk: a RAID array (an Intel RST/DDF container too) or a
+// device-mapper volume (LVM, LUKS, multipath, dmraid). lsblk names an md
+// device by its level and a dm device by its UUID's prefix.
 func isHolder(t string) bool {
-	return t == "crypt" || t == "lvm" || t == "dm" || t == "linear" ||
-		(strings.HasPrefix(t, "raid") && t != "raid")
+	return t == "crypt" || t == "lvm" || t == "dm" || t == "linear" || t == "container" ||
+		t == "mpath" || t == "dmraid" || (strings.HasPrefix(t, "raid") && t != "raid")
 }
 
 // Teardown returns the commands that release disk d before its partition
@@ -207,15 +218,30 @@ func Teardown(d Device) [][]string {
 func TeardownAll(ds []Device) [][]string {
 	var cmds [][]string
 	seen := map[string]bool{}
-	var release func(dev Device)
-	release = func(dev Device) {
+	var containers [][]string
+	var release func(dev Device, onDM bool)
+	release = func(dev Device, onDM bool) {
+		dm := dev.Type == "mpath" || dev.Type == "dmraid"
 		for _, c := range dev.Children {
-			release(c)
+			release(c, dm)
+		}
+		// A partition of a multipath or dmraid device is itself a
+		// device-mapper volume (kpartx's mpatha1), holding its parent.
+		if onDM && dev.Type == "part" && !seen[dev.Path] {
+			seen[dev.Path] = true
+			cmds = append(cmds, []string{"dmsetup", "remove", dev.Name})
+			return
 		}
 		if !isHolder(dev.Type) || seen[dev.Path] {
 			return
 		}
 		seen[dev.Path] = true
+		// An RST/DDF container is stopped after every array in it, which
+		// lsblk lists beside it, not under it.
+		if dev.Type == "container" {
+			containers = append(containers, []string{"mdadm", "--stop", dev.Path})
+			return
+		}
 		if strings.HasPrefix(dev.Type, "raid") || dev.Type == "linear" {
 			cmds = append(cmds, []string{"mdadm", "--stop", dev.Path})
 		} else {
@@ -224,9 +250,10 @@ func TeardownAll(ds []Device) [][]string {
 	}
 	for _, d := range ds {
 		for _, c := range d.Children {
-			release(c)
+			release(c, false)
 		}
 	}
+	cmds = append(cmds, containers...)
 	for _, d := range ds {
 		for _, c := range d.Children {
 			if c.Type == "part" {
