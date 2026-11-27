@@ -1292,10 +1292,24 @@ func (m model) installProblem() string {
 	// refused there, it ended the program, pointing at a config key the
 	// wizard does not show.
 	if err == nil && plan.Wipe {
+		devs, vgs := machineVolumes()
 		if groups := plan.VGNames(); len(groups) > 0 {
-			devs, vgs := machineVolumes()
 			if clash := blockdev.VGNameClashes(devs, vgs, groups, plan.DiskList()); len(clash) > 0 {
 				err = fmt.Errorf("%s - give the LVM partition another Volume group name in Installation Media", strings.Join(clash, "; "))
+			}
+		}
+		// Nor share an array, pool or volume group with a disk the install
+		// leaves, which the installer refuses then too (unless
+		// --force-destructive), ending the program.
+		if err == nil && !m.force {
+			var shared []string
+			for _, disk := range plan.DiskList() {
+				shared = append(shared, blockdev.Shared(devs, disk, plan.DiskList(), vgs)...)
+			}
+			shared = append(shared, blockdev.SharedMembers(devs, plan.DiskList())...)
+			if len(shared) > 0 {
+				err = fmt.Errorf("wiping %s would break other disks: %s - choose another disk in Installation Media, or start the installer with --force-destructive",
+					strings.Join(plan.DiskList(), ", "), strings.Join(shared, "; "))
 			}
 		}
 	}

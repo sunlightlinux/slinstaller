@@ -39,7 +39,7 @@ func queryTerminal() { _ = lipgloss.HasDarkBackground() }
 // skipSize and skipAll are the command line's --skip-validation-size and
 // --skip-validation-all, which the wizard's own check of the config
 // honours as the installer's does.
-func RunFullscreen(skipSize, skipAll bool) (*config.Config, string, error) {
+func RunFullscreen(skipSize, skipAll, force bool) (*config.Config, string, error) {
 	devs, err := blockdev.List()
 	if err != nil {
 		return nil, "", err
@@ -52,7 +52,7 @@ func RunFullscreen(skipSize, skipAll bool) (*config.Config, string, error) {
 	}
 
 	start := newModel(disks)
-	start.skipSize, start.skipAll = skipSize, skipAll
+	start.skipSize, start.skipAll, start.force = skipSize, skipAll, force
 	start.consoles = system.DetectConsoles() // mirror the live consoles onto the target
 	start.vmName, start.vm = system.VirtualMachine()
 	start.cpuVendor = system.CPUVendor() // rewrite vendor-specific kernel args (intel/amd)
@@ -290,8 +290,9 @@ const (
 )
 
 type model struct {
-	// skipSize and skipAll: the validation the command line turned off.
-	skipSize, skipAll bool
+	// skipSize and skipAll: the validation the command line turned off;
+	// force: --force-destructive, which lets a shared disk be wiped.
+	skipSize, skipAll, force bool
 
 	disks []blockdev.Device
 

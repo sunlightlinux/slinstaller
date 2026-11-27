@@ -670,3 +670,27 @@ func TestInstallProblemVGNameClash(t *testing.T) {
 		t.Errorf("another name: %q", p)
 	}
 }
+
+// Wiping a disk that shares a volume group with one the install leaves is
+// refused by the installer unless --force-destructive; the wizard says so
+// at Install, where it can be changed, instead of the program ending after
+// it. With --force-destructive it does not stand in the way.
+func TestInstallProblemSharedDisk(t *testing.T) {
+	old := machineVolumes
+	t.Cleanup(func() { machineVolumes = old })
+	machineVolumes = func() ([]blockdev.Device, map[string][]string) {
+		devs := twoTestDisks()
+		devs[0].Type, devs[1].Type = "disk", "disk"
+		devs[0].Children = []blockdev.Device{{Name: "sda2", Path: "/dev/sda2", Type: "part", FsType: "LVM2_member"}}
+		devs[1].Children = []blockdev.Device{{Name: "sdb1", Path: "/dev/sdb1", Type: "part", FsType: "LVM2_member"}}
+		return devs, map[string][]string{"data": {"/dev/sda2", "/dev/sdb1"}}
+	}
+	m := readyModel()
+	if p := m.installProblem(); !strings.Contains(p, "would break other disks") || !strings.Contains(p, "--force-destructive") {
+		t.Errorf("problem %q", p)
+	}
+	m.force = true
+	if p := m.installProblem(); p != "" {
+		t.Errorf("with --force-destructive: %q", p)
+	}
+}

@@ -411,7 +411,7 @@ restart:
 		// Full-screen wizard on a real terminal; the plain prompt flow
 		// over a serial console or a pipe, where it would not render.
 		if !textUI && fullScreenCapable() {
-			cfg, interactivePass, err = tui.RunFullscreen(skipSize, skipAll)
+			cfg, interactivePass, err = tui.RunFullscreen(skipSize, skipAll, forceDestructive)
 			fullscreen = true
 		} else {
 			// --text, a pipe/file, a dumb/unset TERM, or a terminal that
