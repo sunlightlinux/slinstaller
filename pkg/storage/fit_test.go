@@ -254,3 +254,21 @@ func TestParseLVSizeEdges(t *testing.T) {
 		t.Errorf("2^64 bytes = %d, %v; want it saturated", n, err)
 	}
 }
+
+// An xfs partition filling the disk needs what mkfs.xfs makes one on, not
+// just a partition's worth: 100 MiB left passed, and mkfs failed after the
+// wipe.
+func TestCheckFitFillHoldsTheFilesystemMinimum(t *testing.T) {
+	pl := &Plan{Wipe: true, Disk: "/dev/sdb", Parts: []Partition{
+		{Number: 1, Device: "/dev/sdb1", Filesystem: "xfs", Mountpoint: "/data", Size: SizeRest},
+	}}
+	size := func(n uint64) func(string) (uint64, bool) {
+		return func(string) (uint64, bool) { return n, true }
+	}
+	if err := pl.CheckFit(size(100<<20+GPTReserveBytes), MinRootSize, "2 GB"); err == nil || !strings.Contains(err.Error(), "300.0M minimum") {
+		t.Errorf("100 MiB for a filling xfs: %v", err)
+	}
+	if err := pl.CheckFit(size(300<<20+GPTReserveBytes), MinRootSize, "2 GB"); err != nil {
+		t.Errorf("300 MiB for a filling xfs: %v", err)
+	}
+}

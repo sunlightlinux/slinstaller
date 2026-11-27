@@ -242,9 +242,10 @@ func (pl *Plan) FixedBytesByDisk() map[string]uint64 {
 
 // FillMinByDisk gives, per disk, the smallest the partition that fills the
 // rest of it (SizeRest) may be: rootMin for the root filesystem, the ESP
-// minimum for an ESP, and MinPartitionSize for anything else. A disk with
-// no fill partition is not listed. With FixedBytesByDisk it tells whether
-// what a disk has left is enough, before the disk is wiped.
+// minimum for an ESP, and MinPartitionSize (or its filesystem's minimum, if
+// more) for anything else. A disk with no fill partition is not listed.
+// With FixedBytesByDisk it tells whether what a disk has left is enough,
+// before the disk is wiped.
 func (pl *Plan) FillMinByDisk(rootMin uint64) map[string]uint64 {
 	out := map[string]uint64{}
 	for _, p := range pl.Parts {
@@ -261,7 +262,9 @@ func (pl *Plan) FillMinByDisk(rootMin uint64) map[string]uint64 {
 		case p.isESP() || p.SpareESP:
 			out[disk] = MinESPSize
 		default:
-			out[disk] = MinPartitionSize
+			// Or what its mkfs takes, where that is more.
+			fsMin, _ := MinFilesystemSize(p.Filesystem)
+			out[disk] = max(MinPartitionSize, fsMin)
 		}
 	}
 	return out
@@ -372,7 +375,8 @@ func (pl *Plan) checkVGFit(sizeOf func(disk string) (uint64, bool), rootMin uint
 		case p.LV:
 			// A volume that fills the rest needs room left for it too:
 			// lvcreate -l 100%FREE fails on no free extents.
-			v := uint64(MinPartitionSize)
+			fsMin, _ := MinFilesystemSize(p.Filesystem)
+			v := max(uint64(MinPartitionSize), fsMin)
 			if p.Mountpoint == "/" {
 				v = rootMin
 			}
