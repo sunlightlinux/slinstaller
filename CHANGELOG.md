@@ -132,6 +132,14 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 **Faster**
 
+- **One initramfs build fewer.** base-install ran `chroot
+  xbps-reconfigure -fa` after `xbps-install -r`, which had already
+  configured every package (its scripts run chrooted): a second full
+  pass, dracut included. It is `-a` now (`-fa` still with `--arch`, under
+  which xbps runs no script). A plain install that adds a DKMS module
+  gets one rebuild after it.
+- `udevadm settle` waits 30 seconds at most, not 120, at each call; the
+  Details log view builds only the rows it shows.
 - An encrypted, LVM or RAID install rebuilds its initramfs with `dracut
   --regenerate-all --force` instead of a third `xbps-reconfigure -fa`,
   which re-ran every package's configure script (and grub-mkconfig) for
@@ -229,6 +237,10 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 **Encryption, RAID and LVM**
 
+- **Logical volumes have to fit their volume group** before the wipe: a
+  500G LV on a 64G disk failed at lvcreate, after partitioning.
+- The LUKS keyfile is synced before it goes into the key slots; every
+  encrypted PV of an encrypted /boot's group is GRUB-readable (pbkdf2).
 - `encrypted: true` on a plain partition, a RAID member or a logical
   volume was ignored and the volume installed unencrypted. It is read on
   a `type: lvm` partition and a RAID array only; elsewhere it is refused,
@@ -400,6 +412,15 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 **Full-screen and text front-ends**
 
+- **The wizard keeps the disk the user chose.** Rescan Media kept the
+  choice as an index, so a USB stick listed ahead of it moved the target
+  (and the layout made for it) to another disk; it is found again by
+  path, and one that is gone is unchosen. The media dialog's Esc and
+  Cancel put back the disk it opened with. Enable Encryption ticked with
+  a layout that encrypts nothing is refused at Install.
+- **Hidden prompts** keep a passphrase's spaces and put echo back on
+  Ctrl+C; the disk prompt ends on a read error and picks no disk; the
+  retype confirmation, at a terminal, asks again (three tries).
 - The wizard checks what the installer would refuse after it — kernel
   arguments this machine cannot meet, an unknown time zone, keymap or
   language — at Install, where it can be fixed; these ended the program
