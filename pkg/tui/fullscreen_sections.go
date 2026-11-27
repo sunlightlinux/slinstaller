@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -342,11 +343,15 @@ func (m model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.view = viewHub
 		return m, nil
 	case key.Type == tea.KeyBackspace:
+		// A character, not a byte: half of an ü matched nothing.
 		if m.listFilter != "" {
-			m.listFilter = m.listFilter[:len(m.listFilter)-1]
+			_, n := utf8.DecodeLastRuneInString(m.listFilter)
+			m.listFilter = m.listFilter[:len(m.listFilter)-n]
 			m.listCursor = 0
 		}
-	case key.Type == tea.KeyRunes && len(key.Runes) == 1:
+	case key.Type == tea.KeyRunes && len(key.Runes) > 0:
+		// A paste comes as one key of several runes: ignored, the
+		// unfiltered list's first entry was what Enter then chose.
 		m.listFilter += string(key.Runes)
 		m.listCursor = 0
 	}
