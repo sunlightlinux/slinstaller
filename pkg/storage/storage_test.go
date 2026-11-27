@@ -171,9 +171,9 @@ func TestRequiredTools(t *testing.T) {
 
 func TestMissingTools(t *testing.T) {
 	// "sh" exists on any system that runs these tests; the other does not.
-	missing := MissingTools([]string{"sh", "slinstaller-definitely-not-a-real-tool"})
+	missing := MissingTools([]string{"sh", "slinstaller-definitely-not-a-real-tool", "slinstaller-definitely-not-a-real-tool"})
 	if len(missing) != 1 || missing[0] != "slinstaller-definitely-not-a-real-tool" {
-		t.Errorf("MissingTools = %v, want the one bogus name", missing)
+		t.Errorf("MissingTools = %v, want the one bogus name, once", missing)
 	}
 }
 

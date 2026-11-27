@@ -152,7 +152,7 @@ func run(args []string) error {
 	fs.Var(&aliases, "b", "short for --block-device")
 	var copyNetwork, allowInsecure bool
 	fs.BoolVar(&copyNetwork, "copy-network", false, "copy the live system's network configuration into the installed system (the config's copyNetwork)")
-	fs.BoolVar(&allowInsecure, "allow-insecure-http", false, "allow a plain http:// repository (the config's allowInsecureHTTP)")
+	fs.BoolVar(&allowInsecure, "allow-insecure-http", false, "allow plain http:// for the repository, a config, image or report URL, and https-to-http redirects (the config's allowInsecureHTTP)")
 	var swapFileSize string
 	fs.StringVar(&swapFileSize, "swap-file-size", "", "create a swap file of this size, e.g. 2G (the config's swapFileSize)")
 	var logLevel int
@@ -161,7 +161,7 @@ func run(args []string) error {
 	fs.IntVar(&logLevel, "l", 3, "short for --log-level")
 	var resume bool
 	fs.BoolVar(&resume, "resume", false,
-		"with --apply, continue an install that failed while installing the base system: nothing is partitioned or formatted again (same boot of the live system only)")
+		"with --apply, continue an install that failed while installing the base system: nothing is partitioned or formatted again; after a reboot of the live medium the encrypted volumes, arrays and volume groups are brought back first (the passphrase is asked once)")
 	var resumeFrom string
 	fs.StringVar(&resumeFrom, "resume-from", "",
 		"as --resume, but from the named stage: "+strings.Join(controller.ResumableStages(), ", ")+" (the stage is run again from its start)")
@@ -998,7 +998,7 @@ func installStoppable(cfg *config.Config, opts controller.Options) error {
 	go func() {
 		select {
 		case <-sigs:
-			fmt.Fprintln(os.Stderr, "\nStopping after the current step... (Ctrl+C again leaves now)")
+			fmt.Fprintln(os.Stderr, "\nInterrupted: winding the install down after this step (a Ctrl+C on the terminal stops the running command too). Ctrl+C again leaves now.")
 			close(stop)
 		case <-done:
 			return

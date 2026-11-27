@@ -1319,7 +1319,7 @@ func (c *Config) Validate() error {
 		add("report-url: %s is not an http or https URL", c.ReportURL)
 	} else if strings.HasPrefix(c.ReportURL, "http://") && !c.AllowInsecureHTTP {
 		// A report carries the hostname and the install's errors.
-		add("report-url: %s is plain http; use https, or set allowInsecureHTTP", c.ReportURL)
+		add("report-url: %s is plain http; use https, or set allowInsecureHTTP (--allow-insecure-http)", c.ReportURL)
 	}
 	if err := c.checkRemote("image", c.Image); err != nil {
 		add("%v", err)
@@ -1851,7 +1851,7 @@ func (c *Config) Validate() error {
 		}
 	}
 	if len(admins) > 0 && !adminWithPassword && !ownSudo {
-		add("no administrator has a password (%s): root is locked once there is an administrator, and sudo asks for one - give an administrator a password hash", strings.Join(admins, ", "))
+		add("no administrator has a password (%s): root is locked once there is an administrator, and sudo asks for one - give an administrator a password hash (slinstaller --genpass -), or write their sudoers rule with write-files (e.g. /etc/sudoers.d/<login>)", strings.Join(admins, ", "))
 	}
 
 	if c.Hostname != "" {
@@ -2195,7 +2195,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		phys := pl.PhysOn(disk)
 		for k, p := range phys {
 			if p.Size == storage.SizeRest && k != len(phys)-1 {
-				return nil, fmt.Errorf("config: %s fills its disk but is not the last partition on it", p.Device)
+				return nil, fmt.Errorf("config: %s fills its disk but is not the last partition on it - give it a size, or move it last", p.Device)
 			}
 		}
 	}
@@ -2222,8 +2222,8 @@ func checkFreshNumbering(pl *storage.Plan) error {
 			}
 			seen[p.Device] = true
 			if p.Number != k+1 {
-				return fmt.Errorf("config: %s is partition %d of %s, but a new table numbers its partitions 1, 2, 3…; %s would be %s",
-					p.Device, p.Number, disk, p.Device, storage.PartitionName(disk, k+1))
+				return fmt.Errorf("config: %s is partition %d of %s, but a new table numbers its partitions 1, 2, 3… in order: rename it %s",
+					p.Device, p.Number, disk, strings.TrimPrefix(storage.PartitionName(disk, k+1), "/dev/"))
 			}
 		}
 	}

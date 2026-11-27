@@ -100,7 +100,7 @@ func TestPlanRefusesWhatItCannotLayOut(t *testing.T) {
 			"/dev/nvme0n1p2 is not a partition of /dev/sda"},
 		"a gap in the numbers": {disk(&Media{Name: "sda1", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
 			&Media{Name: "sda5", FsType: "ext4", Mountpoint: "/"}),
-			"/dev/sda5 would be /dev/sda2"},
+			"/dev/sda5 is partition 5 of /dev/sda, but a new table numbers its partitions 1, 2, 3… in order: rename it sda2"},
 		"a partition declared twice": {disk(&Media{Name: "sda1", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
 			&Media{Name: "sda1", FsType: "ext4", Mountpoint: "/"}),
 			"/dev/sda1 is declared twice"},

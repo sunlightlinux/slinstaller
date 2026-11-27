@@ -44,7 +44,12 @@ func (pl *Plan) RequiredTools() []string {
 // It is how a front-end checks the live system before a destructive run.
 func MissingTools(names []string) []string {
 	var missing []string
+	seen := map[string]bool{}
 	for _, n := range names {
+		if seen[n] {
+			continue // each named once (partprobe came up twice)
+		}
+		seen[n] = true
 		if _, err := exec.LookPath(n); err != nil {
 			missing = append(missing, n)
 		}

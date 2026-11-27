@@ -79,9 +79,10 @@ type Options struct {
 	// again: the pre-install hooks and the partition stage are skipped, what
 	// was made is mounted once more, and the install carries on from the
 	// named stage (base-install or any later one), which is run again from
-	// its start. It is for the same boot of the live system, in which the
-	// encrypted volumes, arrays and volume groups made the first time are
-	// still open. Empty means a normal install.
+	// its start. Encrypted volumes, arrays and volume groups the first
+	// attempt made are brought back first if they are not open (after a
+	// reboot of the live system; see reassemble). Empty means a normal
+	// install.
 	ResumeFrom string
 
 	// Log, if set, receives a line announcing each stage as it starts, so
