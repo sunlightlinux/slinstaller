@@ -997,9 +997,12 @@ restart:
 			// And an LVM physical volume whose group has others (lsblk's
 			// UUID for a PV is its own; pvs knows the groups).
 			for vg, pvs := range blockdev.VolumeGroups() {
+				// The PVs this install does not format or shrink: only
+				// those are harmed (a group wholly reformatted is not).
+				others := slices.DeleteFunc(slices.Clone(pvs), func(x string) bool { return slices.Contains(formatted, x) })
 				for _, f := range formatted {
-					if slices.Contains(pvs, f) && len(pvs) > 1 {
-						shared = append(shared, fmt.Sprintf("%s is a physical volume of %s, which also has %s", f, vg, strings.Join(slices.DeleteFunc(slices.Clone(pvs), func(x string) bool { return x == f }), ", ")))
+					if slices.Contains(pvs, f) && len(others) > 0 {
+						shared = append(shared, fmt.Sprintf("%s is a physical volume of %s, which also has %s", f, vg, strings.Join(others, ", ")))
 					}
 				}
 			}

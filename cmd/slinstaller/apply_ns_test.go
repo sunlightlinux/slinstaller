@@ -478,6 +478,22 @@ func applyChild(t *testing.T) {
 	os.WriteFile(filepath.Join(e.bin, "pvs.out"), []byte("  "+testDisk+"p2:data\n  /dev/sdz1:data\n"), 0o644)
 	_, err = e.run(confirmed, formatPV)
 	e.refused("formatting a PV of a group spanning another disk", err, "is a physical volume of data")
+	// A group whose every PV this install formats harms nothing else.
+	bothPVs := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{
+		{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Name: testName + "p2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+		{Name: testName + "p3", Type: "part", FsType: "ext4", Mountpoint: "/home"},
+	}}}}
+	e = newApplyEnv(t)
+	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":128000000000,"type":"disk","children":[
+		{"name":"slitest0p1","path":"`+testDisk+`p1","size":536870912,"type":"part","fstype":"vfat"},
+		{"name":"slitest0p2","path":"`+testDisk+`p2","size":53687091200,"type":"part","fstype":"LVM2_member","uuid":"pv1"},
+		{"name":"slitest0p3","path":"`+testDisk+`p3","size":53687091200,"type":"part","fstype":"LVM2_member","uuid":"pv2"}]}`)
+	os.WriteFile(filepath.Join(e.bin, "pvs.out"), []byte("  "+testDisk+"p2:data\n  "+testDisk+"p3:data\n"), 0o644)
+	_, err = e.run(confirmed, bothPVs, "--through", "partition")
+	if err != nil && strings.Contains(err.Error(), "physical volume") {
+		t.Errorf("a group wholly formatted refused: %v", err)
+	}
 	e = newApplyEnv(t)
 	setListing(t, e.bin, shared)
 	_, err = e.run(confirmed, plainConfig(), "--force-destructive")

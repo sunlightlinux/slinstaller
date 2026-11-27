@@ -113,6 +113,10 @@ func (m *Mounter) MountMeta() error {
 			return fmt.Errorf("storage: bind %s to %s: %w", src, target, err)
 		}
 		m.mounted = append(m.mounted, target)
+		if m.meta == nil {
+			m.meta = map[string]bool{}
+		}
+		m.meta[target] = true // detached, not unmounted, whatever follows
 		// A slave of the live mounts (arch-chroot's --make-rslave): where
 		// the live system's mounts are shared (systemd makes / shared),
 		// taking the bind off again propagated back and unmounted the
@@ -120,10 +124,6 @@ func (m *Mounter) MountMeta() error {
 		if err := syscall.Mount("", target, "", syscall.MS_SLAVE|syscall.MS_REC, ""); err != nil {
 			return fmt.Errorf("storage: make %s a slave: %w", target, err)
 		}
-		if m.meta == nil {
-			m.meta = map[string]bool{}
-		}
-		m.meta[target] = true
 	}
 	return nil
 }
