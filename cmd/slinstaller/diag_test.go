@@ -270,3 +270,33 @@ func TestPowerAfterWaitsTheDelay(t *testing.T) {
 		t.Errorf("powerAfter with no delay: %v, slept %v", err, slept)
 	}
 }
+
+// The archive never goes through a link, and the dated default in /tmp is
+// never a file someone made first.
+func TestDiagnosticsArchivePlanted(t *testing.T) {
+	dir := t.TempDir()
+	defer func(p string) { diagnosticsDir = p }(diagnosticsDir)
+	diagnosticsDir = dir
+	t.Setenv("PATH", t.TempDir())
+	victim := filepath.Join(dir, "victim")
+	os.WriteFile(victim, []byte("secret\n"), 0o644)
+
+	link := filepath.Join(dir, "named.tar.gz")
+	os.Symlink(victim, link)
+	if _, err := writeDiagnostics(link, plainConfig(), "", errors.New("boom")); err == nil {
+		t.Error("the archive was written through a symlink")
+	}
+
+	// Plant the dated names around now: the default must not take one over.
+	now := time.Now()
+	for s := -1; s <= 5; s++ {
+		name := "slinstaller-diagnostics-" + now.Add(time.Duration(s)*time.Second).Format("20060102-150405") + ".tar.gz"
+		os.WriteFile(filepath.Join(dir, name), []byte("planted\n"), 0o666)
+	}
+	if path, err := writeDiagnostics("", plainConfig(), "", errors.New("boom")); err == nil {
+		t.Errorf("the archive took over a planted file %s", path)
+	}
+	if data, _ := os.ReadFile(victim); string(data) != "secret\n" {
+		t.Errorf("victim changed: %q", data)
+	}
+}

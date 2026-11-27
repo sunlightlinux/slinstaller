@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -342,4 +343,52 @@ func TestLogWriterCleansLines(t *testing.T) {
 	if got, want := b.String(), "Creating journal: done\nfoo.xbps: 1KB [avg]\n"; got != want {
 		t.Errorf("log = %q, want %q", got, want)
 	}
+}
+
+// The default log is in /tmp, where another user can plant a path first.
+// Nothing planted is written through; the log is made afresh, private.
+func TestOpenInstallLogPlanted(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim")
+	check := func(what, path string) {
+		t.Helper()
+		f, err := OpenInstallLog(path)
+		if err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		fmt.Fprintln(f, "log line")
+		f.Close()
+		if data, _ := os.ReadFile(victim); string(data) != "secret\n" {
+			t.Errorf("%s: written through to the victim: %q", what, data)
+		}
+		fi, err := os.Lstat(path)
+		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s: log is %v, %v; want a regular 0600 file", what, fi, err)
+		}
+		if data, _ := os.ReadFile(path); string(data) != "log line\n" {
+			t.Errorf("%s: log = %q", what, data)
+		}
+	}
+
+	os.WriteFile(victim, []byte("secret\n"), 0o644)
+	link := filepath.Join(dir, "symlink.log")
+	os.Symlink(victim, link)
+	check("symlink", link)
+
+	hard := filepath.Join(dir, "hardlink.log")
+	if err := os.Link(victim, hard); err != nil {
+		t.Fatal(err)
+	}
+	check("hard link", hard)
+
+	fifo := filepath.Join(dir, "fifo.log")
+	if err := syscall.Mkfifo(fifo, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	check("fifo", fifo)
+
+	// Our own earlier log is reused, emptied and made private.
+	own := filepath.Join(dir, "own.log")
+	os.WriteFile(own, []byte("last run\n"), 0o644)
+	check("own file", own)
 }

@@ -12,6 +12,13 @@ change.
 
 ### Fixed
 
+- **No planted file in /tmp is written through as root.** The default
+  install log `/tmp/slinstaller.log` was opened with O_CREAT|O_TRUNC, so
+  a symlink or hard link another user left there had root truncate and
+  write the file it pointed to, a file of theirs got the log, and a FIFO
+  hung the install. A link is no longer followed, anything at that path
+  that is not root's own regular file is replaced by a fresh 0600 one,
+  and the dated diagnostics archive is created exclusively.
 - **An https URL can no longer be redirected to plain http.** Only the
   URL as given was checked: a config, progress report or remote image
   fetched over https followed a server's redirect to http. Such a

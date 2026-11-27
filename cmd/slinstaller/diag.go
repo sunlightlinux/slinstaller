@@ -62,10 +62,14 @@ var diagnosticFiles = map[string]string{
 // the install log, and a description of the machine. It returns the file's
 // path. path "" means a dated file in diagnosticsDir.
 func writeDiagnostics(path string, cfg *config.Config, logPath string, failure error) (string, error) {
+	// The default is in /tmp: never through a link planted there, and never
+	// into a file someone else made first.
+	flags := os.O_CREATE | os.O_TRUNC | os.O_WRONLY | unix.O_NOFOLLOW
 	if path == "" {
 		path = filepath.Join(diagnosticsDir, "slinstaller-diagnostics-"+time.Now().Format("20060102-150405")+".tar.gz")
+		flags = os.O_CREATE | os.O_EXCL | os.O_WRONLY | unix.O_NOFOLLOW
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, flags, 0o600)
 	if err != nil {
 		return "", err
 	}

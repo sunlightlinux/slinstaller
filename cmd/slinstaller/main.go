@@ -573,7 +573,13 @@ restart:
 	}
 	var quiet io.Writer // set when the commands' output goes to the file alone
 	if logPath != "" {
-		lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		var lf *os.File
+		var err error
+		if logFile == "" {
+			lf, err = tui.OpenInstallLog(logPath) // the default, in /tmp
+		} else {
+			lf, err = os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		}
 		switch {
 		case err == nil:
 			defer lf.Close()

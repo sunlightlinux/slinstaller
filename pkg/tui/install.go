@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -130,6 +131,29 @@ var installLogPath = "/tmp/slinstaller.log"
 
 // InstallLogPath is that path, for the text flow to write its log to.
 func InstallLogPath() string { return installLogPath }
+
+// OpenInstallLog opens the log at path for writing, empty, mode 0600. The
+// default path is in /tmp, where any user can plant something there first
+// for root to write through: a link, a hard link to another file, a file
+// of their own they can read. A link is never followed, and whatever is at
+// path that is not a regular file of this user's alone is removed and the
+// log made afresh. (In a sticky /tmp, a file root owns stays root's.)
+func OpenInstallLog(path string) (*os.File, error) {
+	if fi, err := os.Lstat(path); err == nil {
+		st, _ := fi.Sys().(*syscall.Stat_t)
+		if fi.Mode().IsRegular() && st != nil && int(st.Uid) == os.Geteuid() && st.Nlink == 1 {
+			f, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
+			if err == nil {
+				err = f.Chmod(0o600)
+			}
+			return f, err
+		}
+		if err := os.Remove(path); err != nil {
+			return nil, err
+		}
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
+}
 
 const targetLogPath = "/root/slinstaller.log"
 
@@ -553,7 +577,7 @@ func (m *installModel) start() tea.Cmd {
 	// goroutine so it is complete when the controller copies it to the
 	// target. Without a file the install still runs; the view has the log.
 	var mu sync.Mutex
-	f, err := os.OpenFile(installLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	f, err := OpenInstallLog(installLogPath)
 	if err == nil {
 		m.logPath = installLogPath
 		fmt.Fprintf(f, "slinstaller install log, started %s\n", m.now().Format(time.RFC1123))
