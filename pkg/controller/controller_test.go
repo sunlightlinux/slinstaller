@@ -427,3 +427,31 @@ func TestWriteFilesMakesNoDirsOutside(t *testing.T) {
 		t.Errorf("made outside: %v", ents)
 	}
 }
+
+// A copied network file takes the live one's mode over an existing file's,
+// and a link at its place is replaced, not written through.
+func TestCopyPathModeAndLinks(t *testing.T) {
+	root, live, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	src := filepath.Join(live, "wpa.conf")
+	os.WriteFile(src, []byte("psk=secret\n"), 0o600)
+	fi, _ := os.Lstat(src)
+	dst := filepath.Join(root, "etc", "wpa.conf")
+	os.MkdirAll(filepath.Dir(dst), 0o755)
+	os.WriteFile(dst, []byte("packaged\n"), 0o644)
+	if err := copyPath(root, src, dst, fi); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(dst); st.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v over a 0644 file", st.Mode().Perm())
+	}
+	victim := filepath.Join(outside, "f")
+	os.WriteFile(victim, []byte("keep\n"), 0o644)
+	os.Remove(dst)
+	os.Symlink(victim, dst)
+	if err := copyPath(root, src, dst, fi); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "keep\n" {
+		t.Error("written through a link")
+	}
+}

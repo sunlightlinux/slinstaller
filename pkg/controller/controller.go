@@ -813,25 +813,7 @@ func writeRootPrivate(root, name string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if !insideTarget(root, dir) {
-		return fmt.Errorf("%s leads outside the installed system", dir)
-	}
-	tmp, err := os.CreateTemp(dir, "."+name+".*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name()) // gone once renamed
-	_, err = tmp.Write(data)
-	if err == nil {
-		err = tmp.Chmod(0o600)
-	}
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Rename(tmp.Name(), filepath.Join(dir, name))
-	}
-	return err
+	return writeInTarget(root, filepath.Join(dir, name), data, 0o600)
 }
 
 func (in *installer) baseInstall() error {
@@ -2019,7 +2001,7 @@ func (in *installer) copyLiveNetwork() error {
 			return fmt.Errorf("copyNetwork: stat %s: %w", src, err)
 		}
 		dst := filepath.Join(in.opts.Root, src)
-		if err := copyPath(src, dst, fi); err != nil {
+		if err := copyPath(in.opts.Root, src, dst, fi); err != nil {
 			return fmt.Errorf("copyNetwork: %s: %w", src, err)
 		}
 	}
@@ -2028,7 +2010,7 @@ func (in *installer) copyLiveNetwork() error {
 
 // copyPath copies a file or a directory tree from src to dst, creating
 // parent directories and preserving file permissions.
-func copyPath(src, dst string, fi os.FileInfo) error {
+func copyPath(root, src, dst string, fi os.FileInfo) error {
 	if fi.IsDir() {
 		entries, err := os.ReadDir(src)
 		if err != nil {
@@ -2042,7 +2024,7 @@ func copyPath(src, dst string, fi os.FileInfo) error {
 			if err != nil {
 				return err
 			}
-			if err := copyPath(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()), cfi); err != nil {
+			if err := copyPath(root, filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()), cfi); err != nil {
 				return err
 			}
 		}
@@ -2060,7 +2042,38 @@ func copyPath(src, dst string, fi os.FileInfo) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, fi.Mode().Perm())
+	// A new file with the live one's mode, renamed into place: written
+	// over the package's 0644 wpa_supplicant.conf, the live 0600 copy with
+	// the Wi-Fi key kept 0644; and a link there, or a directory leading
+	// out of the target, was written through onto the live system.
+	return writeInTarget(root, dst, data, fi.Mode().Perm())
+}
+
+// writeInTarget writes path, in the target at root, as a new file of mode
+// perm renamed into place: an existing file's mode is not kept, a link at
+// path is replaced rather than followed, and a directory leading out of
+// the target is refused.
+func writeInTarget(root, path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if !insideTarget(root, dir) {
+		return fmt.Errorf("%s leads outside the installed system", dir)
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) // gone once renamed
+	_, err = tmp.Write(data)
+	if err == nil {
+		err = tmp.Chmod(perm)
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+	}
+	return err
 }
 
 func (in *installer) preHooks() error  { return in.runHooks(in.cfg.PreInstall) }
