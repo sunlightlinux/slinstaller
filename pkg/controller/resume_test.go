@@ -293,7 +293,7 @@ func TestResolvConfOfTheTargetIsKept(t *testing.T) {
 	if got, _ := os.ReadFile(behind); string(got) != "nameserver 192.0.2.53\n" {
 		t.Errorf("written through the target's link: %q", got)
 	}
-	if got, _ := os.ReadFile(dst); string(got) != "nameserver 10.0.0.1\n" {
+	if got, _ := os.ReadFile(dst); string(got) != resolvMark+"nameserver 10.0.0.1\n" {
 		t.Errorf("install-time resolv.conf = %q", got)
 	}
 	if err := removeIfPresent(in.resolvCopy); err != nil {
@@ -322,6 +322,19 @@ func TestResolvConfOfTheTargetIsKept(t *testing.T) {
 	if got, _ := os.ReadFile(again.resolvSaved); string(got) != "nameserver 203.0.113.1\n" {
 		t.Errorf("the image's resolv.conf after a resume = %q", got)
 	}
+
+	// A copy a failed attempt left, with the live file changed since (the
+	// DNS it failed on, fixed): still known for ours, not put back.
+	in = stagedInstaller(t, twoPartConfig(), &r)
+	mkTarget(t, in, "etc")
+	in.copyResolv(live)
+	os.WriteFile(live, []byte("nameserver 10.0.0.2\n"), 0o644)
+	again = stagedInstaller(t, twoPartConfig(), &r)
+	again.opts.Root = in.opts.Root
+	if err := again.copyResolv(live); err != nil || again.resolvSaved != "" {
+		t.Errorf("a stale copy was set aside as the target's own: %q, %v", again.resolvSaved, err)
+	}
+	os.WriteFile(live, []byte("nameserver 10.0.0.1\n"), 0o644)
 
 	// No resolv.conf of its own, and a resume: nothing to put back.
 	in = stagedInstaller(t, twoPartConfig(), &r)

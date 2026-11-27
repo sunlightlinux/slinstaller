@@ -109,7 +109,7 @@ func mountStagesChild(t *testing.T) {
 	copied := filepath.Join(in.opts.Root, "etc", "resolv.conf")
 	if liveErr == nil {
 		got, err := os.ReadFile(copied)
-		if err != nil || !bytes.Equal(got, live) || in.resolvCopy != copied {
+		if err != nil || !bytes.Equal(got, append([]byte(resolvMark), live...)) || in.resolvCopy != copied {
 			t.Errorf("resolv.conf not copied for the install: %v (resolvCopy=%q)", err, in.resolvCopy)
 		}
 	}
@@ -276,7 +276,7 @@ func unpackImageWithBinds(t *testing.T, dir string) {
 	}
 	if live, err := os.ReadFile("/etc/resolv.conf"); err == nil {
 		got, _ := os.ReadFile(filepath.Join(root, "etc", "resolv.conf"))
-		if string(got) != string(live) {
+		if string(got) != resolvMark+string(live) {
 			t.Errorf("install-time resolv.conf = %q", got)
 		}
 		if kept, _ := os.ReadFile(in.resolvSaved); string(kept) != "nameserver 203.0.113.9\n" {

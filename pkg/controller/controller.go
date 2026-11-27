@@ -582,7 +582,7 @@ func (in *installer) copyResolv(src string) error {
 			}
 			in.resolvSaved = saved
 		}
-		if err := os.WriteFile(dst, data, 0o644); err != nil {
+		if err := os.WriteFile(dst, append([]byte(resolvMark), data...), 0o644); err != nil {
 			return fmt.Errorf("copy resolv.conf: %w", err)
 		}
 		in.resolvCopy = dst
@@ -590,15 +590,21 @@ func (in *installer) copyResolv(src string) error {
 	return nil
 }
 
+// resolvMark heads the install-time copy of resolv.conf, so a resumed
+// install knows the copy a failed attempt left for its own. Its contents
+// cannot tell: the live file may have changed since (the DNS the first
+// attempt failed on, fixed), and the stale copy was then set aside as
+// the target's own and put back into the installed system.
+const resolvMark = "# slinstaller: the live system's resolv.conf, for the install only\n"
+
 // isOurResolv reports whether the file at dst is a copy this installer
-// left there (a resumed install's first attempt never got to finish): a
-// plain file holding exactly the live system's resolv.conf.
-func (in *installer) isOurResolv(fi os.FileInfo, dst string, live []byte) bool {
+// left there (a resumed install's first attempt never got to finish).
+func (in *installer) isOurResolv(fi os.FileInfo, dst string, _ []byte) bool {
 	if !fi.Mode().IsRegular() {
 		return false
 	}
 	got, err := os.ReadFile(dst)
-	return err == nil && bytes.Equal(got, live)
+	return err == nil && bytes.HasPrefix(got, []byte(resolvMark))
 }
 
 // saveConfig records, on the installed system, the config it was built
