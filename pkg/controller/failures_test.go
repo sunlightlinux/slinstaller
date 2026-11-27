@@ -32,8 +32,9 @@ func blockDir(t *testing.T, in *installer, rel ...string) {
 func blockFile(t *testing.T, in *installer, rel ...string) {
 	t.Helper()
 	p := filepath.Join(append([]string{in.opts.Root}, rel...)...)
-	os.MkdirAll(filepath.Dir(p), 0o755)
-	if err := os.Symlink(filepath.Join(in.opts.Root, "no-such-dir", "x"), p); err != nil {
+	// A directory where the file goes: a link there is replaced, not
+	// written through, so it would not block anything.
+	if err := os.MkdirAll(filepath.Join(p, "occupied"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -226,11 +227,6 @@ func TestSwapfileFailures(t *testing.T) {
 	blockWithDir(t, in, "etc", "fstab")
 	wantErr(t, in.swapfile(), "open")
 
-	in = stagedInstaller(t, cfg, &r)
-	fullDisk(t, in, "etc", "fstab")
-	if err := in.swapfile(); err == nil {
-		t.Error("a failed fstab write was not reported")
-	}
 }
 
 func TestBootloaderFailures(t *testing.T) {
@@ -249,11 +245,9 @@ func TestBootloaderFailures(t *testing.T) {
 	blockWithDir(t, in, "etc", "default", "grub")
 	wantErr(t, in.bootloader(), "open")
 
-	in = stagedInstaller(t, twoPartConfig(), &r)
-	fullDisk(t, in, "etc", "default", "grub")
-	if err := in.bootloader(); err == nil {
-		t.Error("a failed write to /etc/default/grub was not reported")
-	}
+	// (A link at /etc/default/grub — /dev/full, say — is replaced by a file
+	// of its own, not written through: there is no full disk to fake.)
+	r = recorder{}
 
 	in = stagedInstaller(t, twoPartConfig(), &r)
 	mkTarget(t, in, "etc", "default")
@@ -425,7 +419,7 @@ func TestFirstBootFailures(t *testing.T) {
 		"hostname": {func() *config.Config { c := base(); c.Hostname = "box"; return c },
 			func(t *testing.T, in *installer, r *recorder) { blockFile(t, in, "etc", "hostname") }, "write hostname"},
 		"machine-id": {base,
-			func(t *testing.T, in *installer, r *recorder) { blockFile(t, in, "etc", "machine-id") }, "write machine-id"},
+			func(t *testing.T, in *installer, r *recorder) { fullDisk(t, in, "etc", "machine-id") }, "write machine-id"},
 		"timezone": {func() *config.Config { c := base(); c.Timezone = "UTC"; return c },
 			func(t *testing.T, in *installer, r *recorder) { blockWithDir(t, in, "etc", "localtime") }, "link localtime"},
 		"keymap": {func() *config.Config { c := base(); c.Keyboard = "us"; return c },

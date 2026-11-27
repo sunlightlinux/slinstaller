@@ -879,6 +879,16 @@ func (in *installer) saveConfig() error {
 // refused.
 func writeRootPrivate(root, name string, data []byte) error {
 	dir := filepath.Join(root, "root")
+	// An image's /root may be an absolute link (/root -> /var/roothome):
+	// resolved inside the target, as the installed system will. From here
+	// it pointed at the live system, and MkdirAll failed on it ("file
+	// exists"), failing the install after its bootloader was in place.
+	if link, err := os.Readlink(dir); err == nil && filepath.IsAbs(link) {
+		dir = filepath.Join(root, link)
+	}
+	if !existingInside(root, dir) {
+		return fmt.Errorf("%s leads outside the installed system", dir)
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -1097,7 +1107,7 @@ func (in *installer) writeTargetRepos() error {
 			content += fmt.Sprintf("repository=%s\n", r)
 		}
 		path := filepath.Join(dir, "10-sunlight.conf")
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		if err := writeInTarget(in.opts.Root, path, []byte(content), 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}
@@ -1131,6 +1141,9 @@ func (in *installer) writeTargetRepos() error {
 func (in *installer) fstab() error {
 	uuids, err := storage.ProbeUUIDs(in.plan)
 	if err != nil {
+		return err
+	}
+	if err := ownFile(in.opts.Root, filepath.Join(in.opts.Root, "etc", "fstab")); err != nil {
 		return err
 	}
 	if err := storage.WriteFstab(in.opts.Root, in.plan.Fstab(uuids)); err != nil {
@@ -1278,7 +1291,7 @@ func (in *installer) setupKeyfile(enc []storage.Partition) error {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 		conf := "# Written by slinstaller.\ninstall_items+=\" " + keyfilePath + " \"\n"
-		if err := os.WriteFile(filepath.Join(dir, "10-slinstaller-keyfile.conf"), []byte(conf), 0o644); err != nil {
+		if err := writeInTarget(in.opts.Root, filepath.Join(dir, "10-slinstaller-keyfile.conf"), []byte(conf), 0o644); err != nil {
 			return fmt.Errorf("write dracut keyfile conf: %w", err)
 		}
 	}
@@ -1313,6 +1326,9 @@ func (in *installer) swapfile() error {
 	}
 
 	path := filepath.Join(in.opts.Root, "etc", "fstab")
+	if err := ownFile(in.opts.Root, path); err != nil { // appended to: not through a link
+		return err
+	}
 	if holds(path, storage.SwapFileFstab) {
 		return nil
 	}
@@ -1482,7 +1498,11 @@ func (in *installer) bootloader() error {
 	if in.bootOnEncrypted() {
 		grubDefault.WriteString("\n# /boot is encrypted — let GRUB unlock it\nGRUB_ENABLE_CRYPTODISK=y\n")
 	}
-	if path := filepath.Join(in.opts.Root, "etc", "default", "grub"); grubDefault.Len() > 0 && !holds(path, grubDefault.String()) {
+	path := filepath.Join(in.opts.Root, "etc", "default", "grub")
+	if err := ownFile(in.opts.Root, path); err != nil { // appended to: not through a link
+		return err
+	}
+	if grubDefault.Len() > 0 && !holds(path, grubDefault.String()) {
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", path, err)
@@ -1701,7 +1721,7 @@ func (in *installer) writeMdadmConf() error {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	header := "# Written by slinstaller — the RAID arrays this system assembles at boot.\n"
-	if err := os.WriteFile(filepath.Join(dir, "mdadm.conf"), append([]byte(header), out...), 0o644); err != nil {
+	if err := writeInTarget(in.opts.Root, filepath.Join(dir, "mdadm.conf"), append([]byte(header), out...), 0o644); err != nil {
 		return fmt.Errorf("write mdadm.conf: %w", err)
 	}
 	return nil
@@ -1718,7 +1738,7 @@ func (in *installer) forceDracutModule(module string) error {
 	}
 	content := fmt.Sprintf("# Written by slinstaller.\nadd_dracutmodules+=\" %s \"\n", module)
 	path := filepath.Join(dir, "10-slinstaller-"+module+".conf")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := writeInTarget(in.opts.Root, path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
@@ -1831,7 +1851,10 @@ func insideTarget(root, dir string) bool {
 // and written through, an absolute link reached the live system's file.
 // A directory that leads out of the target is refused.
 func ownFile(root, path string) error {
-	if !insideTarget(root, filepath.Dir(path)) {
+	if root == "" {
+		return nil // no target: the caller says so
+	}
+	if !existingInside(root, filepath.Dir(path)) {
 		return fmt.Errorf("%s leads outside the installed system", path)
 	}
 	fi, err := os.Lstat(path)

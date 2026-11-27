@@ -407,8 +407,10 @@ func TestRootFilesNotThroughLinks(t *testing.T) {
 	root2 := t.TempDir()
 	os.Symlink(outside, filepath.Join(root2, "root"))
 	in.opts.Root = root2
-	if err := in.saveConfig(); err == nil || !strings.Contains(err.Error(), "leads outside") {
-		t.Errorf("/root out of the target: %v", err)
+	// An absolute link is the installed system's: followed inside the
+	// target, never onto the live system's directory of that name.
+	if err := in.saveConfig(); err != nil {
+		t.Errorf("/root an absolute link: %v", err)
 	}
 	if ents, _ := os.ReadDir(outside); len(ents) != 1 {
 		t.Errorf("written outside: %v", ents)
@@ -484,5 +486,41 @@ func TestWriteSynced(t *testing.T) {
 	}
 	if err := writeSynced(p, []byte("k"), 0o400); err == nil {
 		t.Error("written over an existing file")
+	}
+}
+
+// An image's /root that is an absolute link is followed inside the target.
+func TestRootFilesThroughAnImagesAbsoluteRootLink(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "var", "roothome"), 0o700)
+	os.Symlink("/var/roothome", filepath.Join(root, "root"))
+	in := &installer{cfg: &config.Config{Hostname: "box"}, opts: Options{Root: root}}
+	if err := in.saveConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "var", "roothome", "slinstaller.yaml")); err != nil {
+		t.Errorf("not saved where the installed system's /root is: %v", err)
+	}
+}
+
+// The target's own config files are not written through a link onto the
+// live system: an image's xbps.d entry or dracut drop-in that is a link out
+// is replaced by a file of the target's.
+func TestTargetConfigNotThroughLinks(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	outside := filepath.Join(t.TempDir(), "victim")
+	os.WriteFile(outside, []byte("keep\n"), 0o644)
+	dir := mkTarget(t, in, "etc", "xbps.d")
+	os.Symlink(outside, filepath.Join(dir, "10-sunlight.conf"))
+	in.opts.TargetRepos = []string{"https://mirror.example/sunlight"}
+	if err := in.writeTargetRepos(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(outside); string(got) != "keep\n" {
+		t.Errorf("written through the link: %q", got)
+	}
+	if got := readTarget(t, in, "etc", "xbps.d", "10-sunlight.conf"); !strings.Contains(got, "mirror.example") {
+		t.Errorf("10-sunlight.conf = %q", got)
 	}
 }
