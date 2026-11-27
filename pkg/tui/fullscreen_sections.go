@@ -420,6 +420,12 @@ func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.confirmed = true
 				return m, tea.Quit
 			}
+			// Ready but for the passphrase: ask for it here. Its popup opens
+			// when an encrypted partition is added, and left with Esc there
+			// was nowhere to open it again.
+			if m.diskSet && hasAdmin(m.users) && hasRoot(m.parts) && hasESP(m.parts) && hasCrypt(m.parts) && m.passphrase == "" {
+				return m.openPassphrasePopup()
+			}
 			// Install pressed before the layout is complete: say what is
 			// missing in a bordered popup, the way clr warns.
 			m.popup = popupMessage
