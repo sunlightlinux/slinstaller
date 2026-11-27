@@ -2,10 +2,10 @@ package tui
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"regexp"
 	"strings"
@@ -62,7 +62,7 @@ var doneButtons = []struct {
 // on the final screen, so the caller can re-run the configuration wizard.
 // Reboot and power-off are carried out here, after the interface is torn
 // down; an error aborts as before.
-func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan) (back bool, err error) {
+func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan) (next string, err error) {
 	ch := make(chan tea.Msg, 1024)
 	stop := make(chan struct{})
 	opts.Stop = stop
@@ -93,32 +93,36 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 	}()
 	final, runErr := p.Run()
 	if runErr != nil {
-		return false, runErr
+		return "", runErr
 	}
-	fm := final.(installModel)
+	// bubbletea recovers a panic in Update or View and returns no model:
+	// the install may still be running, so its commands are ended rather
+	// than left behind.
+	fm, ok := final.(installModel)
+	if !ok {
+		abandonChildren()
+		return "", fmt.Errorf("the installer's screen failed; the install was abandoned")
+	}
 	if fm.cancelled && fm.stopping {
-		return false, awaitAbandoned(ch, result)
+		return "", awaitAbandoned(ch, result)
 	}
 	if fm.cancelled {
-		return false, fmt.Errorf("aborted")
+		return "", fmt.Errorf("aborted")
 	}
-	// The full-screen interface has been torn down by now, so a reboot or
-	// power-off chosen on the final screen runs cleanly.
+	// What the operator chose on the final screen is the caller's to do,
+	// after it has reported the result: reboot or power off ran here
+	// before, racing the report and the diagnostics, and "Back to menu"
+	// returned no error, so a failed install was reported a success and
+	// left no diagnostics.
 	switch fm.action {
 	case actionReboot:
-		if e := exec.Command("reboot").Run(); e != nil && fm.err == nil {
-			return false, fmt.Errorf("reboot: %w", e)
-		}
+		return "reboot", fm.err
 	case actionPowerOff:
-		if e := exec.Command("poweroff").Run(); e != nil && fm.err == nil {
-			return false, fmt.Errorf("poweroff: %w", e)
-		}
+		return "poweroff", fm.err
 	case actionBack:
-		// Caller re-runs the wizard; the install itself may have succeeded or
-		// failed, but the operator asked to go back regardless.
-		return true, nil
+		return "back", fm.err
 	}
-	return false, fm.err
+	return "", fm.err
 }
 
 // abandonChildren ends the commands the install is running when the
@@ -356,6 +360,26 @@ func (m *installModel) markStage(done, total int, name string) {
 }
 
 // failRunning marks the stage that was running when the install failed.
+// failedOrStopped is how the final screen says the install ended without
+// completing.
+func failedOrStopped(err error) string {
+	if errors.Is(err, controller.ErrStopped) {
+		return "Install stopped"
+	}
+	return "Install failed"
+}
+
+// finishRunning marks the stages still running as done.
+func (m *installModel) finishRunning() {
+	now := m.now()
+	for i := range m.steps {
+		if m.steps[i].status == stepRunning {
+			m.steps[i].status = stepOK
+			m.steps[i].took = now.Sub(m.steps[i].began)
+		}
+	}
+}
+
 func (m *installModel) failRunning() {
 	now := m.now()
 	for i := range m.steps {
@@ -630,6 +654,12 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// between steps would wait on for ever. The step running
 				// is abandoned.
 				if m.stopping {
+					// Once: the installer's own SIGTERM comes back through
+					// the bridge as one more Ctrl+C, and a second round
+					// would hit the cleanup's commands.
+					if m.cancelled {
+						return m, nil
+					}
 					abandonChildren()
 					m.cancelled = true
 					return m, tea.Quit
@@ -654,7 +684,7 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				m.action = doneButtons[m.doneCursor].action
 				return m, tea.Quit
-			case "q", "esc":
+			case "q", "esc", "ctrl+c": // ctrl+c: also a SIGTERM from outside
 				m.action = actionExit
 				return m, tea.Quit
 			case "d":
@@ -687,21 +717,32 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		rows := lineToRows(l, len(m.logs), m.lineWidth)
 		m.logs = append(m.logs, l)
 		m.lineRows = append(m.lineRows, rows)
+		if m.scroll > 0 {
+			// keep a scrolled-up view on the rows being read
+			m.scroll += len(rows)
+		}
 		if len(m.logs) > maxLogLines {
 			m.logs = m.logs[len(m.logs)-maxLogLines:]
 			m.lineRows = m.lineRows[len(m.lineRows)-maxLogLines:]
-		} else if m.scroll > 0 {
-			// keep a scrolled-up view on the rows being read
-			m.scroll += len(rows)
+			// The oldest rows are gone: no further up than the top.
+			if top := len(m.logView()) - m.logRows(); m.scroll > top {
+				m.scroll = max(top, 0)
+			}
 		}
 		return m, m.wait()
 
 	case doneMsg:
 		m.finished = m.now()
 		m.err = msg.err
-		if m.err != nil {
+		switch {
+		case errors.Is(m.err, controller.ErrStopped):
+			// Stopped between stages: the one still marked running had
+			// finished (the stop is checked before the next one is
+			// announced), so it is done, not failed.
+			m.finishRunning()
+		case m.err != nil:
 			m.failRunning()
-		} else {
+		default:
 			m.markStage(len(m.steps), len(m.steps), "complete")
 		}
 		m.phase = phaseDone
@@ -1011,7 +1052,7 @@ func (m installModel) doneView() string {
 	} else {
 		body = []string{
 			lineBG.Width(w).Render(""),
-			warnText.Width(w).Render("  Install failed after " + fmtDur(m.elapsed()) + "."),
+			warnText.Width(w).Render("  " + failedOrStopped(m.err) + " after " + fmtDur(m.elapsed()) + "."),
 			lineBG.Width(w).Render(""),
 		}
 		for _, l := range wrapErr(m.err.Error(), w-4) {

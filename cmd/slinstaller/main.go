@@ -958,24 +958,26 @@ restart:
 	// serial paths confirm by retyping the disk path and install over plain
 	// streamed text.
 	if fullscreen {
-		back, rerr := tui.RunInstall(cfg, opts, plan)
+		next, rerr := tui.RunInstall(cfg, opts, plan)
+		// Reported first — the result and, on a failure, the diagnostics —
+		// then what the operator chose on the final screen.
 		if rerr == nil || rerr.Error() != "aborted" {
 			report.finish(rerr)
 		}
-		if rerr != nil {
-			if rerr.Error() != "aborted" {
-				reportFailure(diagnostics, cfg, tui.InstallLogPath(), rerr)
-			}
-			return rerr
+		if rerr != nil && rerr.Error() != "aborted" {
+			reportFailure(diagnostics, cfg, tui.InstallLogPath(), rerr)
 		}
-		if back {
-			// The operator chose "Back to menu": re-run the wizard and
-			// everything downstream of it (reboot/power-off already happened
-			// inside RunInstall when chosen).
+		switch next {
+		case "back":
+			// Re-run the wizard and everything downstream of it.
 			fmt.Fprintln(os.Stderr, "\nReturning to the configuration menu...")
 			goto restart
+		case "reboot", "poweroff":
+			if err := powerCommand(next); err != nil && rerr == nil {
+				return err
+			}
 		}
-		return nil
+		return rerr
 	}
 
 	// A resumed install erases nothing: it mounts what the first attempt

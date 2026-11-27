@@ -494,3 +494,66 @@ func TestConfirmWarnsOfSecureBoot(t *testing.T) {
 		t.Errorf("a warning with Secure Boot off:\n%s", got)
 	}
 }
+
+// Stopped between stages: the stage that had finished is done, not
+// failed, and the screen says stopped. Ctrl+C (a SIGTERM from outside) on
+// the final screen leaves.
+func TestStoppedInstallScreen(t *testing.T) {
+	m := newInstallModel()
+	m.phase, m.steps = phaseRunning, newSteps()
+	m, _ = stepInstall(m, stageMsg{done: 1, total: len(m.steps), name: m.steps[1].name})
+	m, _ = stepInstall(m, doneMsg{err: fmt.Errorf("controller: %w before mount", controller.ErrStopped)})
+	if m.steps[1].status != stepOK {
+		t.Errorf("the finished stage is %d, want OK", m.steps[1].status)
+	}
+	if view := stripANSIForTest(m.View()); !strings.Contains(view, "Install stopped after") {
+		t.Errorf("final screen:\n%s", view)
+	}
+	if got, cmd := stepInstall(m, keyNamed("ctrl+c")); got.action != actionExit || cmd == nil {
+		t.Error("Ctrl+C on the final screen did not leave")
+	}
+}
+
+// After leaving mid-step, the installer's own SIGTERM coming back as one
+// more Ctrl+C does not end the commands a second time.
+func TestAbandonOnce(t *testing.T) {
+	saved := abandonChildren
+	defer func() { abandonChildren = saved }()
+	n := 0
+	abandonChildren = func() { n++ }
+	m := newInstallModel()
+	m.phase, m.steps, m.stop = phaseRunning, newSteps(), make(chan struct{})
+	for i := 0; i < 3; i++ {
+		m, _ = stepInstall(m, keyNamed("ctrl+c"))
+	}
+	if n != 1 {
+		t.Errorf("abandoned %d times", n)
+	}
+}
+
+// A view scrolled up holds still past the log's bound too.
+func TestScrolledLogHoldsPastTheBound(t *testing.T) {
+	m := newInstallModel()
+	m.phase, m.details = phaseRunning, true
+	for i := 0; i < maxLogLines+50; i++ {
+		m, _ = stepInstall(m, logMsg(fmt.Sprintf("line %d", i)))
+	}
+	m.scroll = 15
+	before := stripANSIForTest(m.detailsView())
+	for i := 0; i < 5; i++ {
+		m, _ = stepInstall(m, logMsg(fmt.Sprintf("new %d", i)))
+	}
+	after := stripANSIForTest(m.detailsView())
+	rows := func(v string) string {
+		var out []string
+		for _, l := range strings.Split(v, "\n") {
+			if l = strings.TrimSpace(l); strings.HasPrefix(l, "line ") {
+				out = append(out, l)
+			}
+		}
+		return strings.Join(out, "|")
+	}
+	if rows(before) != rows(after) {
+		t.Errorf("the paused view moved:\n%s\n---\n%s", rows(before), rows(after))
+	}
+}
