@@ -289,8 +289,25 @@ func (m *Mounter) ReadRootFile(pl *Plan, rel string) ([]byte, error) {
 		if err := os.MkdirAll(m.root, 0o755); err != nil {
 			return nil, err
 		}
-		if err := syscall.Mount(p.EffectiveDevice(), m.root, p.Filesystem, syscall.MS_RDONLY|syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV, p.mountData()); err != nil {
-			return nil, fmt.Errorf("storage: mount %s read-only on %s: %w", p.EffectiveDevice(), m.root, err)
+		// Read-only does not stop ext4 replaying a dirty journal, and xfs
+		// will not mount a dirty log read-only at all: noload/norecovery
+		// look without writing (a crash before the resume leaves exactly
+		// such a log). Refused those, plain read-only.
+		flags := uintptr(syscall.MS_RDONLY | syscall.MS_NOEXEC | syscall.MS_NOSUID | syscall.MS_NODEV)
+		opts := p.mountData()
+		noReplay := map[string]string{"ext3": "noload", "ext4": "noload", "xfs": "norecovery"}[p.Filesystem]
+		merr := fmt.Errorf("no replay option")
+		if noReplay != "" {
+			d := noReplay
+			if opts != "" {
+				d = opts + "," + noReplay
+			}
+			merr = syscall.Mount(p.EffectiveDevice(), m.root, p.Filesystem, flags, d)
+		}
+		if merr != nil {
+			if err := syscall.Mount(p.EffectiveDevice(), m.root, p.Filesystem, flags, opts); err != nil {
+				return nil, fmt.Errorf("storage: mount %s read-only on %s: %w", p.EffectiveDevice(), m.root, err)
+			}
 		}
 		data, err := os.ReadFile(filepath.Join(m.root, rel))
 		if uerr := syscall.Unmount(m.root, 0); uerr != nil && err == nil {
