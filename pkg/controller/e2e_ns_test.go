@@ -681,7 +681,7 @@ func e2ePlain(t *testing.T, dir string) {
 	e.inOrder(
 		"== pre-install", "pre-install ran",
 		"== partition", "run wipefs -a /dev/sda1", "run wipefs -a /dev/sda",
-		"run parted -s /dev/sda mklabel gpt", "run partprobe /dev/sda", "run udevadm settle",
+		"run parted -s /dev/sda mklabel gpt", "run partprobe /dev/sda", "run udevadm settle --timeout=30",
 		"run mkfs.vfat", "run mkfs.ext4",
 		"== mount", "== meta-fs",
 		"== base-install", "run mkdir -p "+e.root+"/var/db/xbps/keys", "run cp -a "+keys+"/.",

@@ -633,7 +633,10 @@ func (in *installer) settle() {
 	if _, err := exec.LookPath("udevadm"); err != nil {
 		return
 	}
-	_ = in.opts.Runner([]string{"udevadm", "settle"})
+	// Bounded: settle waits for the whole udev queue, any device's, up to
+	// 120s by default — a USB or optical drive keeping udev busy cost that
+	// at every call, and its result is not used anyway.
+	_ = in.opts.Runner([]string{"udevadm", "settle", "--timeout=30"})
 }
 
 func (in *installer) mount() error {

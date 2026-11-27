@@ -249,7 +249,7 @@ func TestSettleIsSkippedWithoutUdevadm(t *testing.T) {
 	// With it, settling is one udevadm call through the runner.
 	fakeBin(t, map[string]string{"udevadm": "exit 0"})
 	in.settle()
-	if r.flat() != "udevadm settle\n" {
+	if r.flat() != "udevadm settle --timeout=30\n" {
 		t.Errorf("settle = %q", r.flat())
 	}
 }
