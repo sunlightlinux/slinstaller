@@ -1753,10 +1753,15 @@ func (c *Config) Plan() (*storage.Plan, error) {
 
 	for _, disk := range disks {
 		device := "/dev/" + disk.Name
-		for i, ch := range disk.Children {
+		// i counts the partitions, not the list's entries: an empty entry
+		// is not cut, so it must not leave a gap in the numbers parted
+		// gives the rest.
+		i := -1
+		for _, ch := range disk.Children {
 			if ch == nil {
 				continue
 			}
+			i++
 
 			// An lvm partition is a physical volume: it is cut like any
 			// other, and its children become logical volumes on top.
@@ -1905,24 +1910,51 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		}
 	}
 
-	// A fill physical partition must be the last physical one on its disk;
-	// logical volumes and RAID arrays (which are not cut by parted) are
-	// exempt.
+	if err := checkFreshNumbering(pl); err != nil {
+		return nil, err
+	}
+
+	// A fill physical partition must be the last physical one on its disk —
+	// in on-disk order, which is the number order parted cuts them in, not
+	// the order the config lists them; logical volumes and RAID arrays
+	// (which are not cut by parted) are exempt.
 	for _, disk := range append(append([]string{}, pl.Disks...), pl.RaidDisks...) {
-		lastPhys := -1
-		for i, p := range pl.Parts {
-			if !p.LV && !p.Raid && planDiskOf(p, pl.Disk) == disk {
-				lastPhys = i
-			}
-		}
-		for i, p := range pl.Parts {
-			if !p.LV && !p.Raid && planDiskOf(p, pl.Disk) == disk &&
-				p.Size == storage.SizeRest && i != lastPhys {
+		phys := pl.PhysOn(disk)
+		for k, p := range phys {
+			if p.Size == storage.SizeRest && k != len(phys)-1 {
 				return nil, fmt.Errorf("config: %s fills its disk but is not the last partition on it", p.Device)
 			}
 		}
 	}
 	return pl, nil
+}
+
+// checkFreshNumbering refuses a new partition table whose partition names
+// do not match what parted will make. Device names and numbers come from
+// the config's child names, but on a fresh table parted numbers the
+// partitions itself, 1, 2, 3… in the order they are cut — so a child named
+// for another disk (mkfs on a disk nobody confirmed), a gap (sda1, sda5:
+// mkfs on a partition that does not exist), or a duplicate (two sda1: the
+// second mkfs over the first) all went ahead, after the table was wiped.
+// Each disk's partitions must be its own and numbered 1..n.
+func checkFreshNumbering(pl *storage.Plan) error {
+	seen := map[string]bool{}
+	for _, disk := range append(append([]string{}, pl.Disks...), pl.RaidDisks...) {
+		for k, p := range pl.PhysOn(disk) {
+			if want := storage.PartitionName(disk, p.Number); p.Device != want {
+				return fmt.Errorf("config: partition %s is not a partition of %s (it would be %s)", p.Device, disk, want)
+			}
+			if seen[p.Device] {
+				return fmt.Errorf("config: partition %s is declared twice", p.Device)
+			}
+			seen[p.Device] = true
+			if p.Number != k+1 {
+				return fmt.Errorf("config: %s is partition %d of %s, but a new table numbers its partitions 1, 2, 3…; %s would be %s",
+					p.Device, p.Number, disk, p.Device, storage.PartitionName(disk, k+1))
+			}
+		}
+	}
+	return nil
 }
 
 // planReuse builds a plan that installs into existing partitions without
@@ -1933,6 +1965,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 // Validate reports those; this guards again so a direct Plan call is safe.
 func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 	pl := &storage.Plan{Wipe: false}
+	seen := map[string]bool{}
 	for _, d := range disks {
 		pl.Disks = append(pl.Disks, "/dev/"+d.Name)
 	}
@@ -1947,6 +1980,15 @@ func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 					disk.Name, ch.Name, ch.Type)
 			}
 			dev, num := partDev(device, i, ch.Name)
+			// Formatted or kept, it must be on the disk the install was
+			// confirmed for, and listed once.
+			if want := storage.PartitionName(device, num); dev != want {
+				return nil, fmt.Errorf("config: partition %s is not a partition of %s (it would be %s)", dev, device, want)
+			}
+			if seen[dev] {
+				return nil, fmt.Errorf("config: partition %s is declared twice", dev)
+			}
+			seen[dev] = true
 			p := storage.Partition{
 				Number:     num,
 				Device:     dev,

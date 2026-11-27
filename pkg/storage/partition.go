@@ -146,6 +146,9 @@ func (pl *Plan) diskTableCommands(disk string) [][]string {
 
 // physOn returns the physical partitions on disk (not logical volumes or
 // RAID arrays), in on-disk (Number) order.
+// PhysOn is the partitions parted cuts on disk, in on-disk (number) order.
+func (pl *Plan) PhysOn(disk string) []Partition { return pl.physOn(disk) }
+
 func (pl *Plan) physOn(disk string) []Partition {
 	var out []Partition
 	for _, p := range pl.Parts {

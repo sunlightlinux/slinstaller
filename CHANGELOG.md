@@ -12,6 +12,20 @@ change.
 
 ### Fixed
 
+- **Partition names are checked against what parted makes.** A partition's
+  device came from its `name` unchecked, and parted numbers partitions
+  itself. A child named for another disk (`nvme0n1p2` under `sda`) was
+  formatted though only `sda` was confirmed; a gap (`sda1`, `sda5`) or a
+  duplicate (`sda1` twice) had mkfs hit a missing or the wrong partition
+  after the table was wiped; an empty list entry left a gap. A new table
+  now has to be numbered 1..n on its own disk, and the fill partition has
+  to be the last on the disk, not in the list.
+- **A Safe install could format an existing partition.** A `create`
+  partition is cut by parted at the lowest free number, but formatted as
+  the device its name (or position) gave: on a disk with `sda1`..`sda4`,
+  a new partition the plan called `sda2` became `sda5`, and mkfs
+  formatted the existing `sda2`. The partition stage now checks each
+  number against the disk's table before anything is touched.
 - On a preserved `/home`, the previous owner's links were followed: an
   `authorized_keys -> ../../../etc/shadow` made the ssh-keys step write
   over the new shadow file. Links in the home are replaced, a home that

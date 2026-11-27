@@ -108,6 +108,7 @@ func TestBootArgumentsForStackedRoots(t *testing.T) {
 		}
 		cfg.TargetMedia[1].Children[0].ESP = false // no spare here: it needs a real mount
 		cfg.TargetMedia[1].Children = cfg.TargetMedia[1].Children[1:]
+		cfg.TargetMedia[1].Children[0].Name = "sdb1" // now the disk's only partition
 		var r recorder
 		in := stagedInstaller(t, cfg, &r)
 		in.opts.Passphrase = testPassphrase
@@ -246,6 +247,7 @@ func TestPartitionedArrayInTheInstall(t *testing.T) {
 	cfg := serverConfig(&config.RaidArray{Name: "md0", Level: "1", Partitions: []*config.Media{
 		{FsType: "ext4", Mountpoint: "/", Size: "20G"}, {FsType: "ext4", Mountpoint: "/srv"}}})
 	cfg.TargetMedia[1].Children = cfg.TargetMedia[1].Children[1:] // no spare ESP: it needs a real mount
+	cfg.TargetMedia[1].Children[0].Name = "sdb1"                  // now the disk's only partition
 	var r recorder
 	if err := Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices}); err != nil {
 		t.Fatal(err)

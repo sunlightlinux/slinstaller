@@ -365,11 +365,43 @@ echo "2:513MiB:41473MiB:40960MiB:ext4::;"; echo "1:41473MiB:102400MiB:60927MiB:f
 		t.Errorf("a failed shrink went on: %v\n%s", err, r.flat())
 	}
 	// No room after all: reported, with nothing created.
-	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"`})
+	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"
+echo "2:513MiB:102400MiB:101887MiB:ext4::;"`})
 	r = recorder{}
 	err = Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices})
 	if err == nil || !strings.Contains(err.Error(), "has no unallocated space") || strings.Contains(r.flat(), "mkfs") {
 		t.Errorf("no room: %v\n%s", err, r.flat())
+	}
+}
+
+// A Safe install's new partition is formatted as the device the config
+// names, but parted numbers it itself: when the two differ, the install
+// stops before touching the disk — on a disk holding sda1..sda4, a "sda2"
+// to create would have had mkfs format the existing sda2.
+func TestCreateMustBeWhatPartedNumbers(t *testing.T) {
+	cfg := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: "sda", Type: "disk", Children: []*config.Media{
+		{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Type: "part", FsType: "ext4", Mountpoint: "/", Create: true, Start: "102400M", Size: "50G"},
+	}}}}
+	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"
+echo "2:513MiB:60000MiB:59487MiB:ntfs::msftdata;"; echo "3:60000MiB:60500MiB:500MiB:ntfs::;"
+echo "4:60500MiB:100000MiB:39500MiB:ext4::;"; echo "1:100000MiB:300000MiB:200000MiB:free;"`})
+	var r recorder
+	err := Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices})
+	if err == nil || !strings.Contains(err.Error(), "parted will number it 5 (/dev/sda5)") || !strings.Contains(err.Error(), "partition 2 already exists") {
+		t.Errorf("err = %v", err)
+	}
+	if strings.Contains(r.flat(), "mkpart") || strings.Contains(r.flat(), "mkfs") {
+		t.Errorf("the disk was touched:\n%s", r.flat())
+	}
+	// Named for the number parted gives it, it goes ahead.
+	cfg.TargetMedia[0].Children[1].Name = "sda5"
+	r = recorder{}
+	if err := Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.flat(), "mkfs.ext4 -v -F -b 4096 /dev/sda5") {
+		t.Errorf("not formatted as sda5:\n%s", r.flat())
 	}
 }
 

@@ -113,3 +113,56 @@ func (pl *Plan) PlaceInFree() error {
 	}
 	return nil
 }
+
+// CheckCreateNumbers refuses a Safe install whose new partitions would not
+// be the devices the plan formats. parted gives a new partition the lowest
+// number free in the table, and nothing more of the plan follows it: the
+// mkfs, the esp flag and fstab use the number the config named (or the
+// child's position, for a nameless one). On a disk holding sda1..sda4, a
+// partition the plan calls sda2 is cut as sda5 — and mkfs then formatted
+// the existing sda2. Run before the table is touched.
+func (pl *Plan) CheckCreateNumbers() error {
+	for _, disk := range pl.DiskList() {
+		var creates []Partition
+		for _, p := range pl.physOn(disk) {
+			if p.Create {
+				creates = append(creates, p)
+			}
+		}
+		if len(creates) == 0 {
+			continue
+		}
+		out, err := partedPrintFree(disk)
+		if err != nil {
+			return err
+		}
+		parts, _ := parsePartedFree(out)
+		used := map[int]bool{}
+		for _, p := range parts {
+			used[p.Number] = true
+		}
+		next := 1
+		for _, p := range creates {
+			for used[next] {
+				next++
+			}
+			used[next] = true
+			if p.Number != next {
+				return fmt.Errorf("storage: %s is to be created, but parted will number it %d (%s)%s; name it %s in the config - nothing was changed",
+					p.Device, next, PartitionName(disk, next), existsNote(parts, p.Number), PartitionName(disk, next))
+			}
+		}
+	}
+	return nil
+}
+
+// existsNote says when the number the config named is an existing
+// partition — the one its mkfs would have destroyed.
+func existsNote(parts []existingPart, n int) string {
+	for _, p := range parts {
+		if p.Number == n {
+			return fmt.Sprintf(", and partition %d already exists", n)
+		}
+	}
+	return ""
+}

@@ -137,7 +137,13 @@ func raidWithSpare(level string, active int) *Config {
 		if i == 0 {
 			d.Children = append(d.Children, &Media{Name: name + "1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"})
 		}
-		d.Children = append(d.Children, &Media{Name: name + "2", Type: "raid", Raid: "md0", Spare: i == active})
+		// The member is the disk's second partition after the ESP, its
+		// first on the other disks: parted numbers what it cuts 1, 2, ….
+		member := name + "1"
+		if i == 0 {
+			member = name + "2"
+		}
+		d.Children = append(d.Children, &Media{Name: member, Type: "raid", Raid: "md0", Spare: i == active})
 		c.TargetMedia = append(c.TargetMedia, d)
 	}
 	return c
@@ -153,7 +159,7 @@ func TestRaidSpares(t *testing.T) {
 		t.Fatal(err)
 	}
 	arr := plan.Parts[len(plan.Parts)-1]
-	if strings.Join(arr.RaidMembers, ",") != "/dev/sda2,/dev/sdb2" || strings.Join(arr.RaidSpares, ",") != "/dev/sdc2" {
+	if strings.Join(arr.RaidMembers, ",") != "/dev/sda2,/dev/sdb1" || strings.Join(arr.RaidSpares, ",") != "/dev/sdc1" {
 		t.Errorf("members %v spares %v", arr.RaidMembers, arr.RaidSpares)
 	}
 	// A spare does not count towards what the level needs …

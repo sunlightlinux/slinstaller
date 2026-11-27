@@ -93,6 +93,22 @@ func TestPlanRefusesWhatItCannotLayOut(t *testing.T) {
 			"sda1:"},
 		"only empty entries": {disk(nil, nil),
 			"declares no partitions"},
+		// A new table is numbered by parted, 1..n: a name that says
+		// otherwise would have mkfs aim at the wrong device.
+		"a partition of another disk": {disk(&Media{Name: "sda1", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			&Media{Name: "nvme0n1p2", FsType: "ext4", Mountpoint: "/"}),
+			"/dev/nvme0n1p2 is not a partition of /dev/sda"},
+		"a gap in the numbers": {disk(&Media{Name: "sda1", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			&Media{Name: "sda5", FsType: "ext4", Mountpoint: "/"}),
+			"/dev/sda5 would be /dev/sda2"},
+		"a partition declared twice": {disk(&Media{Name: "sda1", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			&Media{Name: "sda1", FsType: "ext4", Mountpoint: "/"}),
+			"/dev/sda1 is declared twice"},
+		// Listed last but numbered second: on disk it is in the middle.
+		"fill not last on disk": {disk(&Media{Name: "sda1", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			&Media{Name: "sda3", FsType: "ext4", Mountpoint: "/home", Size: "1G"},
+			&Media{Name: "sda2", FsType: "ext4", Mountpoint: "/"}),
+			"/dev/sda2 fills its disk but is not the last partition"},
 	} {
 		if _, err := tc.cfg.Plan(); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want %q", name, err, tc.want)
@@ -116,6 +132,12 @@ func TestPlanRefusesWhatItCannotLayOut(t *testing.T) {
 			"sda/sda3 size:"},
 		"only empty entries": {reuse(nil),
 			"declares no partitions"},
+		"reuse a partition of another disk": {reuse(&Media{Name: "sda1", FsType: "vfat", Mountpoint: "/boot", Preserve: true},
+			&Media{Name: "sdb2", FsType: "ext4", Mountpoint: "/"}),
+			"/dev/sdb2 is not a partition of /dev/sda"},
+		"reuse a partition twice": {reuse(&Media{Name: "sda1", FsType: "vfat", Mountpoint: "/boot", Preserve: true},
+			&Media{Name: "sda1", FsType: "ext4", Mountpoint: "/"}),
+			"/dev/sda1 is declared twice"},
 	} {
 		if _, err := tc.cfg.Plan(); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want %q", name, err, tc.want)
@@ -143,10 +165,11 @@ func TestPlanNamesAndNumbersUnnamedPartitions(t *testing.T) {
 	if pl.Parts[0].Device != "/dev/nvme0n1p1" || pl.Parts[0].Number != 1 {
 		t.Errorf("first partition = %s #%d", pl.Parts[0].Device, pl.Parts[0].Number)
 	}
-	// The third entry is partition 3 (its position), an encrypted physical
-	// volume named after its group.
+	// The third entry is partition 2 — the empty entry is not cut, and
+	// parted numbers what it cuts — an encrypted physical volume named
+	// after its group.
 	pv := pl.Parts[1]
-	if pv.Device != "/dev/nvme0n1p3" || !pv.IsPV || !pv.Encrypted || pv.MapName != "cryptvg0" {
+	if pv.Device != "/dev/nvme0n1p2" || !pv.IsPV || !pv.Encrypted || pv.MapName != "cryptvg0" {
 		t.Errorf("physical volume = %+v", pv)
 	}
 	if len(pl.Parts) != 3 || !pl.Parts[2].LV || pl.Parts[2].Size != storage.SizeRest {

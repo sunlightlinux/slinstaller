@@ -314,6 +314,13 @@ func (in *installer) finish() error {
 }
 
 func (in *installer) partition() error {
+	// A Safe install's new partitions must be the devices it then formats;
+	// checked before anything — a resize included — touches the disk.
+	if !in.plan.Wipe {
+		if err := in.plan.CheckCreateNumbers(); err != nil {
+			return err
+		}
+	}
 	// A disk about to be repartitioned is released first: arrays and
 	// volumes the live system brought up from an earlier install are
 	// stopped, and old signatures erased (blockdev.Teardown).
