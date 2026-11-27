@@ -133,3 +133,18 @@ func TestUUIDFailureCarriesStderr(t *testing.T) {
 		t.Errorf("UUID error should carry cryptsetup's stderr, got %v", err)
 	}
 }
+
+// KeyOpens test-opens the volume with the keyfile, mapping nothing.
+func TestKeyOpens(t *testing.T) {
+	dir := fakeCryptsetup(t)
+	if !KeyOpens("/dev/sda3", "/k") {
+		t.Error("an accepted key did not open")
+	}
+	if got := read(t, filepath.Join(dir, "args")); !strings.Contains(got, "open --test-passphrase --key-file /k /dev/sda3") {
+		t.Errorf("args = %q", got)
+	}
+	t.Setenv("FAKE_CRYPTSETUP_FAIL", "1")
+	if KeyOpens("/dev/sda3", "/k") {
+		t.Error("a refused key opened")
+	}
+}

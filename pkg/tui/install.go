@@ -134,8 +134,11 @@ var sigSink = make(chan os.Signal, 1)
 // still sends so it is not blocked on them. Returning at once left that
 // cleanup racing the program's exit, and the "aborted" of a cancelled
 // confirmation skipped the diagnostics this failure deserves.
+// abandonWait is how long awaitAbandoned waits (a variable for tests).
+var abandonWait = 15 * time.Second
+
 func awaitAbandoned(ch chan tea.Msg, result chan error) error {
-	timeout := time.After(15 * time.Second)
+	timeout := time.After(abandonWait)
 	for {
 		select {
 		case err := <-result:

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -436,5 +437,26 @@ func TestResumeReassemblesTheStack(t *testing.T) {
 	stop, asm := strings.Index(flat, "mdadm --stop /dev/md127"), strings.Index(flat, "mdadm --assemble /dev/md0")
 	if stop < 0 || asm < stop || strings.Count(flat, "--stop") != 1 {
 		t.Errorf("an array held under another name:\n%s", flat)
+	}
+}
+
+// What cleanup cannot do is said in the log, not hidden.
+func TestCleanupWarns(t *testing.T) {
+	var r recorder
+	var log bytes.Buffer
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.Log = &log
+	in.resolvCopy = filepath.Join(mkTarget(t, in, "etc"), "resolv.conf")
+	os.MkdirAll(filepath.Join(in.resolvCopy, "occupied"), 0o755)
+	in.cleanup()
+	if !strings.Contains(log.String(), "warning: remove") {
+		t.Errorf("log = %q", log.String())
+	}
+	log.Reset()
+	in.resolvCopy = filepath.Join(in.opts.Root, "etc", "resolv2.conf")
+	in.resolvSaved = filepath.Join(in.opts.Root, "etc", "no-such-saved")
+	in.cleanup()
+	if !strings.Contains(log.String(), "warning: put back the target's resolv.conf") {
+		t.Errorf("log = %q", log.String())
 	}
 }

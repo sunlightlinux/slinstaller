@@ -443,3 +443,18 @@ func TestLVSizes(t *testing.T) {
 		}
 	}
 }
+
+func TestSizeHelpers(t *testing.T) {
+	if n, err := SizeBytes("59.5G"); err != nil || n != uint64(59.5*(1<<30)) {
+		t.Errorf("SizeBytes = %d, %v", n, err)
+	}
+	if min, label := (&Config{}).RootMinimum(); min != storage.MinRootSize || label == "" {
+		t.Errorf("RootMinimum = %d %q", min, label)
+	}
+	if got := CurlFetch("https://x/i.raw", false); !strings.Contains(got, "--proto-redir =https") {
+		t.Errorf("https: %q", got)
+	}
+	if got := CurlFetch("https://x/i.raw", true); strings.Contains(got, "proto-redir") {
+		t.Errorf("https with plain http allowed: %q", got)
+	}
+}

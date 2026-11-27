@@ -192,6 +192,19 @@ func mountChild(t *testing.T) {
 	if len(m.mounted) != 5 {
 		t.Errorf("mounted %d things, want 5: %v", len(m.mounted), m.mounted)
 	}
+	// The binds alone come off (for an image unpack) and go back on.
+	if !m.HasMeta() {
+		t.Error("HasMeta after MountMeta")
+	}
+	if err := m.UnmountMeta(); err != nil {
+		t.Fatalf("UnmountMeta: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "proc", "self")); err == nil || m.HasMeta() || len(m.mounted) != 2 {
+		t.Errorf("after UnmountMeta: proc bound %v, HasMeta %v, mounted %v", err == nil, m.HasMeta(), m.mounted)
+	}
+	if err := m.MountMeta(); err != nil {
+		t.Fatalf("MountMeta again: %v", err)
+	}
 
 	if err := m.UnmountAll(); err != nil {
 		t.Fatalf("UnmountAll: %v", err)

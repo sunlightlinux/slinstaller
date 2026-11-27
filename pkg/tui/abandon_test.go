@@ -95,3 +95,31 @@ func TestAbandonLeavesSIGTERMToChildren(t *testing.T) {
 		t.Fatalf("child: %v\n%s", err, out)
 	}
 }
+
+func TestAwaitAbandonedOutcomes(t *testing.T) {
+	saved := abandonWait
+	defer func() { abandonWait = saved }()
+	abandonWait = 50 * time.Millisecond
+	// It never winds down: said so, after the wait.
+	if err := awaitAbandoned(make(chan tea.Msg), make(chan error)); err == nil || !strings.Contains(err.Error(), "did not wind down") {
+		t.Errorf("stuck: %v", err)
+	}
+	// It had already finished well: no failure.
+	ok := make(chan error, 1)
+	ok <- nil
+	if err := awaitAbandoned(make(chan tea.Msg), ok); err != nil {
+		t.Errorf("finished: %v", err)
+	}
+	// The exported wrapper calls the same.
+	savedAb := abandonChildren
+	defer func() { abandonChildren = savedAb }()
+	called := false
+	abandonChildren = func() { called = true }
+	AbandonChildren()
+	if !called {
+		t.Error("AbandonChildren did nothing")
+	}
+	if layoutEncrypted([]partEntry{{Type: "lvm", Encrypted: true}}) != true || layoutEncrypted(autoLayout(false)) {
+		t.Error("layoutEncrypted")
+	}
+}
