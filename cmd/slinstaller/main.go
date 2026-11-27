@@ -358,6 +358,11 @@ restart:
 		apply = true
 	default:
 		fs.Usage()
+		for _, a := range rest[1:] {
+			if strings.HasPrefix(a, "-") {
+				return fmt.Errorf("%s comes after the config file; flags go before it", a)
+			}
+		}
 		return fmt.Errorf("expected at most one config file")
 	}
 	if err != nil {
@@ -623,6 +628,11 @@ restart:
 	if logPath == "" && !fullscreen && !systemCheck {
 		logPath = tui.InstallLogPath()
 	}
+	// A system check writes nothing to the log: a --log given with it was
+	// emptied for nothing.
+	if systemCheck {
+		logPath = ""
+	}
 	var quiet io.Writer // set when the commands' output goes to the file alone
 	if logPath != "" {
 		var lf *os.File
@@ -738,7 +748,6 @@ restart:
 			return fmt.Errorf("the installer medium is not booted in UEFI mode (%s is absent); Sunlight Linux is UEFI-only - reboot it in UEFI mode",
 				"/sys/firmware/efi")
 		}
-
 
 		// An offline install has no remote repo, so the base must come from a
 		// local repository on the live medium. Fail here, before wiping, if

@@ -111,3 +111,10 @@ func TestRootAndStageFlags(t *testing.T) {
 		t.Error("UnmountTree(/) was not refused")
 	}
 }
+
+// A flag after the config file is said to be one, not a second file.
+func TestFlagAfterTheConfig(t *testing.T) {
+	if err := run([]string{"a.yaml", "--text"}); err == nil || !strings.Contains(err.Error(), "--text comes after the config file; flags go before it") {
+		t.Errorf("err = %v", err)
+	}
+}
