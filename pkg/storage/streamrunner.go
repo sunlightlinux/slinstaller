@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"sync"
 	"time"
 )
 
@@ -47,21 +48,58 @@ func SinkRunner(sink func(line string)) Runner {
 		pr, pw := io.Pipe()
 		c.Stdout, c.Stderr = pw, pw
 
+		// The pipe is read by one goroutine into a queue and the sink fed
+		// from it by another, so the pipe is drained as fast as the command
+		// writes whatever the sink does: a sink stalled for longer than
+		// outputWait (a screen paused with Ctrl+S) would otherwise have had
+		// the end of the output cut off when the pipe was closed.
+		var (
+			mu     sync.Mutex
+			queue  []string
+			closed bool
+		)
+		cond := sync.NewCond(&mu)
+		push := func(l string) {
+			mu.Lock()
+			queue = append(queue, l)
+			mu.Unlock()
+			cond.Signal()
+		}
 		done := make(chan struct{})
+		go func() {
+			for {
+				mu.Lock()
+				for len(queue) == 0 && !closed {
+					cond.Wait()
+				}
+				if len(queue) == 0 {
+					mu.Unlock()
+					close(done)
+					return
+				}
+				l := queue[0]
+				queue = queue[1:]
+				mu.Unlock()
+				sink(l)
+			}
+		}()
 		go func() {
 			sc := bufio.NewScanner(pr)
 			sc.Buffer(make([]byte, 64*1024), 1<<20)
 			for sc.Scan() {
-				sink(sc.Text())
+				push(sc.Text())
 			}
 			// A line past the buffer stops the scanner. The child still
 			// writes to the pipe, so keep reading until EOF or it blocks
 			// and Run never returns.
 			if err := sc.Err(); err != nil {
-				sink("(output line dropped: " + err.Error() + ")")
+				push("(output line dropped: " + err.Error() + ")")
 			}
 			io.Copy(io.Discard, pr)
-			close(done)
+			mu.Lock()
+			closed = true
+			mu.Unlock()
+			cond.Signal()
 		}()
 
 		err := c.Run()
