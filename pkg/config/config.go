@@ -1611,11 +1611,13 @@ func (c *Config) Validate() error {
 	// an encrypted partition's mkfs is given it less the LUKS header.
 	checkFSMin := func(where, fsType, sizeStr string, encrypted bool) {
 		if min, label := storage.MinFilesystemSize(fsType); min > 0 {
+			what := fsType + " size"
 			if encrypted {
 				min += storage.LUKSHeaderSize
-				label += " and the 16 MiB LUKS header"
+				label = fmt.Sprintf("%d MiB", min>>20)
+				what += " (with the 16 MiB LUKS header)"
 			}
-			checkMin(where, sizeStr, min, label, fsType+" size")
+			checkMin(where, sizeStr, min, label, what)
 		}
 	}
 
