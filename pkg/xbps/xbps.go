@@ -14,6 +14,7 @@ package xbps
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 // Options is a base-system install: the target tree, the repository to
@@ -124,4 +125,50 @@ func (o Options) Commands() ([][]string, error) {
 	cmds = append(cmds, []string{"chroot", o.Root, "xbps-reconfigure", "-fa"})
 
 	return cmds, nil
+}
+
+// ResolveCommands returns the commands that check, installing nothing, that
+// the packages resolve from the repositories: the keys are seeded into
+// scratch, a throwaway root, and xbps-install runs there as a dry run (-n).
+// A typo, a kernel no repository carries or an offline repository missing
+// part of the base would otherwise fail at base-install, after the wipe.
+func (o Options) ResolveCommands(scratch string) ([][]string, error) {
+	o.Root = scratch
+	cmds, err := o.Commands()
+	if err != nil {
+		return nil, err
+	}
+	cmds = cmds[:len(cmds)-1] // no reconfigure
+	install := cmds[len(cmds)-1]
+	for i, a := range install {
+		if a == "-Sy" {
+			install[i] = "-Sny"
+			break
+		}
+	}
+	return cmds, nil
+}
+
+// Unresolved reports a dry run's output when it says the package set
+// cannot be installed — a package not found in the repository pool, or the
+// transaction aborted over unresolved dependencies, shlibs or conflicts
+// (xbps prints the culprits on the lines before) — and nothing otherwise:
+// any other failure (a network blip, a lock) is not a verdict on the
+// package set. At most the last 20 lines.
+func Unresolved(output string) []string {
+	if !strings.Contains(output, "not found in repository pool") &&
+		!strings.Contains(output, "Transaction aborted due to unresolved") &&
+		!strings.Contains(output, "Transaction aborted due to conflicting") {
+		return nil
+	}
+	var lines []string
+	for _, l := range strings.Split(output, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) > 20 {
+		lines = lines[len(lines)-20:]
+	}
+	return lines
 }

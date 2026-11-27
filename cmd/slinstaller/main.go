@@ -9,6 +9,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"embed"
 	"errors"
 	"flag"
@@ -35,6 +37,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
 	"github.com/sunlightlinux/slinstaller/pkg/tui"
+	"github.com/sunlightlinux/slinstaller/pkg/xbps"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
@@ -844,6 +847,15 @@ restart:
 				}
 			}
 		}
+
+		// And that the package set resolves from them: a typo in packages,
+		// a kernel no repository carries, an offline repository missing
+		// part of the base all failed at base-install, after the wipe.
+		if reachesBaseInstall(through, resumeFrom) && !fromImage && !cfg.SkipValidationAll {
+			if err := resolvePackages(opts, cfg); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Every install, staged or not, puts an unsigned GRUB on the disk.
@@ -1140,6 +1152,98 @@ func checkDiskFit(plan *storage.Plan, devs []blockdev.Device, rootMin uint64, ro
 		}
 		return d.Size, true
 	}, rootMin, rootMinLabel)
+}
+
+// reachesBaseInstall says whether a fresh run with these flags installs
+// packages: not a resumed one past it, nor one stopped before it.
+func reachesBaseInstall(through, resumeFrom string) bool {
+	if resumeFrom != "" && resumeFrom != "base-install" {
+		return false
+	}
+	if through == "" {
+		return true
+	}
+	for _, s := range controller.StageNames() {
+		if s == "base-install" {
+			return true
+		}
+		if s == through {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveRun runs the dry run's commands and returns their output; a
+// variable so tests stand it in.
+var resolveRun = func(cmds [][]string) (string, error) {
+	var out bytes.Buffer
+	for _, c := range cmds {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		cmd := exec.CommandContext(ctx, c[0], c[1:]...)
+		cmd.Stdout, cmd.Stderr = &out, &out
+		err := cmd.Run()
+		cancel()
+		if err != nil {
+			return out.String(), err
+		}
+	}
+	return out.String(), nil
+}
+
+// resolvePackages dry-runs the base install in a scratch root, before the
+// disk is touched. It refuses only when xbps says the package set cannot be
+// had; a dry run that fails otherwise (xbps missing here, the network
+// flapping) is a warning, not a verdict. With kernel-fallback, a kernel
+// that is not found is retried as the fallback, as the install does.
+func resolvePackages(opts controller.Options, cfg *config.Config) error {
+	if _, err := exec.LookPath("xbps-install"); err != nil {
+		return nil // not a live system: nothing to resolve with
+	}
+	try := func(packages []string) ([]string, error) {
+		scratch, err := os.MkdirTemp("", "slinstaller-resolve-")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(scratch)
+		cmds, err := xbps.Options{
+			Repo: opts.Repo, LocalRepos: opts.LocalRepos, ExtraRepos: opts.ExtraRepos,
+			KeysDir: opts.KeysDir, Arch: opts.Arch, ProxyEnv: cfg.ProxyEnv(), Packages: packages,
+		}.ResolveCommands(scratch)
+		if err != nil {
+			return nil, err
+		}
+		out, err := resolveRun(cmds)
+		if err == nil {
+			return nil, nil
+		}
+		if bad := xbps.Unresolved(out); len(bad) > 0 {
+			return bad, nil
+		}
+		return nil, err
+	}
+	fmt.Fprintln(os.Stderr, "checking that the packages resolve...")
+	bad, err := try(opts.Packages)
+	if kernel, fallback := cfg.KernelPackage(), cfg.KernelFallback; len(bad) > 0 && kernel != "" && fallback != "" {
+		swapped := make([]string, len(opts.Packages))
+		for i, p := range opts.Packages {
+			if p == kernel {
+				p = fallback
+			}
+			swapped[i] = p
+		}
+		if bad2, err2 := try(swapped); len(bad2) == 0 && err2 == nil {
+			fmt.Fprintf(os.Stderr, "note: %s does not resolve; the install will use the fallback %s\n", kernel, fallback)
+			return nil
+		}
+	}
+	switch {
+	case len(bad) > 0:
+		return fmt.Errorf("the packages do not resolve from the repositories (nothing was touched):\n  %s", strings.Join(bad, "\n  "))
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "warning: could not check that the packages resolve (%v); going on\n", err)
+	}
+	return nil
 }
 
 // hostXBPSArch is this machine's architecture as xbps names it.

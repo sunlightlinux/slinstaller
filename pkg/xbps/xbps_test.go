@@ -1,6 +1,7 @@
 package xbps
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -150,5 +151,38 @@ func TestCommandsOfflineLocalOnly(t *testing.T) {
 	}
 	if strings.Contains(want, "-R  ") || strings.Contains(want, "-R -r") {
 		t.Error("offline install has an empty remote -R")
+	}
+}
+
+// The dry run is the install's own command in a scratch root, with -n and
+// no reconfigure; only a verdict on the package set is reported.
+func TestResolve(t *testing.T) {
+	o := Options{Root: "/mnt", Repo: "https://repo", ExtraRepos: []string{"https://mirror"}, KeysDir: "/keys", Packages: []string{"base", "linux"}}
+	cmds, err := o.ResolveCommands("/tmp/scratch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := fmt.Sprint(cmds)
+	if !strings.Contains(got, "xbps-install -Sny -R https://mirror -R https://repo -r /tmp/scratch base linux") ||
+		strings.Contains(got, "/mnt") || strings.Contains(got, "reconfigure") || !strings.Contains(got, "/tmp/scratch/var/db/xbps/keys") {
+		t.Errorf("resolve commands: %s", got)
+	}
+	if _, err := (Options{Root: "/mnt"}).ResolveCommands("/s"); err == nil {
+		t.Error("no repository accepted")
+	}
+	for out, want := range map[string]bool{
+		"[*] Updating repository...\nPackage 'linx' not found in repository pool.\n":          true,
+		"foo-1.0 (missing dep bar>=2)\nTransaction aborted due to unresolved dependencies.\n": true,
+		"Transaction aborted due to conflicting packages.\n":                                  true,
+		"ERROR: [reposync] failed to fetch file: Connection refused\n":                        false,
+		"": false,
+	} {
+		if got := Unresolved(out); (len(got) > 0) != want {
+			t.Errorf("%q: %v", out, got)
+		}
+	}
+	long := strings.Repeat("x\n", 30) + "Package 'y' not found in repository pool.\n"
+	if got := Unresolved(long); len(got) != 20 || !strings.Contains(got[19], "'y'") {
+		t.Errorf("long output: %d lines", len(got))
 	}
 }
