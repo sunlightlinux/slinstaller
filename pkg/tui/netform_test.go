@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // staticEth0 is a model on the interface list with eth0 already static.
@@ -45,5 +47,39 @@ func TestNetFormRefusesAnIPv6Gateway(t *testing.T) {
 		if got.formStep != 2 || !strings.Contains(got.formErr, "IPv4") {
 			t.Errorf("IPv6 gateway %s went through: step %d err %q", gw, got.formStep, got.formErr)
 		}
+	}
+}
+
+// TestNetworkTestUsesTheProxy: Test Network Settings checked the network
+// without the HTTPS proxy set in the Proxy section, which the install then
+// uses: behind a proxy-only network it failed (and the live network was
+// not carried over), while the install itself would have gone through.
+func TestNetworkTestUsesTheProxy(t *testing.T) {
+	var gotProxy string
+	was := netVerify
+	t.Cleanup(func() { netVerify = was })
+	netVerify = func(target, proxy string) error { gotProxy = proxy; return nil }
+
+	m := withSize(newModel(twoTestDisks()))
+	m.proxy = "http://proxy.example:3128"
+	m = send(m, runes("A"))
+	for _, s := range m.visibleSections(1) {
+		if s == secTestNet {
+			break
+		}
+		m = send(m, down)
+	}
+	nm, cmd := m.Update(enter)
+	if nm.(model).popup != popupSpinner || cmd == nil {
+		t.Fatalf("Test Network did not start: popup %d", nm.(model).popup)
+	}
+	ok := false
+	for _, c := range cmd().(tea.BatchMsg) {
+		if r, is := c().(netTestDoneMsg); is {
+			ok = r.ok
+		}
+	}
+	if !ok || gotProxy != "http://proxy.example:3128" {
+		t.Errorf("check ok %v, proxy given to it %q", ok, gotProxy)
 	}
 }

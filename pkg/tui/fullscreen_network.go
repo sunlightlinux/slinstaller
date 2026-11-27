@@ -33,11 +33,16 @@ func spinnerTickCmd() tea.Cmd {
 	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return spinnerTickMsg{} })
 }
 
+// netVerify is the connectivity check (a variable so tests can stand in).
+var netVerify = network.VerifyConnectivityVia
+
 // testNetCmd runs the connectivity check off the UI goroutine and reports
-// the outcome as a message.
-func testNetCmd() tea.Cmd {
+// the outcome as a message. It goes through the Proxy section's proxy, as
+// the install will (clr-installer's test applies it too): without it a
+// network that reaches out only through a proxy failed the test.
+func testNetCmd(proxy string) tea.Cmd {
 	return func() tea.Msg {
-		if err := network.VerifyConnectivity(netTestTarget); err != nil {
+		if err := netVerify(netTestTarget, proxy); err != nil {
 			return netTestDoneMsg{result: "[FAIL] No connectivity: " + err.Error()}
 		}
 		return netTestDoneMsg{result: "[ OK ] Network is reachable.", ok: true}

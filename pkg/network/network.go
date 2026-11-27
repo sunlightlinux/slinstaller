@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -26,11 +27,30 @@ func VerifyConnectivity(url string) error {
 	return verify(url, 10*time.Second)
 }
 
+// VerifyConnectivityVia is VerifyConnectivity through the given proxy
+// URL — one the operator has typed but the environment does not carry
+// yet — or, with proxy "", through the environment's.
+func VerifyConnectivityVia(url, proxy string) error {
+	if strings.TrimSpace(proxy) == "" {
+		return VerifyConnectivity(url)
+	}
+	pu, err := neturl.Parse(strings.TrimSpace(proxy))
+	if err != nil {
+		return fmt.Errorf("network: proxy %q: %w", proxy, err)
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = http.ProxyURL(pu)
+	return verifyWith(&http.Client{Timeout: 10 * time.Second, Transport: tr}, url)
+}
+
 // verify makes one request, a GET whose body is not read: a server that
 // refuses HEAD still answers it, and one request instead of a HEAD then a
 // GET halves the time an unreachable mirror takes to fail.
 func verify(url string, timeout time.Duration) error {
-	client := &http.Client{Timeout: timeout}
+	return verifyWith(&http.Client{Timeout: timeout}, url)
+}
+
+func verifyWith(client *http.Client, url string) error {
 	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("network: cannot reach %s: %w", url, err)

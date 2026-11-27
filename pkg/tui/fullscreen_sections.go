@@ -575,7 +575,7 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		m.testingNet = true
 		m.netProgress = 0
 		m.netResult = ""
-		return m, tea.Batch(spinnerTickCmd(), testNetCmd())
+		return m, tea.Batch(spinnerTickCmd(), testNetCmd(strings.TrimSpace(m.proxy)))
 	case secSaveConfig:
 		// Write the current configuration to a file, as clr's Save
 		// Configuration Settings does, and report the outcome.
