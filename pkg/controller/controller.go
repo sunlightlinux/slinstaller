@@ -326,11 +326,9 @@ func (in *installer) cleanup() {
 	// Only when there is a copy to take the place of: an image unpack takes
 	// it out while the target's own is still aside (a failed unpack leaves
 	// it there for the next attempt, which finds and keeps it).
-	if err := removeIfPresent(in.resolvCopy); err != nil {
-		warn("%v", err)
-	} else if in.resolvSaved != "" && in.resolvCopy != "" {
-		if err := os.Rename(in.resolvSaved, in.resolvCopy); err != nil {
-			warn("put back the target's resolv.conf: %v", err)
+	if in.resolvCopy != "" {
+		if err := in.putBackResolv(); err != nil {
+			warn("%v", err)
 		}
 	}
 	if err := in.mnt.UnmountAll(); err != nil {
@@ -355,17 +353,7 @@ func (in *installer) finish() error {
 	// (write-files, a post-install hook) is the system's own and stays —
 	// removed, the installed system had none — and the one set aside
 	// goes, rather than coming back over it.
-	var resolvErr error
-	if got, err := os.ReadFile(in.resolvCopy); in.resolvCopy != "" && err == nil && !bytes.HasPrefix(got, []byte(resolvMark)) {
-		resolvErr = removeIfPresent(in.resolvSaved)
-	} else {
-		resolvErr = removeIfPresent(in.resolvCopy)
-		if resolvErr == nil && in.resolvSaved != "" {
-			if err := os.Rename(in.resolvSaved, in.resolvCopy); err != nil {
-				resolvErr = fmt.Errorf("put back the target's resolv.conf: %w", err)
-			}
-		}
-	}
+	resolvErr := in.putBackResolv()
 	if resolvErr != nil {
 		return errors.Join(resolvErr, in.mnt.UnmountAll())
 	}
@@ -854,6 +842,36 @@ func (in *installer) isOurResolv(fi os.FileInfo, dst string, live []byte) bool {
 	// (The second only resuming: on a fresh install it took an image's own
 	// resolv.conf that happened to say the same for ours, and removed it.)
 	return err == nil && (bytes.HasPrefix(got, []byte(resolvMark)) || (in.opts.ResumeFrom != "" && bytes.Equal(got, live)))
+}
+
+// putBackResolv takes the install-time resolv.conf out of the target and
+// puts the target's own back. Only the copy as it was made (a regular file
+// headed by its mark): one the config wrote over it (write-files, a hook) —
+// content, or a link such as resolvconf's — is the system's own and stays,
+// and the one set aside goes. Used by finish and by cleanup alike: cleanup
+// removing a written one lost it to a resume that does not rerun
+// first-boot. Not read through a link (Lstat): a link's target is the
+// installed system's, not the live one's.
+func (in *installer) putBackResolv() error {
+	if in.resolvCopy == "" {
+		return nil
+	}
+	if fi, err := os.Lstat(in.resolvCopy); err == nil {
+		got, rerr := os.ReadFile(in.resolvCopy)
+		ours := fi.Mode().IsRegular() && rerr == nil && bytes.HasPrefix(got, []byte(resolvMark))
+		if !ours {
+			return removeIfPresent(in.resolvSaved)
+		}
+	}
+	if err := removeIfPresent(in.resolvCopy); err != nil {
+		return err
+	}
+	if in.resolvSaved != "" {
+		if err := os.Rename(in.resolvSaved, in.resolvCopy); err != nil {
+			return fmt.Errorf("put back the target's resolv.conf: %w", err)
+		}
+	}
+	return nil
 }
 
 // saveConfig records, on the installed system, the config it was built
@@ -1748,6 +1766,13 @@ func (in *installer) forceDracutModule(module string) error {
 // keymap, locale and user accounts. Networking is its own stage.
 func (in *installer) firstBoot() error {
 	root := in.opts.Root
+	// The files the system package writes in place: made the target's own
+	// first, so a link an image has there is not written through.
+	for _, rel := range []string{"etc/hostname", "etc/machine-id", "etc/rc.conf", "etc/rc.local", "etc/locale.conf", "etc/default/libc-locales"} {
+		if err := ownFile(root, filepath.Join(root, rel)); err != nil {
+			return err
+		}
+	}
 	if err := system.Hostname(root, in.cfg.Hostname); err != nil {
 		return err
 	}

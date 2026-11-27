@@ -133,8 +133,10 @@ func mountStagesChild(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(r.opts.Root, "boot", "marker"), nil, 0o644)
 	r.resolvCopy = filepath.Join(r.opts.Root, "etc", "resolv.conf")
-	os.MkdirAll(filepath.Join(r.resolvCopy, "occupied"), 0o755)
-	if err := r.finish(); err == nil || !strings.Contains(err.Error(), "remove") {
+	os.MkdirAll(filepath.Dir(r.resolvCopy), 0o755)
+	os.WriteFile(r.resolvCopy, []byte(resolvMark), 0o644)
+	r.resolvSaved = filepath.Join(r.opts.Root, "etc", "gone") // cannot be put back
+	if err := r.finish(); err == nil || !strings.Contains(err.Error(), "put back") {
 		t.Errorf("finish with resolv.conf stuck: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(r.opts.Root, "boot", "marker")); err == nil {
@@ -218,12 +220,20 @@ func TestFinish(t *testing.T) {
 		t.Errorf("no warning about the log: %q", log.String())
 	}
 
-	// A resolv.conf that cannot be removed is an error: left behind, it
-	// would pin the installed system to the live medium's DNS.
+	// A resolv.conf that cannot be put right is an error: left behind, the
+	// copy would pin the installed system to the live medium's DNS.
+	in = stagedInstaller(t, twoPartConfig(), &r)
+	in.resolvCopy = filepath.Join(mkTarget(t, in, "etc"), "resolv.conf")
+	os.WriteFile(in.resolvCopy, []byte(resolvMark), 0o644)
+	in.resolvSaved = filepath.Join(in.opts.Root, "etc", "gone")
+	wantErr(t, in.finish(), "put back")
+	// One the config made a directory of is not ours: left as it is.
 	in = stagedInstaller(t, twoPartConfig(), &r)
 	in.resolvCopy = filepath.Join(mkTarget(t, in, "etc"), "resolv.conf")
 	os.MkdirAll(filepath.Join(in.resolvCopy, "occupied"), 0o755)
-	wantErr(t, in.finish(), "remove")
+	if err := in.finish(); err != nil {
+		t.Errorf("a directory in its place: %v", err)
+	}
 }
 
 // realRun runs a command for real; for the harmless ones (cp, mkdir) a test

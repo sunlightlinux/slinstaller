@@ -419,7 +419,17 @@ func TestFirstBootFailures(t *testing.T) {
 		"hostname": {func() *config.Config { c := base(); c.Hostname = "box"; return c },
 			func(t *testing.T, in *installer, r *recorder) { blockFile(t, in, "etc", "hostname") }, "write hostname"},
 		"machine-id": {base,
-			func(t *testing.T, in *installer, r *recorder) { fullDisk(t, in, "etc", "machine-id") }, "write machine-id"},
+			func(t *testing.T, in *installer, r *recorder) {
+				// A link is made the target's own now; an /etc that takes no
+				// new file fails the write. (Not as root, which writes anyway.)
+				if os.Geteuid() == 0 {
+					t.Skip("root writes into a read-only directory")
+				}
+				etc := mkTarget(t, in, "etc")
+				os.WriteFile(filepath.Join(etc, "hostname"), nil, 0o644)
+				os.Chmod(etc, 0o555)
+				t.Cleanup(func() { os.Chmod(etc, 0o755) })
+			}, "write machine-id"},
 		"timezone": {func() *config.Config { c := base(); c.Timezone = "UTC"; return c },
 			func(t *testing.T, in *installer, r *recorder) { blockWithDir(t, in, "etc", "localtime") }, "link localtime"},
 		"keymap": {func() *config.Config { c := base(); c.Keyboard = "us"; return c },

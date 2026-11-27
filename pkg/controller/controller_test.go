@@ -524,3 +524,27 @@ func TestTargetConfigNotThroughLinks(t *testing.T) {
 		t.Errorf("10-sunlight.conf = %q", got)
 	}
 }
+
+// first-boot's hostname and the bootloader's /etc/default/grub are not
+// written through a link out of the target.
+func TestFirstBootAndGrubNotThroughLinks(t *testing.T) {
+	var r recorder
+	cfg := twoPartConfig()
+	cfg.Hostname = "box"
+	in := stagedInstaller(t, cfg, &r)
+	outside := t.TempDir()
+	for _, n := range []string{"hostname", "grub"} {
+		os.WriteFile(filepath.Join(outside, n), []byte("keep\n"), 0o644)
+	}
+	etc := mkTarget(t, in, "etc")
+	os.Symlink(filepath.Join(outside, "hostname"), filepath.Join(etc, "hostname"))
+	mkTarget(t, in, "etc", "default")
+	os.Symlink(filepath.Join(outside, "grub"), filepath.Join(etc, "default", "grub"))
+	in.firstBoot()
+	in.bootloader()
+	for _, n := range []string{"hostname", "grub"} {
+		if got, _ := os.ReadFile(filepath.Join(outside, n)); string(got) != "keep\n" {
+			t.Errorf("%s written through the link: %q", n, got)
+		}
+	}
+}

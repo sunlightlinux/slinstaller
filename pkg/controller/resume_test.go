@@ -451,9 +451,10 @@ func TestCleanupWarns(t *testing.T) {
 	in := stagedInstaller(t, twoPartConfig(), &r)
 	in.opts.Log = &log
 	in.resolvCopy = filepath.Join(mkTarget(t, in, "etc"), "resolv.conf")
-	os.MkdirAll(filepath.Join(in.resolvCopy, "occupied"), 0o755)
+	os.WriteFile(in.resolvCopy, []byte(resolvMark), 0o644)
+	in.resolvSaved = filepath.Join(in.opts.Root, "etc", "gone") // cannot be put back
 	in.cleanup()
-	if !strings.Contains(log.String(), "warning: remove") {
+	if !strings.Contains(log.String(), "warning: put back") {
 		t.Errorf("log = %q", log.String())
 	}
 	log.Reset()
@@ -577,5 +578,36 @@ func TestIsOurResolvOnlyResuming(t *testing.T) {
 	in.opts.ResumeFrom = "bootloader"
 	if !in.isOurResolv(fi, dst, live) {
 		t.Error("resuming, a pre-mark copy not recognised")
+	}
+}
+
+// A resolv.conf the config made a link (resolvconf's) stays a link, in
+// finish and in cleanup alike; cleanup keeps written content too.
+func TestPutBackResolvKeepsWhatTheConfigMade(t *testing.T) {
+	for _, via := range []string{"finish", "cleanup"} {
+		var r recorder
+		in := stagedInstaller(t, twoPartConfig(), &r)
+		etc := mkTarget(t, in, "etc")
+		in.resolvCopy = filepath.Join(etc, "resolv.conf")
+		in.resolvSaved = filepath.Join(etc, "resolv.conf.slinstaller-saved")
+		os.WriteFile(in.resolvSaved, []byte("nameserver 9.9.9.9\n"), 0o644)
+		os.Symlink("/run/resolvconf/resolv.conf", in.resolvCopy) // dangling here
+		if via == "finish" {
+			in.finish()
+		} else {
+			in.cleanup()
+		}
+		if l, err := os.Readlink(in.resolvCopy); err != nil || l != "/run/resolvconf/resolv.conf" {
+			t.Errorf("%s: the link is %q, %v", via, l, err)
+		}
+	}
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	etc := mkTarget(t, in, "etc")
+	in.resolvCopy = filepath.Join(etc, "resolv.conf")
+	os.WriteFile(in.resolvCopy, []byte("nameserver 192.0.2.53\n"), 0o644)
+	in.cleanup()
+	if got, _ := os.ReadFile(in.resolvCopy); string(got) != "nameserver 192.0.2.53\n" {
+		t.Errorf("cleanup lost a written resolv.conf: %q", got)
 	}
 }
