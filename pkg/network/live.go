@@ -18,7 +18,10 @@ func LiveCommands(i Interface) ([][]string, error) {
 	if i.Name == "" || len(i.Addrs) == 0 {
 		return nil, fmt.Errorf("network: %q has no address to apply", i.Name)
 	}
-	cmds := [][]string{{"ip", "addr", "flush", "dev", i.Name}}
+	// Global addresses only: flushing the fe80:: link-local address too
+	// left IPv6 without neighbour discovery (and a link-local gateway out
+	// of reach), and a link that is already up does not get it back.
+	cmds := [][]string{{"ip", "addr", "flush", "dev", i.Name, "scope", "global"}}
 	for _, a := range i.Addrs {
 		prefix, err := maskToCIDR(a.Netmask, a.V6)
 		if err != nil {

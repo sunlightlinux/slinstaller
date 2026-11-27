@@ -20,7 +20,7 @@ func TestLiveCommands(t *testing.T) {
 	// The old addresses go first, so the interface ends with exactly the
 	// configured ones; the route comes last, once there is an address for it.
 	want := []string{
-		"ip addr flush dev eth0",
+		"ip addr flush dev eth0 scope global",
 		"ip addr add 10.0.0.2/24 dev eth0",
 		"ip addr add fd00::2/64 dev eth0",
 		"ip link set eth0 up",

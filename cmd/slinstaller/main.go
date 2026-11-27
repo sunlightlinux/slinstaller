@@ -1487,6 +1487,12 @@ func seedSunlightKey(liveKeys string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// `cp -a dir/. keys/` gives the target's /var/db/xbps/keys this
+	// directory's mode: MkdirTemp's 0700, not the 0755 xbps has. The keys
+	// are public.
+	if err := os.Chmod(dir, 0o755); err != nil {
+		return "", err
+	}
 	// The live medium's keys (Void's), when the directory is there.
 	if ents, err := os.ReadDir(liveKeys); err == nil {
 		for _, e := range ents {

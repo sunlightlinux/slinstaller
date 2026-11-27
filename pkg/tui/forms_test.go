@@ -276,7 +276,7 @@ func TestStaticInterfaceIsAppliedToTheLiveSystem(t *testing.T) {
 	}
 	nm, _ = nm.(model).Update(cmd())
 	m = nm.(model)
-	want := "ip addr flush dev eth0|ip addr add 10.0.0.2/24 dev eth0|ip link set eth0 up|ip route replace default via 10.0.0.1 dev eth0"
+	want := "ip addr flush dev eth0 scope global|ip addr add 10.0.0.2/24 dev eth0|ip link set eth0 up|ip route replace default via 10.0.0.1 dev eth0"
 	if strings.Join(ran, "|") != want {
 		t.Errorf("live commands:\n%s", strings.Join(ran, "\n"))
 	}

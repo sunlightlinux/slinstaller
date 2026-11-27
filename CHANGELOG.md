@@ -55,6 +55,11 @@ change.
 
 ### Fixed
 
+- A static address applied to the live system from the full-screen
+  installer flushed the interface's IPv6 link-local address too; only
+  global addresses are flushed now.
+- The installed system's `/var/db/xbps/keys` was left mode 0700 (copied
+  from a temporary directory); it is 0755, as xbps makes it.
 - With `copyNetwork`, the `denyinterfaces` line for bond and bridge
   members was appended after the live system's dhcpcd.conf; when that
   ended inside an `interface` block dhcpcd ignored it and asked for a
