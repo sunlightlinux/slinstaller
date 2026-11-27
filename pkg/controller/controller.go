@@ -1260,19 +1260,7 @@ func (in *installer) fstab() error {
 // the runit service ask for its passphrase a second time (dracut already
 // opened it).
 func (in *installer) crypttab() error {
-	var enc, nonRoot []storage.Partition
-	rootEncrypted := false
-	for _, p := range in.plan.Parts {
-		if !p.Encrypted {
-			continue
-		}
-		enc = append(enc, p)
-		if in.isRootCrypt(p) {
-			rootEncrypted = true
-		} else {
-			nonRoot = append(nonRoot, p)
-		}
-	}
+	enc, nonRoot, rootEncrypted := in.cryptVolumes()
 	if len(enc) == 0 {
 		return nil
 	}
@@ -1292,19 +1280,48 @@ func (in *installer) crypttab() error {
 	if len(nonRoot) == 0 {
 		return nil
 	}
-	var tab strings.Builder
-	for _, p := range nonRoot {
-		uuid, err := luks.UUID(p.Device)
-		if err != nil {
-			return err
-		}
-		tab.WriteString(luks.CrypttabLineWith(p.MapName, uuid, in.keyfile, p.CryptOptions))
+	tab, err := crypttabText(nonRoot, in.keyfile, luks.UUID)
+	if err != nil {
+		return err
 	}
 	path := filepath.Join(in.opts.Root, "etc", "crypttab")
-	if err := writeInTarget(in.opts.Root, path, []byte(tab.String()), 0o600); err != nil { // an image's 0644 file not kept
+	if err := writeInTarget(in.opts.Root, path, []byte(tab), 0o600); err != nil { // an image's 0644 file not kept
 		return fmt.Errorf("write crypttab: %w", err)
 	}
 	return nil
+}
+
+// cryptVolumes splits the plan's encrypted volumes: all of them, those
+// crypttab lists (every one the initramfs does not open), and whether the
+// root's path is encrypted.
+func (in *installer) cryptVolumes() (enc, nonRoot []storage.Partition, rootEncrypted bool) {
+	for _, p := range in.plan.Parts {
+		if !p.Encrypted {
+			continue
+		}
+		enc = append(enc, p)
+		if in.isRootCrypt(p) {
+			rootEncrypted = true
+		} else {
+			nonRoot = append(nonRoot, p)
+		}
+	}
+	return enc, nonRoot, rootEncrypted
+}
+
+// crypttabText renders /etc/crypttab for the non-root volumes, each named
+// by the LUKS UUID uuidOf reads from its device (luks.UUID; a test passes
+// its own).
+func crypttabText(nonRoot []storage.Partition, keyfile string, uuidOf func(string) (string, error)) (string, error) {
+	var tab strings.Builder
+	for _, p := range nonRoot {
+		uuid, err := uuidOf(p.Device)
+		if err != nil {
+			return "", err
+		}
+		tab.WriteString(luks.CrypttabLineWith(p.MapName, uuid, keyfile, p.CryptOptions))
+	}
+	return tab.String(), nil
 }
 
 // rootVGName is the LVM volume group that holds the root logical volume, or

@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("00007110010001002")
+string("0")
+bool(true)

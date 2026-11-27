@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("7000012Y0208")
+string("0\r0")
+bool(false)
