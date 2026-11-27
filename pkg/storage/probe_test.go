@@ -87,8 +87,38 @@ func TestProbeUUIDsReadsWhereTheFilesystemLives(t *testing.T) {
 
 func TestProbeUUIDsStopsOnTheFirstFailure(t *testing.T) {
 	fakeTool(t, "blkid", "exit 2")
-	if _, err := ProbeUUIDs(&Plan{Parts: []Partition{{Device: "/dev/sda1", Filesystem: "vfat"}}}); err == nil {
+	if _, err := ProbeUUIDs(&Plan{Parts: []Partition{{Device: "/dev/sda1", Filesystem: "vfat", Mountpoint: "/boot"}}}); err == nil {
 		t.Error("a failed probe was swallowed")
+	}
+}
+
+// A partition that is only kept — a Windows MSR, a shrunk NTFS, a spare ESP
+// — has no fstab entry, and may hold no signature blkid knows (it exits 2).
+// Probed, a Safe install from a discovered layout failed at the fstab stage.
+func TestProbeUUIDsSkipsWhatFstabDoesNotList(t *testing.T) {
+	dir := fakeTool(t, "blkid", `for a; do last=$a; done; [ "$last" = /dev/sda2 ] && exit 2; echo "uuid-of-$last"`)
+	pl := &Plan{Parts: []Partition{
+		{Device: "/dev/sda1", Filesystem: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Device: "/dev/sda2", Preserve: true},
+		{Device: "/dev/sda3", Filesystem: "ntfs", Preserve: true, ResizeMiB: 4096},
+		{Device: "/dev/sda4", Filesystem: "ext4", Mountpoint: "/"},
+		{Device: "/dev/sda5", Filesystem: "swap"},
+		{Device: "/dev/sdb1", Filesystem: "vfat", SpareESP: true},
+	}}
+	uuids, err := ProbeUUIDs(pl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dev := range []string{"/dev/sda1", "/dev/sda4", "/dev/sda5"} {
+		if uuids[dev] == "" {
+			t.Errorf("%s, listed in fstab, was not probed", dev)
+		}
+	}
+	args, _ := os.ReadFile(filepath.Join(dir, "args"))
+	for _, dev := range []string{"/dev/sda2", "/dev/sda3", "/dev/sdb1"} {
+		if strings.Contains(string(args), dev+"\n") {
+			t.Errorf("blkid was run on %s, which fstab does not list:\n%s", dev, args)
+		}
 	}
 }
 

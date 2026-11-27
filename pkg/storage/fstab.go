@@ -23,7 +23,7 @@ func ProbeUUID(device string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ProbeUUIDs reads the UUID of every partition in the plan, keyed by
+// ProbeUUIDs reads the UUID of every filesystem fstab lists, keyed by
 // device path, for Fstab to reference.
 func ProbeUUIDs(pl *Plan) (map[string]string, error) {
 	uuids := make(map[string]string, len(pl.Parts))
@@ -31,6 +31,12 @@ func ProbeUUIDs(pl *Plan) (map[string]string, error) {
 		// These carry no mountable filesystem: a physical volume, a RAID
 		// member, an array that holds a partition table instead.
 		if p.IsPV || p.IsRaidMember || (p.Raid && p.Filesystem == "") {
+			continue
+		}
+		// Nor what fstab does not list: a partition only kept (a Windows
+		// MSR, a shrunk NTFS) may hold nothing blkid knows, and its exit 2
+		// failed the install; a spare ESP is never mounted.
+		if p.Mountpoint == "" && p.Filesystem != "swap" {
 			continue
 		}
 		id, err := ProbeUUID(p.EffectiveDevice())
