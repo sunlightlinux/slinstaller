@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1402,6 +1403,16 @@ func (in *installer) swapfile() error {
 	if in.cfg.SwapFileSize == "" {
 		return nil
 	}
+	// fallocate is given the bytes the config was checked as: it reads
+	// "1GB" as 10^9, and refuses "2e9", "1048576.5" and "0", all of which
+	// the config check takes. "0" is no swap file (clr-installer's meaning).
+	size, err := config.SizeBytes(in.cfg.SwapFileSize)
+	if err != nil {
+		return fmt.Errorf("swapFileSize: %w", err)
+	}
+	if size == 0 {
+		return nil
+	}
 	// A link there (a reused root, an image) would have the commands below
 	// truncate and mkswap whatever it points at; it is replaced.
 	if fi, err := os.Lstat(filepath.Join(in.opts.Root, "swapfile")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
@@ -1416,7 +1427,7 @@ func (in *installer) swapfile() error {
 		}
 	}
 	if err := storage.RunCommands(
-		storage.SwapFileCommands(in.opts.Root, in.cfg.SwapFileSize, rootFS), in.opts.Runner); err != nil {
+		storage.SwapFileCommands(in.opts.Root, strconv.FormatUint(size, 10), rootFS), in.opts.Runner); err != nil {
 		return err
 	}
 

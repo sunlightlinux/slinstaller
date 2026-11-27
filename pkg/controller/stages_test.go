@@ -274,6 +274,37 @@ func TestSaveConfigWritesAPrivateReplayableCopy(t *testing.T) {
 	}
 }
 
+// swapFileSize reaches fallocate as the bytes the config check read it as.
+// Passed as written, a size Validate accepts and fallocate does not
+// ("2e9", "1048576.5", "0") failed the install after the wipe and the
+// base install, and "1GB" was 10^9 bytes to fallocate but 2^30 to the
+// config. "0" is no swap file, as clr-installer documents it.
+func TestSwapfileSizeIsBytes(t *testing.T) {
+	for size, want := range map[string]string{"2e9": "2000000000", "1GB": "1073741824", "1.5M": "1572864", "64MiB": "67108864"} {
+		cfg := twoPartConfig()
+		cfg.SwapFileSize = size
+		var r recorder
+		in := stagedInstaller(t, cfg, &r)
+		mkTarget(t, in, "etc")
+		if err := in.swapfile(); err != nil {
+			t.Fatalf("%s: swapfile: %v", size, err)
+		}
+		if flat := r.flat(); !strings.Contains(flat, "fallocate -l "+want+" ") {
+			t.Errorf("%s: want fallocate -l %s, ran:\n%s", size, want, flat)
+		}
+	}
+	cfg := twoPartConfig()
+	cfg.SwapFileSize = "0"
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	if err := in.swapfile(); err != nil || len(r.cmds) != 0 {
+		t.Errorf("swapFileSize 0: %v, ran:\n%s", err, r.flat())
+	}
+	if _, err := os.Stat(filepath.Join(in.opts.Root, "etc", "fstab")); err == nil {
+		t.Error("fstab written for swapFileSize 0")
+	}
+}
+
 func TestSwapfileStage(t *testing.T) {
 	// No swap file asked for: nothing runs and fstab is not touched.
 	var r recorder

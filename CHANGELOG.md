@@ -24,6 +24,11 @@ change.
   `1GB`, `512KB` and `1P` — clr-installer's own syntax example writes
   `150MiB` — were refused as "not a byte count". They are read as
   clr-installer reads them: every unit a power of 1024, `GB` included.
+- **`swapFileSize` is made the size the config check read.** It went to
+  `fallocate` as written, which refuses `2e9`, `1048576.5` and `0` (all
+  accepted by the check) after the disk was wiped and the system
+  installed, and reads `1GB` as 10^9 bytes. It is given the bytes now,
+  and `0` is no swap file, as clr-installer documents it.
 - **The dry run shows the whole partition stage.** It printed the disk's
   own commands only: for an LVM, RAID or encrypted layout, `pvcreate`,
   `vgcreate`, `lvcreate`, `mdadm --create` and `cryptsetup luksFormat`
