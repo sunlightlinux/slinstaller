@@ -272,6 +272,34 @@ func TestMkfsSkipsRaidMembers(t *testing.T) {
 	}
 }
 
+// The partition that fills a disk is held to its own minimum: the root's,
+// the ESP's, or a partition's.
+func TestFillMinByDisk(t *testing.T) {
+	pl := &Plan{
+		Disk:  "/dev/sda",
+		Disks: []string{"/dev/sda", "/dev/sdb", "/dev/sdc", "/dev/sdd"},
+		Parts: []Partition{
+			{Device: "/dev/sda1", Disk: "/dev/sda", Size: "536870912", Filesystem: "vfat", Mountpoint: "/boot"},
+			{Device: "/dev/sda2", Size: SizeRest, Filesystem: "ext4", Mountpoint: "/"}, // disk from pl.Disk
+			{Device: "/dev/sdb1", Disk: "/dev/sdb", Size: SizeRest, Filesystem: "vfat", Mountpoint: "/boot/efi"},
+			{Device: "/dev/sdc1", Disk: "/dev/sdc", Size: SizeRest, IsRaidMember: true},
+			{Device: "/dev/sdd1", Disk: "/dev/sdd", Size: "1073741824", Filesystem: "ext4", Mountpoint: "/srv"},
+			{LV: true, Size: SizeRest, Mountpoint: "/"}, // an LV fills its group, not a disk
+			{Raid: true, Size: SizeRest},
+		},
+	}
+	got := pl.FillMinByDisk(4e9)
+	want := map[string]uint64{"/dev/sda": 4e9, "/dev/sdb": MinESPSize, "/dev/sdc": MinPartitionSize}
+	if len(got) != len(want) {
+		t.Errorf("FillMinByDisk = %v, want %v", got, want)
+	}
+	for d, w := range want {
+		if got[d] != w {
+			t.Errorf("%s fill minimum = %d, want %d", d, got[d], w)
+		}
+	}
+}
+
 func TestFixedBytesByDisk(t *testing.T) {
 	pl := &Plan{
 		Disk:  "/dev/sda",

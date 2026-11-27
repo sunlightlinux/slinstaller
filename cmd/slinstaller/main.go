@@ -753,20 +753,8 @@ restart:
 		if err != nil {
 			return err
 		}
-		for _, disk := range plan.DiskList() {
-			switch d := blockdev.FindByPath(devs, disk); {
-			case d == nil:
-				return fmt.Errorf("target disk %s is not among the machine's block devices", disk)
-			case d.Type != "disk" && d.Type != "loop":
-				return fmt.Errorf("target %s is a %s, not a whole disk", disk, d.Type)
-			default:
-				// A mounted filesystem, active swap or the live medium on
-				// the target: installing would pull it from under the
-				// running system. No flag overrides this.
-				if why := d.InUse(); why != "" {
-					return fmt.Errorf("target disk %s is in use: %s", disk, why)
-				}
-			}
+		if err := checkTargetDisks(plan.DiskList(), devs); err != nil {
+			return err
 		}
 
 		if plan.Wipe {
@@ -830,22 +818,13 @@ restart:
 			}
 		}
 
-		// Disk fit: the fixed-size partitions plus GPT overhead must fit the
-		// disk, checked before wiping so an oversize layout fails here rather
-		// than partway through parted. Skipped for a reuse install (nothing
-		// is cut) and when size validation is off.
+		// Disk fit: checked before wiping so an oversize layout fails here
+		// rather than partway through parted. Skipped for a reuse install
+		// (nothing is cut) and when size validation is off.
 		if plan.Wipe && !cfg.SkipValidationSize && !cfg.SkipValidationAll {
-			fixed := plan.FixedBytesByDisk()
-			for _, disk := range plan.DiskList() {
-				d := blockdev.FindByPath(devs, disk)
-				if d == nil || d.Size == 0 {
-					continue
-				}
-				need := fixed[disk] + storage.GPTReserveBytes
-				if need > d.Size {
-					return fmt.Errorf("layout needs %s on %s but the disk is only %s - reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
-						humanSize(need), disk, humanSize(d.Size))
-				}
+			rootMin, rootMinLabel := cfg.RootMinimum()
+			if err := checkDiskFit(plan, devs, rootMin, rootMinLabel); err != nil {
+				return err
 			}
 		}
 
@@ -993,6 +972,59 @@ func installStoppable(cfg *config.Config, opts controller.Options) error {
 	}()
 	opts.Stop = stop
 	return controller.Install(cfg, opts)
+}
+
+// checkTargetDisks confirms each target disk exists and is a whole disk
+// before it is wiped: a config written for another machine must not
+// silently repartition the wrong thing (or a partition).
+func checkTargetDisks(disks []string, devs []blockdev.Device) error {
+	for _, disk := range disks {
+		switch d := blockdev.FindByPath(devs, disk); {
+		case d == nil:
+			return fmt.Errorf("target disk %s is not among the machine's block devices", disk)
+		case d.Type != "disk" && d.Type != "loop":
+			return fmt.Errorf("target %s is a %s, not a whole disk", disk, d.Type)
+		case d.Size == 0:
+			// An empty card reader, a detached loop device: nothing to
+			// install to, and no size for the fit check to go by.
+			return fmt.Errorf("target disk %s has no capacity (size 0): is there a medium in it?", disk)
+		default:
+			// A mounted filesystem, active swap or the live medium on
+			// the target: installing would pull it from under the
+			// running system. No flag overrides this.
+			if why := d.InUse(); why != "" {
+				return fmt.Errorf("target disk %s is in use: %s", disk, why)
+			}
+		}
+	}
+	return nil
+}
+
+// checkDiskFit checks that each disk holds its fixed-size partitions plus
+// the GPT overhead, and leaves the partition that fills the rest at least
+// its minimum (rootMin for a root).
+func checkDiskFit(plan *storage.Plan, devs []blockdev.Device, rootMin uint64, rootMinLabel string) error {
+	fixed, fillMin := plan.FixedBytesByDisk(), plan.FillMinByDisk(rootMin)
+	for _, disk := range plan.DiskList() {
+		d := blockdev.FindByPath(devs, disk)
+		if d == nil {
+			continue // refused by checkTargetDisks
+		}
+		need := fixed[disk] + storage.GPTReserveBytes
+		if need > d.Size {
+			return fmt.Errorf("layout needs %s on %s but the disk is only %s - reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
+				humanSize(need), disk, humanSize(d.Size))
+		}
+		if min, ok := fillMin[disk]; ok && d.Size-need < min {
+			what := humanSize(min)
+			if min == rootMin {
+				what = rootMinLabel
+			}
+			return fmt.Errorf("the fixed-size partitions leave %s on %s for the partition that fills it, below its %s minimum - reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
+				humanSize(d.Size-need), disk, what)
+		}
+	}
+	return nil
 }
 
 // checkLocale rejects a timezone, keymap or language the live system does

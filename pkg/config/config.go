@@ -436,6 +436,10 @@ func (c *Config) minRoot() (uint64, string) {
 	return storage.MinRootSize, "2 GB"
 }
 
+// RootMinimum is the smallest root filesystem the config may ask for, and
+// how to say it: what a root that fills its disk has to be left with.
+func (c *Config) RootMinimum() (uint64, string) { return c.minRoot() }
+
 // autoSize is the swap size that means "work it out from the memory".
 const autoSize = "auto"
 

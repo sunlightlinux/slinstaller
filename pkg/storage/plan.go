@@ -229,6 +229,33 @@ func (pl *Plan) FixedBytesByDisk() map[string]uint64 {
 	return out
 }
 
+// FillMinByDisk gives, per disk, the smallest the partition that fills the
+// rest of it (SizeRest) may be: rootMin for the root filesystem, the ESP
+// minimum for an ESP, and MinPartitionSize for anything else. A disk with
+// no fill partition is not listed. With FixedBytesByDisk it tells whether
+// what a disk has left is enough, before the disk is wiped.
+func (pl *Plan) FillMinByDisk(rootMin uint64) map[string]uint64 {
+	out := map[string]uint64{}
+	for _, p := range pl.Parts {
+		if p.LV || p.Raid || p.Size != SizeRest {
+			continue
+		}
+		disk := p.Disk
+		if disk == "" {
+			disk = pl.Disk
+		}
+		switch {
+		case p.Mountpoint == "/":
+			out[disk] = rootMin
+		case p.isESP() || p.SpareESP:
+			out[disk] = MinESPSize
+		default:
+			out[disk] = MinPartitionSize
+		}
+	}
+	return out
+}
+
 // PartitionName returns the device path for partition n on disk:
 // /dev/sda -> /dev/sda1, /dev/nvme0n1 -> /dev/nvme0n1p1.
 //

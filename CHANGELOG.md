@@ -12,6 +12,13 @@ change.
 
 ### Fixed
 
+- **A root that fills the disk was never held to the root minimum.** The
+  disk-fit check summed only the fixed sizes, so a 3 GB disk with a 512M
+  ESP, 2G swap and a filling root was wiped and given a 0.3 GB root. What
+  is left for each disk's filling partition now has to reach its minimum
+  (the root's, by install type, for `/`). A disk that reports size 0 (an
+  empty card reader) is refused as a target instead of skipping the
+  check.
 - **The language was never checked.** `language: xx_YY.garbage` was
   written to the target's `LANG` as given. It is now checked, like the
   timezone and keymap, against the locales the live system's C library

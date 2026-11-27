@@ -451,12 +451,25 @@ func applyChild(t *testing.T) {
 	_, err = e.run("", plainConfig(), "--skip-validation-size")
 	e.refused("disk too small, size check off", err, "aborted")
 
-	// A disk that reports no size cannot be checked for fit; the install
-	// goes on to the confirmation.
+	// Room for the fixed partitions is not enough: the root that fills
+	// the rest needs its minimum too (3 GB less 512M and 2G is not 2 GB).
 	e = newApplyEnv(t)
-	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":0,"type":"disk"}`)
+	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":3000000000,"type":"disk"}`)
+	_, err = e.run(confirmed, plainConfig())
+	e.refused("fill root too small", err, "below its 2 GB minimum")
+	e = newApplyEnv(t)
+	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":5000000000,"type":"disk"}`)
 	_, err = e.run("", plainConfig())
-	e.refused("disk of unknown size", err, "aborted")
+	e.refused("fill root big enough", err, "aborted")
+
+	// A disk that reports no size (an empty card reader) is no target,
+	// whether or not sizes are checked.
+	for _, flags := range [][]string{nil, {"--skip-validation-size"}} {
+		e = newApplyEnv(t)
+		setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":0,"type":"disk"}`)
+		_, err = e.run(confirmed, plainConfig(), flags...)
+		e.refused("disk of size 0", err, "has no capacity (size 0)")
+	}
 
 	// Reusing partitions: they have to be there, and be partitions.
 	reuse := plainConfig()
