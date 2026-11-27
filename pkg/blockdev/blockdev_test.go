@@ -263,3 +263,17 @@ func TestSharedMembers(t *testing.T) {
 		t.Errorf("formatting sda1: %q", got)
 	}
 }
+
+// One LUN through two paths: its map's partitions, seen under both, are one
+// device, not fellow members.
+func TestSharedMembersMultipath(t *testing.T) {
+	mp := Device{Name: "mpatha", Path: "/dev/mapper/mpatha", Type: "mpath", Children: []Device{
+		{Name: "mpatha-part2", Path: "/dev/mapper/mpatha-part2", Type: "part", FsType: "linux_raid_member", UUID: "r"}}}
+	devs := []Device{
+		{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 1 << 40, Children: []Device{mp}},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", Size: 1 << 40, Children: []Device{mp}},
+	}
+	if got := SharedMembers(devs, []string{"/dev/sda"}); len(got) != 0 {
+		t.Errorf("one LUN shared with itself: %q", got)
+	}
+}

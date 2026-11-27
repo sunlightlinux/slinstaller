@@ -289,13 +289,14 @@ func (m *Mounter) ReadRootFile(pl *Plan, rel string) ([]byte, error) {
 		if err := os.MkdirAll(m.root, 0o755); err != nil {
 			return nil, err
 		}
-		// Read-only does not stop ext4 replaying a dirty journal, and xfs
+		// Read-only does not stop ext4 replaying a dirty journal (or btrfs
+		// its log tree), and xfs
 		// will not mount a dirty log read-only at all: noload/norecovery
 		// look without writing (a crash before the resume leaves exactly
 		// such a log). Refused those, plain read-only.
 		flags := uintptr(syscall.MS_RDONLY | syscall.MS_NOEXEC | syscall.MS_NOSUID | syscall.MS_NODEV)
 		opts := p.mountData()
-		noReplay := map[string]string{"ext3": "noload", "ext4": "noload", "xfs": "norecovery"}[p.Filesystem]
+		noReplay := map[string]string{"ext3": "noload", "ext4": "noload", "xfs": "norecovery", "btrfs": "rescue=nologreplay"}[p.Filesystem]
 		merr := fmt.Errorf("no replay option")
 		if noReplay != "" {
 			d := noReplay

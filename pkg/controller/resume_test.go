@@ -526,3 +526,17 @@ func TestResumeLooksReadOnlyFirst(t *testing.T) {
 		t.Error("the root was not looked at read-only")
 	}
 }
+
+// The root that cannot be looked at is said as such, not as "nothing to resume".
+func TestResumeLookErrorSaid(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.ResumeFrom = "bootloader"
+	in.readRoot = func(string) ([]byte, error) { return nil, errors.New("mount /dev/sda2: no such device") }
+	err := in.mount()
+	if err == nil || !strings.Contains(err.Error(), "no such device") || strings.Contains(err.Error(), "nothing to resume") {
+		t.Errorf("err = %v", err)
+	}
+	in.readRoot = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	wantErr(t, in.mount(), "nothing to resume")
+}

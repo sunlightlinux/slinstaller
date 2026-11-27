@@ -681,7 +681,12 @@ func (in *installer) mount() error {
 	want := "slinstaller install in progress; layout " + in.layoutPrint() + "\n"
 	if in.opts.ResumeFrom != "" && in.readRoot != nil {
 		got, err := in.readRoot(resumeMark)
-		if err != nil || string(got) != want {
+		switch {
+		case err != nil && !errors.Is(err, os.ErrNotExist):
+			// Not "nothing to resume": the root could not be looked at
+			// (a device not there yet, a module missing). Said as it is.
+			return fmt.Errorf("resume: look at the target's root: %w", err)
+		case err != nil || string(got) != want:
 			return fmt.Errorf("resume: the target holds no install this installer left unfinished for this config's disk layout (/%s) - nothing to resume; run the install without --resume", resumeMark)
 		}
 	}
@@ -699,8 +704,15 @@ func (in *installer) mount() error {
 	mark := filepath.Join(in.opts.Root, resumeMark)
 	if in.opts.ResumeFrom == "" {
 		os.Remove(mark) // a link there is replaced, not followed
-		if err := os.WriteFile(mark, []byte(want), 0o600); err != nil {
+		// Synced, and its directory: the resume's look mounts without
+		// replaying a journal, so a mark only in the journal at a crash
+		// would read as no install to resume.
+		if err := writeSynced(mark, []byte(want), 0o600); err != nil {
 			return fmt.Errorf("mark the install as in progress: %w", err)
+		}
+		if d, err := os.Open(in.opts.Root); err == nil {
+			d.Sync()
+			d.Close()
 		}
 	} else {
 		fi, err := os.Lstat(mark)

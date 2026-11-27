@@ -402,8 +402,11 @@ func parseVolumeGroups(s string) map[string][]string {
 
 // memberTypes are the signatures of a device that is one part of something
 // spanning several: a RAID array, an LVM volume group, a ZFS pool, a
-// bcache set, a multi-device btrfs. Their members share one UUID.
-var memberTypes = map[string]bool{"linux_raid_member": true, "LVM2_member": true, "zfs_member": true, "bcache": true, "btrfs": true}
+// multi-device btrfs. Their members share one UUID.
+// (Not LVM2_member or bcache: lsblk's UUID for those is the device's own,
+// not the group's, so it matches only a clone — Shared, through pvs, sees
+// the groups.)
+var memberTypes = map[string]bool{"linux_raid_member": true, "zfs_member": true, "btrfs": true}
 
 // SharedMembers reports the members, among the devices targets destroy
 // (each target and what is under it), of an array, group or pool that also
@@ -432,6 +435,14 @@ func SharedMembers(devs []Device, targets []string) []string {
 	for _, d := range devs {
 		walk(d, false)
 	}
+	// A path listed both inside and outside is one device seen twice (a
+	// multipath map's partitions under each path to the LUN), not two.
+	insidePaths := map[string]bool{}
+	for _, e := range all {
+		if e.inside {
+			insidePaths[e.dev.Path] = true
+		}
+	}
 	var out []string
 	said := map[string]bool{}
 	for _, e := range all {
@@ -440,13 +451,13 @@ func SharedMembers(devs []Device, targets []string) []string {
 		}
 		var others []string
 		for _, o := range all {
-			if !o.inside && o.dev.UUID == e.dev.UUID && o.dev.FsType == e.dev.FsType && !slices.Contains(others, o.dev.Path) {
+			if !o.inside && !insidePaths[o.dev.Path] && o.dev.UUID == e.dev.UUID && o.dev.FsType == e.dev.FsType && !slices.Contains(others, o.dev.Path) {
 				others = append(others, o.dev.Path)
 			}
 		}
 		if len(others) > 0 {
 			said[e.dev.Path] = true
-			out = append(out, fmt.Sprintf("%s (%s %s) has a fellow member on %s", e.dev.Path, e.dev.FsType, e.dev.UUID, strings.Join(others, ", ")))
+			out = append(out, fmt.Sprintf("%s (%s %s) has a fellow member on %s (or a dd clone of it is there)", e.dev.Path, e.dev.FsType, e.dev.UUID, strings.Join(others, ", ")))
 		}
 	}
 	return out
