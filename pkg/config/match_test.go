@@ -169,6 +169,17 @@ func TestMatchRefusesAForeignPartitionName(t *testing.T) {
 	if err := c.ResolveDisks(machineDisks()); err == nil || !strings.Contains(err.Error(), "partition sdb5 is not one of disk \"sda\"") {
 		t.Errorf("ResolveDisks = %v", err)
 	}
+	// A prefix is not enough: another disk's name can start with this one's.
+	for disk, child := range map[string]string{"sda": "sdaa3", "nvme0n1": "nvme0n10p1", "loop1": "loop10p2"} {
+		if partitionOf(disk, child) {
+			t.Errorf("%s taken for a partition of %s", child, disk)
+		}
+	}
+	for disk, child := range map[string]string{"sda": "sda3", "nvme0n1": "nvme0n1p12", "mmcblk0": "mmcblk0p1"} {
+		if !partitionOf(disk, child) {
+			t.Errorf("%s not taken for a partition of %s", child, disk)
+		}
+	}
 }
 
 // A reuse layout with an empty entry numbers its partitions as Plan does,

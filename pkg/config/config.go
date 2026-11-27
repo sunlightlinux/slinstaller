@@ -744,7 +744,7 @@ func (c *Config) ResolveDisks(disks []DiskInfo) error {
 			// A named partition must be one of the disk's own: renamed by
 			// its position, sdb5 under a matched sda became nvme0n1p2 — an
 			// existing partition nobody named — and was formatted.
-			if ch.Name != "" && (old == "" || !strings.HasPrefix(ch.Name, old)) {
+			if ch.Name != "" && (old == "" || !partitionOf(old, ch.Name)) {
 				return fmt.Errorf("config: partition %s is not one of disk %q (matched as /dev/%s): name it after the disk, or leave it unnamed", ch.Name, old, name)
 			}
 			if old != "" && strings.HasPrefix(ch.Name, old) {
@@ -951,6 +951,19 @@ func (c *Config) KernelPackage() string {
 // device file: "p" after a name that ends in a digit (nvme0n1 -> nvme0n1p1),
 // "" otherwise (sda -> sda1). clr-installer keeps a table of prefixes for
 // this (nvme, loop, mmcblk); the kernel's rule covers those and the rest.
+// partitionOf reports whether name is a partition of disk by the kernel's
+// naming: the disk's name, its partition separator ("p" after a digit)
+// and a number. A prefix alone is not enough — nvme0n10p1 starts with
+// nvme0n1, sdaa3 with sda.
+func partitionOf(disk, name string) bool {
+	rest, ok := strings.CutPrefix(name, disk)
+	if !ok {
+		return false
+	}
+	rest, ok = strings.CutPrefix(rest, aliasPartSuffix(disk))
+	return ok && rest != "" && strings.Trim(rest, "0123456789") == ""
+}
+
 func aliasPartSuffix(file string) string {
 	// The kernel's own rule: a disk whose name ends in a digit (nvme0n1,
 	// loop0, mmcblk0, md0) has its partitions set off by a "p".
