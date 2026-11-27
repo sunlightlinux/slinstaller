@@ -55,12 +55,17 @@ func isSerialConsole(dev string) bool {
 	return false
 }
 
+// dedupStrings drops repeats, keeping each at its last place: the kernel
+// makes the last console= /dev/console, and a console named again last
+// must stay last.
 func dedupStrings(in []string) []string {
-	seen := map[string]bool{}
+	last := map[string]int{}
+	for i, s := range in {
+		last[s] = i
+	}
 	var out []string
-	for _, s := range in {
-		if !seen[s] {
-			seen[s] = true
+	for i, s := range in {
+		if last[s] == i {
 			out = append(out, s)
 		}
 	}

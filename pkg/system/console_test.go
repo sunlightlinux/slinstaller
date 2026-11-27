@@ -34,3 +34,20 @@ func TestDetectConsolesFromSysfs(t *testing.T) {
 		t.Fatalf("consoles from sysfs = %v", got)
 	}
 }
+
+// The kernel makes the last console= its /dev/console, where the boot
+// messages and a single-user shell go. A console named again last (the
+// live medium's "console=tty0 console=ttyS0,115200n8 console=tty0") kept
+// its first place, so the installed system came up with ttyS0 last: its
+// primary console moved from the screen to the serial port.
+func TestDetectConsolesKeepsTheLastConsoleLast(t *testing.T) {
+	saved := procCmdline
+	defer func() { procCmdline = saved }()
+	f := filepath.Join(t.TempDir(), "cmdline")
+	os.WriteFile(f, []byte("console=tty0 console=ttyS0,115200n8 console=tty0\n"), 0o644)
+	procCmdline = f
+	got := DetectConsoles()
+	if len(got) != 2 || got[0] != "console=ttyS0,115200n8" || got[1] != "console=tty0" {
+		t.Fatalf("consoles = %v, want ttyS0 then tty0 (the last, /dev/console)", got)
+	}
+}
