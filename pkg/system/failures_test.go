@@ -107,7 +107,10 @@ func TestFirstBootWritersReportFailure(t *testing.T) {
 		}, func(r string) error { return EnableSlinitService(r, "sshd") }, "enable slinit service sshd"},
 		{"ssh keys: dir", func(t *testing.T, r string) { blockDir(t, r, "home") },
 			func(r string) error { _, err := user.WriteSSHKeys(r); return err }, "system:"},
-		{"ssh keys: file", func(t *testing.T, r string) { blockFile(t, r, "home", "ion", ".ssh", "authorized_keys") },
+		// A link there is replaced, not a failure; a directory in the way is.
+		{"ssh keys: file", func(t *testing.T, r string) {
+			os.MkdirAll(filepath.Join(r, "home", "ion", ".ssh", "authorized_keys", "x"), 0o755)
+		},
 			func(r string) error { _, err := user.WriteSSHKeys(r); return err }, "write authorized_keys"},
 		{"printk: dir", func(t *testing.T, r string) { blockDir(t, r, "etc", "sysctl.d") },
 			func(r string) error { return PrintkSysctl(r, 3) }, "sysctl.d"},

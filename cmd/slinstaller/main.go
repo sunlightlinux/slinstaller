@@ -858,6 +858,10 @@ restart:
 		if opts.Passphrase == "" {
 			opts.Passphrase = os.Getenv("SLINSTALLER_LUKS_PASSPHRASE")
 		}
+		// Read once and gone: left set, every child inherited it —
+		// xbps-install, the package scripts xbps-reconfigure runs in the
+		// target, the config's hooks.
+		os.Unsetenv("SLINSTALLER_LUKS_PASSPHRASE")
 		if opts.Passphrase == "" {
 			// Read it with echo off so the passphrase is not shown on screen,
 			// and on a terminal twice, as a typo here locks the disk. A pipe

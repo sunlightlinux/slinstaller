@@ -12,6 +12,15 @@ change.
 
 ### Fixed
 
+- On a preserved `/home`, the previous owner's links were followed: an
+  `authorized_keys -> ../../../etc/shadow` made the ssh-keys step write
+  over the new shadow file. Links in the home are replaced, a home that
+  is itself a link is refused.
+- The target's own `/etc/resolv.conf` was written through (a link to
+  `/run/...` landed on the live system's file) or overwritten and then
+  deleted (an image's). It is set aside for the install and put back.
+- `SLINSTALLER_LUKS_PASSPHRASE` stayed in the environment of every command
+  the install ran, package scripts and hooks included.
 - A failed command's error printed the command unmasked: a `useradd -p`
   password hash reached the screen, the diagnostics archive and a
   `report-url`. Errors, dry runs and logs now mask hashes and the password

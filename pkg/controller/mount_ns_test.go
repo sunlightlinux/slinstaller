@@ -136,8 +136,11 @@ func mountStagesChild(t *testing.T) {
 	c := nsInstaller(sub("c"))
 	defer c.mnt.UnmountAll()
 	os.MkdirAll(filepath.Join(c.opts.Root, "etc"), 0o755)
-	os.Symlink(filepath.Join(c.opts.Root, "no-such-dir", "x"), filepath.Join(c.opts.Root, "etc", "resolv.conf"))
-	if err := c.mountMeta(); err == nil || !strings.Contains(err.Error(), "copy resolv.conf") {
+	// A link there is set aside, not a failure; a directory in the way of
+	// the copy is.
+	os.MkdirAll(filepath.Join(c.opts.Root, "etc", "resolv.conf.slinstaller-saved"), 0o755)
+	os.MkdirAll(filepath.Join(c.opts.Root, "etc", "resolv.conf", "occupied"), 0o755)
+	if err := c.mountMeta(); err == nil || !strings.Contains(err.Error(), "resolv.conf") {
 		t.Errorf("mountMeta with resolv.conf unwritable: %v", err)
 	}
 }

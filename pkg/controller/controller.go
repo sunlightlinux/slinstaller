@@ -16,6 +16,7 @@
 package controller
 
 import (
+	"bytes"
 	"crypto/rand"
 	"fmt"
 	"io"
@@ -155,6 +156,10 @@ type installer struct {
 	// resolvCopy is the live system's resolv.conf copied into the target
 	// for install-time DNS, removed again when the install completes.
 	resolvCopy string
+	// resolvSaved is where the target's own resolv.conf (a file an image
+	// brought, or a link to a resolver's runtime file) waits meanwhile, to
+	// be put back by finish; empty when the target had none.
+	resolvSaved string
 
 	// keyfile is the initramfs LUKS keyfile path, set by the crypttab stage
 	// when /boot is encrypted and read by the bootloader stage; empty means
@@ -277,6 +282,11 @@ func (in *installer) finish() error {
 	// is written fresh at first boot.
 	if err := removeIfPresent(in.resolvCopy); err != nil {
 		return err
+	}
+	if in.resolvSaved != "" {
+		if err := os.Rename(in.resolvSaved, in.resolvCopy); err != nil {
+			return fmt.Errorf("put back the target's resolv.conf: %w", err)
+		}
 	}
 	if err := in.archiveLog(); err != nil && in.opts.Log != nil {
 		fmt.Fprintf(in.opts.Log, "warning: the install log was not saved on the target: %v\n", err)
@@ -515,10 +525,32 @@ func (in *installer) mountMeta() error {
 	// Give chrooted commands (and hooks) working DNS during the install.
 	// It is only for install time: run removes it once the install is
 	// done (see resolvCopy). A missing host file is not fatal.
-	if data, err := os.ReadFile("/etc/resolv.conf"); err == nil {
+	return in.copyResolv("/etc/resolv.conf")
+}
+
+// copyResolv puts the live system's resolv.conf (src) in the target for
+// the install, setting the target's own aside.
+func (in *installer) copyResolv(src string) error {
+	if data, err := os.ReadFile(src); err == nil {
 		dst := filepath.Join(in.opts.Root, "etc", "resolv.conf")
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return fmt.Errorf("mkdir for resolv.conf: %w", err)
+		}
+		// What the target has there is its own: moved aside, not written
+		// through (a link to /run/... landed on the LIVE system's file) or
+		// over (an image's resolv.conf was overwritten, then deleted).
+		// A resumed install finds it already aside and keeps it.
+		saved := dst + ".slinstaller-saved"
+		if _, err := os.Lstat(saved); err == nil {
+			in.resolvSaved = saved
+			if err := removeIfPresent(dst); err != nil {
+				return err
+			}
+		} else if fi, err := os.Lstat(dst); err == nil && !in.isOurResolv(fi, dst, data) {
+			if err := os.Rename(dst, saved); err != nil {
+				return fmt.Errorf("set aside the target's resolv.conf: %w", err)
+			}
+			in.resolvSaved = saved
 		}
 		if err := os.WriteFile(dst, data, 0o644); err != nil {
 			return fmt.Errorf("copy resolv.conf: %w", err)
@@ -526,6 +558,17 @@ func (in *installer) mountMeta() error {
 		in.resolvCopy = dst
 	}
 	return nil
+}
+
+// isOurResolv reports whether the file at dst is a copy this installer
+// left there (a resumed install's first attempt never got to finish): a
+// plain file holding exactly the live system's resolv.conf.
+func (in *installer) isOurResolv(fi os.FileInfo, dst string, live []byte) bool {
+	if !fi.Mode().IsRegular() {
+		return false
+	}
+	got, err := os.ReadFile(dst)
+	return err == nil && bytes.Equal(got, live)
 }
 
 // saveConfig records, on the installed system, the config it was built

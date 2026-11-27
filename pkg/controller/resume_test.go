@@ -236,3 +236,66 @@ func TestFirstBootSeedsTheRNG(t *testing.T) {
 	blockDir(t, in, "var", "lib")
 	wantErr(t, in.firstBoot(), "system:")
 }
+
+// The target's own resolv.conf — a link to a resolver's runtime file, or a
+// file an image brought — is set aside for the install and put back, never
+// written through or deleted; a resumed install's own copy is not mistaken
+// for it.
+func TestResolvConfOfTheTargetIsKept(t *testing.T) {
+	live := filepath.Join(t.TempDir(), "resolv.conf")
+	os.WriteFile(live, []byte("nameserver 10.0.0.1\n"), 0o644)
+
+	// A link: the live file behind it is untouched, and the link returns.
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	etc := mkTarget(t, in, "etc")
+	behind := filepath.Join(t.TempDir(), "runtime-resolv.conf")
+	os.WriteFile(behind, []byte("nameserver 192.0.2.53\n"), 0o644)
+	dst := filepath.Join(etc, "resolv.conf")
+	os.Symlink(behind, dst)
+	if err := in.copyResolv(live); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(behind); string(got) != "nameserver 192.0.2.53\n" {
+		t.Errorf("written through the target's link: %q", got)
+	}
+	if got, _ := os.ReadFile(dst); string(got) != "nameserver 10.0.0.1\n" {
+		t.Errorf("install-time resolv.conf = %q", got)
+	}
+	if err := removeIfPresent(in.resolvCopy); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(in.resolvSaved, in.resolvCopy); err != nil {
+		t.Fatal(err)
+	}
+	if l, err := os.Readlink(dst); err != nil || l != behind {
+		t.Errorf("the link was not put back: %q, %v", l, err)
+	}
+
+	// A file of the image's: kept through a resume, then back.
+	in = stagedInstaller(t, twoPartConfig(), &r)
+	etc = mkTarget(t, in, "etc")
+	dst = filepath.Join(etc, "resolv.conf")
+	os.WriteFile(dst, []byte("nameserver 203.0.113.1\n"), 0o644)
+	if err := in.copyResolv(live); err != nil {
+		t.Fatal(err)
+	}
+	again := stagedInstaller(t, twoPartConfig(), &r)
+	again.opts.Root = in.opts.Root
+	if err := again.copyResolv(live); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(again.resolvSaved); string(got) != "nameserver 203.0.113.1\n" {
+		t.Errorf("the image's resolv.conf after a resume = %q", got)
+	}
+
+	// No resolv.conf of its own, and a resume: nothing to put back.
+	in = stagedInstaller(t, twoPartConfig(), &r)
+	mkTarget(t, in, "etc")
+	in.copyResolv(live)
+	again = stagedInstaller(t, twoPartConfig(), &r)
+	again.opts.Root = in.opts.Root
+	if err := again.copyResolv(live); err != nil || again.resolvSaved != "" {
+		t.Errorf("a resume set its own copy aside: %q, %v", again.resolvSaved, err)
+	}
+}

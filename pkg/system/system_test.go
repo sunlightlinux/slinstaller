@@ -89,6 +89,68 @@ func TestWriteSSHKeys(t *testing.T) {
 	}
 }
 
+// A preserved home belongs to its previous owner: links planted in it are
+// replaced or refused, never followed.
+func TestWriteSSHKeysFollowsNoLink(t *testing.T) {
+	u := User{Login: "ion", SSHKeys: []string{"ssh-ed25519 AAAA"}}
+	setup := func(t *testing.T) (root, shadow string) {
+		root = t.TempDir()
+		os.MkdirAll(filepath.Join(root, "etc"), 0o755)
+		shadow = filepath.Join(root, "etc", "shadow")
+		os.WriteFile(shadow, []byte("root:!:1::::::\n"), 0o600)
+		return root, shadow
+	}
+	intact := func(t *testing.T, shadow string) {
+		if got, _ := os.ReadFile(shadow); string(got) != "root:!:1::::::\n" {
+			t.Errorf("shadow was written through a link: %q", got)
+		}
+	}
+
+	// authorized_keys -> ../../../etc/shadow
+	root, shadow := setup(t)
+	ssh := filepath.Join(root, "home", "ion", ".ssh")
+	os.MkdirAll(ssh, 0o700)
+	os.Symlink("../../../etc/shadow", filepath.Join(ssh, "authorized_keys"))
+	if _, err := u.WriteSSHKeys(root); err != nil {
+		t.Fatal(err)
+	}
+	intact(t, shadow)
+	if fi, err := os.Lstat(filepath.Join(ssh, "authorized_keys")); err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o600 {
+		t.Errorf("authorized_keys = %v, %v", fi, err)
+	}
+
+	// a hard link to the shadow file
+	root, shadow = setup(t)
+	ssh = filepath.Join(root, "home", "ion", ".ssh")
+	os.MkdirAll(ssh, 0o700)
+	if err := os.Link(shadow, filepath.Join(ssh, "authorized_keys")); err == nil {
+		if _, err := u.WriteSSHKeys(root); err != nil {
+			t.Fatal(err)
+		}
+		intact(t, shadow)
+	}
+
+	// .ssh -> ../../etc
+	root, shadow = setup(t)
+	os.MkdirAll(filepath.Join(root, "home", "ion"), 0o755)
+	os.Symlink("../../etc", filepath.Join(root, "home", "ion", ".ssh"))
+	if _, err := u.WriteSSHKeys(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc", "authorized_keys")); err == nil {
+		t.Error("keys written into /etc through a .ssh link")
+	}
+	intact(t, shadow)
+
+	// the home itself a link: refused
+	root, _ = setup(t)
+	os.MkdirAll(filepath.Join(root, "home"), 0o755)
+	os.Symlink("/etc", filepath.Join(root, "home", "ion"))
+	if _, err := u.WriteSSHKeys(root); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Errorf("a linked home: %v", err)
+	}
+}
+
 func TestKeymap(t *testing.T) {
 	root := t.TempDir()
 	if err := Keymap(root, "us"); err != nil {

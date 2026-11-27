@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -606,17 +607,53 @@ func (u User) AddCommand(root string) []string {
 // WriteSSHKeys writes the user's authorized_keys into the target and
 // returns the chrooted command that hands the .ssh directory to them.
 // With no keys it writes nothing and returns nil.
+//
+// The home can be a preserved partition, so everything in it belongs to
+// whoever had the account before. No link of theirs is followed: a home
+// that is a symlink is refused, and a .ssh or authorized_keys that is one
+// (or a hard link) is replaced. Followed, "authorized_keys ->
+// ../../../etc/shadow" wrote the keys over the shadow file useradd had
+// just written.
 func (u User) WriteSSHKeys(root string) ([]string, error) {
 	if len(u.SSHKeys) == 0 {
 		return nil, nil
 	}
-	dir := filepath.Join(root, "home", u.Login, ".ssh")
+	home := filepath.Join(root, "home", u.Login)
+	if fi, err := os.Lstat(home); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("system: %s is a symbolic link; not writing ssh keys through it", home)
+	}
+	dir := filepath.Join(home, ".ssh")
+	if fi, err := os.Lstat(dir); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(dir); err != nil {
+			return nil, fmt.Errorf("system: %w", err)
+		}
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("system: %w", err)
 	}
+	file := filepath.Join(dir, "authorized_keys")
+	if fi, err := os.Lstat(file); err == nil {
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if fi.Mode()&os.ModeSymlink != 0 || (fi.Mode().IsRegular() && ok && st.Nlink > 1) {
+			if err := os.Remove(file); err != nil {
+				return nil, fmt.Errorf("system: %w", err)
+			}
+		}
+	}
 	content := strings.Join(u.SSHKeys, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "authorized_keys"), []byte(content), 0o600); err != nil {
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
 		return nil, fmt.Errorf("system: write authorized_keys: %w", err)
+	}
+	_, werr := f.WriteString(content)
+	if werr == nil {
+		werr = f.Chmod(0o600) // a kept file keeps its old mode otherwise
+	}
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return nil, fmt.Errorf("system: write authorized_keys: %w", werr)
 	}
 	return []string{"chroot", root, "chown", "-R", u.Login + ":" + u.Login, "/home/" + u.Login + "/.ssh"}, nil
 }
