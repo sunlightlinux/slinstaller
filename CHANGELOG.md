@@ -55,6 +55,9 @@ change.
 
 ### Fixed
 
+- A logical volume's size was not checked (`10GB` reached `lvcreate`), and
+  a bare number — bytes in a config — went to `lvcreate -L`, which reads
+  it as MiB. LV sizes are validated, and a bare number is passed in bytes.
 - The full-screen network form took any address: one without its prefix
   (`192.168.1.50`) was dropped later and the interface installed on DHCP
   while the hub showed it static. Address, gateway and DNS are checked as

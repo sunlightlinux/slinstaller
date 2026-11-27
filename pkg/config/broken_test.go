@@ -405,3 +405,28 @@ func TestLVMNames(t *testing.T) {
 		t.Errorf("good names: %v", err)
 	}
 }
+
+// A logical volume's size is checked like a partition's, and a bare number
+// — bytes in a config — reaches lvcreate as bytes, not as its default MiB.
+func TestLVSizes(t *testing.T) {
+	lv := func(size string) *Config {
+		return &Config{TargetMedia: []*Media{{Name: "sda", Type: "disk", Children: []*Media{
+			{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			{Name: "sda2", Type: "lvm", VolumeGroup: "vg0", Children: []*Media{
+				{Name: "data", FsType: "ext4", Mountpoint: "/data", Size: size},
+				{Name: "root", FsType: "ext4", Mountpoint: "/"}}},
+		}}}}
+	}
+	if err := lv("10GB").Validate(); err == nil || !strings.Contains(err.Error(), `size "10GB" is not a byte count`) {
+		t.Errorf("10GB: %v", err)
+	}
+	pl, err := lv("1073741824").Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pl.Parts {
+		if p.LV && p.LVName == "data" && p.Size != "1073741824b" {
+			t.Errorf("bare-number LV size = %q", p.Size)
+		}
+	}
+}

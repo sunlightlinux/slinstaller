@@ -1558,6 +1558,11 @@ func (c *Config) Validate() error {
 			}
 			checkFS(lvWhere, lv.FsType, lv.Mountpoint)
 			checkMount(lvWhere, lv.FsType, lv.Mountpoint, lv.MountOptions, lv.Subvolumes, false)
+			if sz := strings.TrimSpace(lv.Size); sz != "" && sz != "0" && !strings.EqualFold(sz, "rest") {
+				if _, err := parseSize(sz); err != nil {
+					add("%s: size %q is not a byte count or a number with a K/M/G/T unit", lvWhere, sz)
+				}
+			}
 			checkMin(lvWhere, lv.Size, storage.MinPartitionSize, "1 MiB", "size")
 			if lv.Mountpoint == "/" {
 				checkMin(lvWhere, lv.Size, rootMin, rootMinLabel, "root size")
@@ -2352,6 +2357,10 @@ func lvParts(vg string, children []*Media) []storage.Partition {
 		lvSize := strings.TrimSpace(lv.Size)
 		if lvSize == "" || lvSize == "0" || strings.EqualFold(lvSize, "rest") {
 			lvSize = storage.SizeRest
+		} else if strings.Trim(lvSize, "0123456789") == "" {
+			// A bare number is bytes in a config, but lvcreate -L reads it
+			// as MiB: 1073741824 asked for a pebibyte. Said in bytes.
+			lvSize += "b"
 		}
 		lp := storage.Partition{
 			LV: true, VGName: vg, LVName: lv.Name,
