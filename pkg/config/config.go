@@ -741,6 +741,12 @@ func (c *Config) ResolveDisks(disks []DiskInfo) error {
 			}
 			pos++
 			n := pos
+			// A named partition must be one of the disk's own: renamed by
+			// its position, sdb5 under a matched sda became nvme0n1p2 — an
+			// existing partition nobody named — and was formatted.
+			if ch.Name != "" && (old == "" || !strings.HasPrefix(ch.Name, old)) {
+				return fmt.Errorf("config: partition %s is not one of disk %q (matched as /dev/%s): name it after the disk, or leave it unnamed", ch.Name, old, name)
+			}
 			if old != "" && strings.HasPrefix(ch.Name, old) {
 				n = partNumber(strings.TrimPrefix(ch.Name, old), n)
 			}
@@ -2257,10 +2263,15 @@ func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 	}
 	for _, disk := range disks {
 		device := "/dev/" + disk.Name
-		for i, ch := range disk.Children {
+		// Numbered as Plan and ResolveDisks number them: an empty entry is
+		// no partition. Counted, it moved every later one up by one — and
+		// with a match the same config formatted another partition.
+		i := -1
+		for _, ch := range disk.Children {
 			if ch == nil {
 				continue
 			}
+			i++
 			if (ch.Type != "" && ch.Type != "part") || ch.Encrypted {
 				return nil, fmt.Errorf("config: reusePartitions supports only plain partitions; %s/%s is %q",
 					disk.Name, ch.Name, ch.Type)

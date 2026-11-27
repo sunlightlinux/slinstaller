@@ -159,3 +159,31 @@ func TestValidateRefusesPathsAsNames(t *testing.T) {
 		t.Errorf("a match on a partition: %v", err)
 	}
 }
+
+// A matched disk's named partition must be one of its own: renamed by
+// position, a typo (sdb5 under sda) became an existing partition nobody
+// named, and was formatted.
+func TestMatchRefusesAForeignPartitionName(t *testing.T) {
+	c := matchConfig("sda", &DiskMatch{Serial: "NV42"}, "sda1", "sdb5")
+	c.ReusePartitions = true
+	if err := c.ResolveDisks(machineDisks()); err == nil || !strings.Contains(err.Error(), "partition sdb5 is not one of disk \"sda\"") {
+		t.Errorf("ResolveDisks = %v", err)
+	}
+}
+
+// A reuse layout with an empty entry numbers its partitions as Plan does,
+// with or without a match: the same config formats the same partition.
+func TestReuseNumbersLikePlan(t *testing.T) {
+	c := &Config{ReusePartitions: true, TargetMedia: []*Media{{Name: "sda", Type: "disk", Children: []*Media{
+		nil,
+		{FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{FsType: "ext4", Mountpoint: "/"},
+	}}}}
+	pl, err := c.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pl.Parts[0].Device != "/dev/sda1" || pl.Parts[1].Device != "/dev/sda2" {
+		t.Errorf("reuse devices: %s, %s", pl.Parts[0].Device, pl.Parts[1].Device)
+	}
+}
