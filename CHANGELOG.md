@@ -10,306 +10,352 @@ change.
 
 ## [Unreleased]
 
+Most of what follows moves a failure from the middle of an install —
+after the disk was wiped — to before anything is touched. A config that
+used to fail that way, or to install something that could not boot, may
+now be refused by the config check (see [STABILITY.md](STABILITY.md)).
+
 ### Changed
 
+**Confirming and stopping**
+
+- The full-screen confirmation selects **Cancel** to begin with: one Enter
+  — the key used on every screen before it — no longer starts erasing a
+  disk (Tab or the arrows move to Install). It names every disk with its
+  size and model, not only the first; an install that keeps the partition
+  table lists what it shrinks, creates, keeps and formats, with the backup
+  warning, instead of saying the disk is erased; and its hint no longer
+  says Esc goes back (it leaves). The text flow's disk list, its summary
+  and the retyped confirmation show the size and model too: two alike
+  disks differ only by size, and a virtio disk has no model.
 - With Secure Boot enforced, the installer says so — on the full-screen
   confirmation and before a text install — since the firmware will not
-  start the unsigned GRUB it installs.
-- On a disk wiped with `wipe: discard`, mkfs is told not to
-  discard it a second time (`-E nodiscard`, `-K`, `-t 0`).
-- The install log view (Details) wraps and classifies each line once, as
-  it arrives, instead of all 10000 on every frame: 1.3 ms a frame instead
-  of 37 ms (benchmark), so an open log view no longer holds back the
-  commands whose output it shows.
+  start the unsigned GRUB it installs. It is a warning, not a refusal.
+- **Ctrl+C stops the install after the current step** instead of quitting
+  at once, which orphaned the running command (mkfs, xbps-install), left
+  the target mounted and the LUKS volumes open, wrote no diagnostics and
+  freed the lock for a second run on the same disk. The install now
+  unmounts and is reported like any failure, with its diagnostics archive.
+  - Full-screen: a SIGTERM from outside counts as a Ctrl+C. A second one
+    leaves the step at once, for a step that never ends: the commands the
+    step started are ended, the install gets up to 15 s to unmount, and
+    the result is reported.
+  - Text path: SIGINT and SIGTERM are the same request. A Ctrl+C on the
+    terminal also reaches the running command, so the step usually fails
+    and the install winds down from there. A second SIGINT/SIGTERM ends
+    the running commands and exits at once with status 130.
+- `--help` exits 0 instead of reporting "flag: help requested" as an error.
+
+**The config and its checks**
+
+- **Config keys nothing reads are warned about**, with their path:
+  `encryptd: true` used to load without a word and install unencrypted.
+  The warnings come right after the config is read — before a validation
+  error the misspelling may cause — and again, briefly, where the plan
+  ends. Nothing is refused; clr-installer's probe and telemetry keys,
+  which slinstaller knows and ignores, are not reported.
+- **A logical volume size without a unit is now bytes.** A bare number is
+  bytes everywhere else in a config, but it reached `lvcreate -L`
+  unchanged, where the default unit is MiB: `1073741824` asked for a
+  pebibyte. *This changes the meaning of such a size*: a config that
+  wrote `size: 10240` for 10 GiB now asks for 10 KiB (and is refused as
+  too small) — write `10G`. A size with a K/M/G/T unit goes to lvcreate
+  as written; anything else (a bare number, a decimal, an exponent) is
+  converted to whole MiB, rounded up.
+- A config, image, disk image or `report-url` over plain `http://`, and an
+  `https://` URL that redirects to `http://`, now need
+  `allowInsecureHTTP` / `--allow-insecure-http`, as a plain http
+  repository already did. Only the URL as given used to be checked, and
+  `report-url` (which carries the hostname and the install's errors)
+  needed no allowance at all. curl gets `--proto-redir =https` for an
+  https image.
+- The full-screen wizard checks the config it built — validation, the
+  partition plan, and that the layout fits the disk (honouring
+  `--skip-validation-size`/`-all`) — when Install is pressed, and shows
+  what is wrong while the answers are still there. A bad hostname, a
+  duplicate mountpoint or a root larger than the disk used to end the
+  program after the wizard, and every section had to be filled in again.
+- The text flow checks the swap size and the hostname as they are typed,
+  and asks again on an answer that is neither of the choices: a typo
+  (`btfrs`, `ys` at "Encrypt?") used to be taken as the default, so an
+  ext4 or unencrypted system was installed. An ended input still gets the
+  default (no, at "Proceed?"), so a pipe cannot loop or proceed. A swap
+  size of 0 says to choose none.
+
+**Resume**
+
+- **`--resume` works after a reboot of the live medium.** It used to fail
+  at the mount ("mount /dev/mapper/X: no such file or directory"):
+  nothing re-opened the encrypted volumes, assembled the arrays or
+  activated the volume groups. A resume now brings back whatever of that
+  stack is missing (a same-boot resume runs nothing), and asks for the
+  passphrase once — it opens what exists, it is not a new one to type
+  twice.
+
+**Faster**
+
+- An encrypted, LVM or RAID install rebuilds its initramfs with `dracut
+  --regenerate-all --force` instead of a third `xbps-reconfigure -fa`,
+  which re-ran every package's configure script (and grub-mkconfig) for
+  that one file. A target without dracut still gets `-fa`.
+- The keyfile's LUKS slot (non-root volumes, an encrypted `/boot`) uses
+  pbkdf2 at cryptsetup's minimum iterations: the key is 2048 random bytes,
+  so argon2id's ~2 s and up to 1 GiB per volume bought nothing, at install
+  or at every boot. The passphrase slot keeps its strong default.
+- The full-screen log view (Details) wraps and classifies each line once,
+  as it arrives, instead of all 10000 on every frame: 1.3 ms a frame
+  instead of 37 ms, so an open log view no longer holds back the commands
+  whose output it shows.
 - The network check before an install makes one request per attempt, each
   bounded by what is left of its minute: an unreachable mirror took two
   10 s timeouts per attempt and 66 s in all.
-- The keyfile's LUKS slot (non-root volumes, an encrypted `/boot`) uses
-  pbkdf2 at the minimum iteration count: the key is 2048 random bytes, so
-  argon2id's seconds and memory bought nothing, at install or at boot.
-  The passphrase slot is unchanged.
-- An encrypted, LVM or RAID install rebuilds its initramfs with `dracut
-  --regenerate-all --force` in the target instead of a full
-  `xbps-reconfigure -fa`, which re-ran every package's configure script
-  for that one purpose (tens of seconds to minutes). A target without
-  dracut still gets `-fa`.
-- The full-screen confirmation selects **Cancel** to begin with: one Enter
-  no longer starts erasing a disk (Tab to Install, then Enter). It names
-  every disk with its size and model, and an install that keeps the
-  partition table lists what it shrinks, creates, keeps and formats
-  instead of saying the disk is erased. Its hint no longer says Esc goes
-  back (it leaves).
-- The text flow and the retyped confirmation show each disk's size and
-  model, not the path alone.
-- A text-flow answer that is neither of the choices is asked again: a typo
-  (`btfrs`, `ys` at "Encrypt?") used to be taken as the default, so an
-  unencrypted or ext4 system was installed. An ended input still gets the
-  default (no, at "Proceed?").
-- The full-screen wizard checks the config it built (validation, the
-  partition plan, and that the layout fits the disk) when Install is pressed, and shows what is wrong while
-  the answers are still there. A bad hostname or a duplicate mountpoint
-  used to end the program after the wizard, and every section had to be
-  filled in again.
-- The text flow checks the swap size and the hostname as they are typed
-  and asks again; a typo there used to end the flow after every question
-  had been answered. A swap size of 0 says to choose none, not that a
-  partition "fills its disk but is not the last".
-- `--help` exits 0 instead of reporting "flag: help requested" as an error.
+- After `wipe: discard` on a disk, mkfs is told not to discard its
+  partitions a second time (`-E nodiscard`, `-K`, `-t 0`): tens of
+  seconds on some SATA/USB bridges. `wipe: zero` writes zeros rather than
+  trimming, so mkfs still discards there.
 
 ### Fixed
 
-- `powerAction: kexec` failed on every btrfs root mounted from a subvolume
-  (GRUB names the files `/@/boot/…`), and with an early microcode image
-  listed first it loaded that instead of the initramfs. Both are handled.
-- `init=/usr/bin/slinit` was added whenever the slinit binary was in the
-  target, even with no slinit boot service (a Void base with the slinit
-  package added): the system did not boot, and the other stages had set it
-  up for runit. It now needs the boot service too. An `init=` the config
-  adds itself is no longer overridden by slinit's.
-- Links in an image or a reused root were followed onto the live system:
-  an absolute `/etc/dhcpcd.conf` link had the live file read and
-  rewritten, and an image whose `/etc/ssh` was an absolute link had the
-  live system's host keys removed. Such links are resolved inside the
-  target. The ssh-keys step no longer runs `chown -R` on a preserved
-  `.ssh`, where a hard link could hand another user's file over.
-- A volume group over an encrypted and a plain physical volume was
-  accepted: its volumes — the root, and with an encrypted `/boot` the
-  initramfs and the key it carries — could land on the plain one, and the
-  key opens every LUKS volume. Such a group is refused.
-- A logical volume's size was not checked (`10GB` reached `lvcreate`), and
-  a bare number — bytes in a config — went to `lvcreate -L`, which reads
-  it as MiB. LV sizes are validated, and any size without a unit (a bare
-  number, a decimal, an exponent) is passed in whole MiB.
-- The full-screen network form took any address: one without its prefix
-  (`192.168.1.50`) was dropped later and the interface installed on DHCP
-  while the hub showed it static. Address, gateway and DNS are checked as
-  they are typed.
-- A logical volume that fills its group, declared before one of a fixed
-  size, was created first and took everything; the next `lvcreate` failed
-  after the disk was wiped. Sized volumes are created first now.
-- Volume group and logical volume names LVM refuses (a space, a leading
-  `-`) passed validation; a space also broke the fstab line. They are
-  refused.
+**Disks and partitions**
+
+- **Partition names are checked against what parted makes.** A
+  partition's device came from its `name` unchecked, while parted numbers
+  what it cuts itself. A child named for another disk (`nvme0n1p2` under
+  `sda`) was formatted though only `sda` was confirmed; a gap (`sda1`,
+  `sda5`), a duplicate or an empty list entry had mkfs hit a missing or
+  the wrong partition after the table was wiped; a fill partition last in
+  the list but not on the disk gave overlapping ranges. A new table now
+  has to be numbered 1..n on its own disk, and the fill partition has to
+  be the last on the disk.
+- **A Safe install could format an existing partition.** parted cuts a
+  `create` partition at the lowest free number, but it was formatted as
+  the device its name gave: on a disk with `sda1`..`sda4`, a new
+  partition the plan called `sda2` became `sda5`, and mkfs formatted the
+  existing `sda2`. The partition stage checks each number against the
+  disk's table before anything — a shrink included — is touched, and the
+  dry run reads the table the same way and says what parted will number
+  it.
 - **The partition editor after a Safe install formatted existing
-  partitions.** The Safe layout's entries (the kept ESP, the root cut in
-  free space) stayed in the editor's list, where new entries were numbered
-  by position: adding a 4G swap ran `mkswap` on the disk's existing third
-  partition. Opening the editor (or Advanced) now starts from an empty
-  layout, which wipes the disk as the confirmation says.
+  partitions.** The Safe layout's entries stayed in the editor's list,
+  where new entries are numbered by position: adding a 4G swap ran
+  `mkswap` on the disk's existing third partition. The editor (and
+  Advanced) now starts from an empty layout, which wipes the disk as the
+  confirmation says.
+- A staged run (`--through`) skipped every disk check along with the tool
+  checks, and would partition and format a partition given as the disk, a
+  disk in use, or one sharing an array with a disk the install keeps. The
+  disk checks now run on every install, staged or resumed.
+- A root that fills its disk was never held to the root minimum: a 3 GB
+  disk with a 512M ESP and 2G swap was wiped and given a 0.3 GB root.
+  What is left for each disk's filling partition now has to reach its
+  minimum (the install type's root minimum for `/`). A disk that reports
+  size 0 (an empty card reader) is refused as a target.
+- Absurd sizes wrapped instead of being refused: `inf`, `nan`, `1e30` or
+  `16777216T` became an arbitrary number or 0, and an oversized layout
+  could pass the fit check as a tiny one. Both size parsers refuse them,
+  and the fit check saturates its sum.
+- Mountpoints were compared and written to fstab as given: `/home/` and
+  `/home` passed as two, `/boot/../tmp` passed, `/a b` broke the fstab
+  line. A mountpoint has to be a clean absolute path without spaces or
+  control characters, not under `/proc`, `/sys`, `/dev` or `/run` — on
+  partitions, logical volumes, arrays and their partitions, and btrfs
+  subvolumes alike.
+- Any entry mounted at `/` counted as the root, so a swap at `/` validated
+  and the install had no root filesystem. A swap with a mountpoint and a
+  vfat root are refused.
+- Reinstalling over a RAID array or volume group spanning several disks
+  failed while releasing the disks: each disk's teardown stopped the
+  shared array again. The disks are released together, each holder once.
+- A Safe install's shrink stopped when `e2fsck` repaired the filesystem
+  (exit 1 or 2), though the check exists to make the shrink safe; only 4
+  and above stop it now.
+- The full-screen shrink popup read a size differently from the config:
+  `60000` was accepted and then refused at Install, and `59.5G` was
+  refused. It now reads sizes as the config does, wants a unit and at
+  least a MiB.
+- A swap file on a btrfs root was copy-on-write (and compressed under
+  `compress=`), which the kernel refuses: the install succeeded and
+  `swapon` failed at every boot. It is marked No_COW before it is
+  allocated.
+- The end of an install (and `--unmount`) only detached the target's
+  filesystems lazily, with no sync: "Install complete." could print with
+  the data still in the page cache. Everything is synced and unmounted
+  properly; a filesystem still held open is detached, and the log says
+  which. The target is unmounted even when putting its resolv.conf back
+  fails.
+
+**Encryption, RAID and LVM**
+
+- `encrypted: true` on a plain partition, a RAID member or a logical
+  volume was ignored and the volume installed unencrypted. It is read on
+  a `type: lvm` partition and a RAID array only; elsewhere it is refused,
+  pointing at `type: crypt` or at the array.
+- A volume group over an encrypted and a plain physical volume was
+  accepted: the root, and with an encrypted `/boot` the initramfs and the
+  key that opens every LUKS volume, could land on the plain one. Such a
+  group is refused.
+- Two LUKS containers could get the same mapper name (two encrypted swaps,
+  `/var/lib` beside `/var-lib`, an array named `root` beside an encrypted
+  root), and the second `luksOpen` failed after the wipe. The later one
+  now gets its device's name added (`cryptswap-sdb2`).
 - A Safe install with Enable Encryption ticked installed unencrypted
   without a word; it is refused, saying why. The box ticked and left
   without Confirm no longer shows [x] over an unencrypted layout.
-- `--resume-from` after a reboot of the live system failed at the mount:
-  nothing re-opened the encrypted volumes, assembled the arrays or
-  activated the volume groups. A resume now brings back whatever of that
-  stack is missing, and asks for the passphrase once (it is an existing
-  one, not a new one to type twice).
-- A static address applied to the live system from the full-screen
-  installer flushed the interface's IPv6 link-local address too; only
-  global addresses are flushed now.
-- The installed system's `/var/db/xbps/keys` was left mode 0700 (copied
-  from a temporary directory); it is 0755, as xbps makes it.
-- With `copyNetwork`, the `denyinterfaces` line for bond and bridge
-  members was appended after the live system's dhcpcd.conf; when that
-  ended inside an `interface` block dhcpcd ignored it and asked for a
-  lease on every member. It goes before the first block now.
-- A user's full name with a colon in it was refused by `useradd` at first
-  boot, after the disk was wiped; it is refused by the config check now
-  (the wizard's included).
-- Replaying a profile on a CPU of the other vendor turned an explicit
-  `intel_iommu=off` into `amd_iommu=on` (and back): an IOMMU switched off
-  to get past broken firmware came back on. Off stays off now, and
-  `kvm_intel.nested=1` is translated like `kvm-intel.nested=1`.
-- A language spelled `en_US.utf8` passed the check but was never
-  generated (the libc-locales line is `en_US.UTF-8`); the codeset is
-  compared as glibc compares it.
-- Two or more static routes on an interface were written on one
-  `static routes=` line, which dhcpcd refuses whole: the interface came up
-  with none. Each route has its own line now.
-- An IPv6 gateway or static route passed validation, but dhcpcd's static
-  `routers`/`routes` are IPv4 only and dropped it at boot. They are
-  refused, saying that IPv6 routes come from router advertisements.
-- Interface names, DNS servers and the search domain were barely checked,
-  yet go unquoted into the boot script that makes bonds, VLANs and bridges
-  (run as root) and into dhcpcd.conf: a name like `$(cmd)` or a DNS value
-  with a newline passed. Names are letters, digits and `. _ : -`; DNS
-  entries must be IP addresses (space-separated); domains must be domain
-  names.
-- A `disk-image` write reported success when the download or the
-  decompression failed: the pipeline's status was `dd`'s alone, so a
-  truncated image half-written to the disk, or a failed fetch, was
-  "written" and the machine rebooted. Every stage is checked now. A signed
-  URL (`img.raw.xz?sig=...`) is decompressed as its path says, and `.bz2`
-  is read too.
-- A swap file on a btrfs root was made copy-on-write (and compressed
-  under `compress=`), which the kernel refuses: the install succeeded and
-  `swapon` failed at every boot. It is marked No_COW before it is
-  allocated.
-- `/etc/mdadm.conf` on the installed system listed every array the live
-  system had assembled (`mdadm --detail --scan`), data arrays on other
-  disks included. It lists the install's own arrays now.
-- An install from an image kept the image's machine-id, saved random seed
-  and SSH host keys, so every machine installed from one image shared
-  them. They are removed after the unpack; the first-boot stage writes a
-  machine-id and seed of the machine's own, and the host keys are made
-  anew (`ssh-keygen -A`).
 - A resume after the keyfile was added to some encrypted volumes but not
   all skipped them all, and crypttab pointed the rest at a key they did
-  not hold. Each volume the keyfile does not open is given it now.
-- When the install-time resolv.conf could not be taken back out, the end
-  of the install returned before unmounting, leaving the target mounted.
-  It is unmounted either way now.
-- `encrypted: true` on a plain partition, a RAID member or a logical
-  volume was ignored and the volume installed unencrypted. It is read on
-  an `lvm` partition (and a RAID array) only; elsewhere it is refused,
-  pointing at `type: crypt` or at the array.
-- **No planted file in /tmp is written through as root.** The default
-  install log `/tmp/slinstaller.log` was opened with O_CREAT|O_TRUNC, so
-  a symlink or hard link another user left there had root truncate and
-  write the file it pointed to, a file of theirs got the log, and a FIFO
-  hung the install. A link is no longer followed, anything at that path
-  that is not root's own regular file is replaced by a fresh 0600 one,
-  and the dated diagnostics archive is created exclusively.
-- **An https URL can no longer be redirected to plain http.** Only the
-  URL as given was checked: a config, progress report or remote image
-  fetched over https followed a server's redirect to http. Such a
-  redirect is now refused unless plain http is allowed
-  (`--allow-insecure-http` / `allowInsecureHTTP`), and curl is run with
-  `--proto-redir =https` for an https image. A plain http `report-url`
-  now needs the same allowance.
-- **Probe failures say why.** blkid, parted, lsblk, mdadm, cryptsetup and
-  openssl run for their output reported only `exit status N` when they
-  failed, dropping the tool's own message. That message is now part of
-  the error.
-- **A Safe install's shrink no longer stops when e2fsck fixes something.**
-  `e2fsck -f -p` exits 1 or 2 after correcting errors, which counted as a
-  failure and aborted the resize of a filesystem that was now clean. Exit
-  codes 1 and 2 now let the shrink go on; 4 and above still stop it.
-- **Absurd sizes are rejected instead of wrapping.** A config size of
-  `inf`, `nan`, `1e30` or a byte count past 64 bits was accepted and
-  converted to an arbitrary number, and a plan size like `16777216T`
-  wrapped to 0. Both parsers now refuse them, and the disk-fit check
-  saturates its sum, so an oversized layout fails before the disk is
-  wiped rather than passing as a tiny one.
-- **A static address's prefix and family are checked.** A numeric netmask
-  such as `33`, `-1` or `200` was accepted and written to dhcpcd.conf as
-  is, and an IPv4 address marked `version: 1` (or an IPv6 one marked 0)
-  passed validation. A prefix must now be 0..32 for IPv4 and 0..128 for
-  IPv6, and the IP must match its declared family.
-- **A very long output line no longer hangs the TUI install.** The TUI
-  runner read command output with a 1 MiB line limit and stopped reading
-  at the first longer line; the command then blocked writing to the pipe
-  and the install never finished. The rest of the output is now drained.
-- **A root that fills the disk was never held to the root minimum.** The
-  disk-fit check summed only the fixed sizes, so a 3 GB disk with a 512M
-  ESP, 2G swap and a filling root was wiped and given a 0.3 GB root. What
-  is left for each disk's filling partition now has to reach its minimum
-  (the root's, by install type, for `/`). A disk that reports size 0 (an
-  empty card reader) is refused as a target instead of skipping the
-  check.
-- **The language was never checked.** `language: xx_YY.garbage` was
-  written to the target's `LANG` as given. It is now checked, like the
-  timezone and keymap, against the locales the live system's C library
-  lists (glibc's `SUPPORTED` or `/etc/default/libc-locales`), and left
-  unchecked where there is no such list (musl).
-- **A misspelt config key was silently ignored.** `encryptd: true`
-  loaded without a word and the install was not encrypted. Keys nothing
-  reads are now listed as warnings, with their path, where the plan
-  ends; the config still loads (clr-installer's probe and telemetry keys
-  are known and not warned about).
-- **Two LUKS containers could get the same mapper name.** Every
-  encrypted swap was `cryptswap`, `/var/lib` and `/var-lib` were both
-  `cryptvar-lib`, and an encrypted array named `root` was `cryptroot`
-  beside an encrypted root partition, so the second `luksOpen` failed
-  after the disks were wiped. The later one now gets its device's name
-  added (`cryptswap-sdb2`); two encrypted volumes of one group work too.
-- **Mountpoints are checked for shape.** They were compared and written
-  to fstab as given: `/home/` and `/home` both passed as different
-  mountpoints, `/boot/../tmp` passed, and `/a b` produced a broken fstab
-  line. A mountpoint now has to be a clean absolute path without spaces
-  or control characters, and not under `/proc`, `/sys`, `/dev` or `/run`,
-  on partitions, logical volumes, RAID arrays and their partitions, and
-  btrfs subvolumes alike.
-- **A swap or vfat partition could pass for the root.** Any entry
-  mounted at `/` was counted as the root, so `{fstype: swap, mountpoint: /}`
-  validated and the install had no root filesystem. A swap with a
-  mountpoint and a vfat root are refused.
-- An install from an image unpacked it with the live system's `/proc`,
-  `/sys` and `/dev` bound into the target: the image's own `dev/`,
-  `proc/` and `sys/` entries landed on the live ones, and its
-  `etc/resolv.conf` was overwritten. The binds come off for the unpack
-  and go back after; the image's resolv.conf is kept.
-- Each install or resume added another set of firmware boot entries for
-  the spare ESPs ("Sunlight (sdb)"), the new ones first in BootOrder.
-  An entry with the same label is removed before it is made again.
+  not hold. Each volume the keyfile does not open is given it.
+- A resume failed on an array the live system had assembled by itself at
+  boot under a name of its own (`md127`): the members were busy. Such an
+  array is stopped and assembled under the install's name.
+- `/etc/mdadm.conf` on the installed system listed every array the live
+  system had assembled, data arrays on other disks included. It lists the
+  install's own arrays.
+- A logical volume that fills its group, declared before a sized one, was
+  created first and took everything; the next `lvcreate` failed after the
+  wipe. Sized volumes are created first.
+- Logical volume sizes were not checked (`10GB` reached `lvcreate`), and
+  volume group and logical volume names LVM refuses (a space, a leading
+  `-`, `.`/`..`, names LVM keeps such as `snapshot*` or `*_rimage`)
+  passed and failed after the wipe; a space also broke the fstab line.
+  Both are refused.
+
+**Boot**
+
 - With an encrypted `/boot`, the initramfs keyfile was named without its
-  key device (`rd.luks.key=<path>`), so dracut looked for it on every disk,
-  never found it, and asked for the passphrase a second time. It is
-  `rd.luks.key=<path>:/` now: the key is in the initramfs.
-- The root volume's `discard` crypt option never reached the initramfs:
-  dracut's crypt module reads no `rd.luks.options`. It is passed as
-  `rd.luks.allow-discards=<uuid>` as well.
+  key device, so dracut looked for it on every disk, never found it, and
+  asked for the passphrase a second time. It is `rd.luks.key=<path>:/`.
+- The root volume's `discard` crypt option never reached the initramfs;
+  it is passed as `rd.luks.allow-discards=<uuid>` too.
 - The recovery-mode boot entries could not boot an encrypted, LVM or RAID
-  root: every argument went into `GRUB_CMDLINE_LINUX_DEFAULT`, which
-  recovery entries leave out. What the system cannot boot without
-  (`rd.*`, `init=`, `root=`, `resume=`, `console=`) is in
-  `GRUB_CMDLINE_LINUX` now. Kernel arguments are quoted for the shell
-  that sources `/etc/default/grub`, so `$` and backticks are kept.
+  root, and came up as runit: every argument went into
+  `GRUB_CMDLINE_LINUX_DEFAULT`, which recovery entries leave out. What the
+  system cannot boot without is in `GRUB_CMDLINE_LINUX` now. Kernel
+  arguments are quoted for the shell that sources `/etc/default/grub`, so
+  `$` and backticks are kept.
+- `init=/usr/bin/slinit` was added whenever the slinit binary was in the
+  target, even with no slinit boot service (a Void base with the slinit
+  package added): the system did not boot. It now needs the boot service
+  too, and an `init=` the config adds itself is no longer overridden.
+- `power-state: kexec` failed on every btrfs root mounted from a
+  subvolume (GRUB names the files `/@/boot/…`), and with an early
+  microcode image listed first it loaded that instead of the initramfs.
+- Each install or resume added another set of firmware boot entries for
+  the spare ESPs, the new ones first in BootOrder. An entry with the same
+  label is removed before it is made again.
+- Replaying a profile on a CPU of the other vendor turned an explicit
+  `intel_iommu=off` into `amd_iommu=on` (and back). Off stays off, and
+  `kvm_intel.nested=1` is translated like `kvm-intel.nested=1`.
+- `system-upgrade` ran before the Sunlight mirror was written to the
+  target's `/etc/xbps.d`, so the upgrade resolved every package against
+  Void alone. The mirror is recorded first.
+
+**First boot**
+
+- The language was never checked: `language: xx_YY.garbage` went to the
+  target's `LANG`. It is checked like the timezone and keymap, against
+  the locales the live system's C library lists (not on musl). A language
+  spelled `en_US.utf8` is now also generated (the codeset is compared as
+  glibc compares it).
+- A user's full name with a colon or line break was refused by `useradd`
+  at first boot, after the wipe; the config check refuses it now.
 - A config whose administrators had no password between them (an SSH key
   only) installed a system nobody could become root on: root's password
   is locked once there is an administrator, and sudo asks for one. It is
-  refused now, unless the config sees to sudo itself (a `write-files`
-  entry under `/etc/sudoers*`, or hooks).
-- A staged run (`--through`) skipped the disk checks along with the tool
-  checks: it would partition and format a partition given as the disk, a
-  disk in use, or one sharing an array with another. The disk checks now
-  run whenever the partition stage does; only `--resume` goes without.
-- Ctrl+C while installing quit the program at once: the command running
-  was orphaned, the target stayed mounted and no diagnostics were written.
-  It now asks the install to stop after the current step (full-screen and
-  text alike, and SIGTERM too); the install unmounts, and the failure is
-  reported with its diagnostics.
-- Reinstalling over a RAID array or volume group spanning several disks
-  failed while releasing the disks: each disk's teardown stopped the
-  shared array again (`mdadm --stop /dev/md127`: no such device). The
-  disks are released together, each holder once.
-- **Partition names are checked against what parted makes.** A partition's
-  device came from its `name` unchecked, and parted numbers partitions
-  itself. A child named for another disk (`nvme0n1p2` under `sda`) was
-  formatted though only `sda` was confirmed; a gap (`sda1`, `sda5`) or a
-  duplicate (`sda1` twice) had mkfs hit a missing or the wrong partition
-  after the table was wiped; an empty list entry left a gap. A new table
-  now has to be numbered 1..n on its own disk, and the fill partition has
-  to be the last on the disk, not in the list.
-- **A Safe install could format an existing partition.** A `create`
-  partition is cut by parted at the lowest free number, but formatted as
-  the device its name (or position) gave: on a disk with `sda1`..`sda4`,
-  a new partition the plan called `sda2` became `sda5`, and mkfs
-  formatted the existing `sda2`. The partition stage now checks each
-  number against the disk's table before anything is touched.
-- On a preserved `/home`, the previous owner's links were followed: an
-  `authorized_keys -> ../../../etc/shadow` made the ssh-keys step write
-  over the new shadow file. Links in the home are replaced, a home that
-  is itself a link is refused.
-- The target's own `/etc/resolv.conf` was written through (a link to
-  `/run/...` landed on the live system's file) or overwritten and then
-  deleted (an image's). It is set aside for the install and put back.
+  refused, unless the config sees to sudo itself (a `write-files` entry
+  under `/etc/sudoers*`, or post-install or stage hooks).
+- The installed system's `/var/db/xbps/keys` was mode 0700; it is 0755.
+
+**Network**
+
+- Two or more static routes on an interface were written on one
+  `static routes=` line, which dhcpcd refuses whole. Each route has its
+  own line.
+- An IPv6 gateway or static route passed validation and was dropped at
+  boot (dhcpcd's static `routers`/`routes` are IPv4 only). They are
+  refused, saying that IPv6 routes come from router advertisements.
+- Interface names, DNS servers and the search domain were barely checked,
+  yet go unquoted into the boot script that makes bonds, VLANs and
+  bridges (run as root) and into dhcpcd.conf. Names are letters, digits
+  and `. _ : -`; DNS entries are IP addresses (space-separated); domains
+  are domain names.
+- A netmask such as `33` or `200` was written to dhcpcd.conf as is, and an
+  address's IP was not compared with its declared family. Both are
+  checked.
+- With `copyNetwork`, the `denyinterfaces` line for bond and bridge
+  members landed after the live system's dhcpcd.conf; inside an
+  `interface` block dhcpcd ignored it and asked for a lease on every
+  member. It goes before the first block.
+- The full-screen network form took any address: one without its prefix
+  was dropped later and the interface installed on DHCP while the hub
+  showed it static. Address, gateway and DNS are checked as typed.
+- A static address applied to the live system flushed the interface's
+  IPv6 link-local address too; only global addresses are flushed.
+
+**Images**
+
+- A `disk-image` write reported success when the download or the
+  decompression failed (the pipeline's status was `dd`'s), and the
+  machine rebooted onto half an image. Every stage is checked. A signed
+  URL (`img.raw.xz?sig=…`) is decompressed as its path says, and `.bz2`
+  is read too.
+- An image was unpacked with the live `/proc`, `/sys` and `/dev` bound
+  into the target: its `dev/`, `proc/` and `sys/` entries landed on the
+  live ones, and its `etc/resolv.conf` was overwritten. The binds come off
+  for the unpack; the image's resolv.conf is kept.
+- An install from an image kept the image's machine-id, random seed and
+  SSH host keys, shared by every machine installed from it. They are
+  removed after the unpack: first boot writes a machine-id and seed of
+  its own, and the host keys are made anew (`ssh-keygen -A`, when the
+  image has it).
+
+**Security**
+
+- The default install log in `/tmp` was opened as root with
+  O_CREAT|O_TRUNC, so a link another user left there had root overwrite
+  the file it pointed to (and a FIFO hung the install). A link is not
+  followed, anything there that is not root's own regular file is
+  replaced by a fresh 0600 one, and the diagnostics archive is created
+  exclusively.
+- Links in a preserved `/home`, an image or a reused root were followed
+  onto the live or new system: `authorized_keys -> ../../../etc/shadow`
+  had the keys written over the new shadow file; an absolute
+  `/etc/dhcpcd.conf` or `/etc/ssh` link had the live system's file
+  rewritten or its host keys removed; the target's resolv.conf link
+  had the live one written. Such links are replaced or resolved inside
+  the target, a home that is itself a link is refused, and a preserved
+  `.ssh` is no longer `chown -R`'d (a hard link could hand over another
+  user's file).
 - `SLINSTALLER_LUKS_PASSPHRASE` stayed in the environment of every command
-  the install ran, package scripts and hooks included (now cleared for an
-  unencrypted layout too).
-- A failed command's error printed the command unmasked: a `useradd -p`
-  password hash reached the screen, the diagnostics archive and a
-  `report-url`. Errors, dry runs and logs now mask hashes and the password
-  in a URL (`https_proxy=http://user:***@proxy`); the diagnostics config
-  masks URL passwords as well as account hashes.
-- `system-upgrade` ran the target's `xbps-install -Syu` before the Sunlight
-  mirror was written to its `/etc/xbps.d`, so the upgrade resolved every
-  package against Void alone. The mirror is recorded first now.
-- The end of an install (and `--unmount`) only detached the target's
-  filesystems lazily, with no sync: "Install complete." could print while
-  the data was still in the page cache, and a machine switched off then
-  booted a dirty ESP. Everything is synced and unmounted properly now; a
-  filesystem still held open is detached, and the log says which.
+  the install ran, package scripts and hooks included. It is read and
+  cleared at the start, for any layout.
+- A failed command's error, the dry run and the logs showed secrets: a
+  `useradd -p` hash reached the screen, the diagnostics archive and a
+  `report-url`, and proxy credentials every log. Crypt hashes and the
+  password in a URL (`http://user:***@proxy`, `@`, `#` and `?` in it
+  included) are masked everywhere, the `report-url` warning included.
+
+**Resume and failures**
+
+- A failed or stopped run left the live system's resolv.conf as the
+  installed disk's, with the target's own set aside: rebooted into, the
+  system was pinned to the live medium's DNS. Every way out of an install
+  now puts it back, and a resume recognises its own leftover copy by a
+  mark rather than by comparing it with a live file that may have changed
+  since. Mounts that could not be released are logged as warnings — what
+  explains a re-run that finds the mapper or array busy.
+- The diagnostics archive now has `/proc/mdstat`, the device-mapper tree,
+  the mount table and inactive arrays, what explains a failure to release
+  a disk.
+- Probe failures (blkid, parted, lsblk, mdadm, cryptsetup, openssl) said
+  only `exit status N`; the tool's own message is kept.
+- `--system-check` named a missing tool once per place it is needed;
+  each is named once.
+
+**Full-screen and text front-ends**
+
+- A very long output line (over 1 MiB) hung the full-screen install: the
+  runner stopped reading and the command blocked on the pipe. The rest is
+  drained.
 
 ## [2.1.1] - 2026-11-18
 

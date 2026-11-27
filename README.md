@@ -11,11 +11,17 @@ clr-installer `config.yaml` runs here. This is the same relationship
 A full install runs end to end under UEFI: it partitions and formats the
 disk, lays down the base system, installs GRUB, and configures first boot.
 
-> **Interim:** Sunlight has no package repository of its own yet, so until
-> it does slinstaller installs the base system from **Void's** official
-> repo. That means a test install currently comes up with **runit**, not
-> slinit — enough to prove the installer end to end; slinit takes over once
-> it is in a repo we control.
+> **Interim:** the base system still comes mostly from **Void's**
+> official repo; only Sunlight's own packages do not. A default install asks
+> for `sunlight-base` (Void's `base-system` with runit taken out and slinit
+> and its boot services put in), `grub-x86_64-efi` and `slpam`, and boots
+> **slinit**. xbps searches, in order, the live medium's own repository
+> (`--local-repo`, default `/usr/share/slinstaller/repo`), the signed
+> Sunlight mirror (`--extra-repo`), then Void (`--repo`); the Sunlight
+> packages come from the first two, everything else from Void. Preflight
+> refuses a default install when the live medium carries no local
+> repository. `--packages base-system,grub-x86_64-efi,glibc-locales` still
+> installs a plain runit system. See [doc/packaging.md](doc/packaging.md).
 
 ## What it installs
 
@@ -67,8 +73,8 @@ sudo ./slinstaller
 Useful flags: `--repo`/`--keys`/`--arch`/`--packages` for the base
 install, `--root` for the target mount tree, and `--through <stage>` to run
 only up to a stage (for VM testing). An encrypted layout takes its
-passphrase from `SLINSTALLER_LUKS_PASSPHRASE` or a prompt — never from the
-config.
+passphrase from `--crypt-file`, `SLINSTALLER_LUKS_PASSPHRASE` or a prompt —
+never from the config. `slinstaller --help` lists every flag.
 
 > ⚠️ Partitioning, formatting and bootloader installs are **irreversible**.
 > Try changes in a VM (QEMU + OVMF) against a scratch image — see
@@ -99,6 +105,39 @@ users:
 Mark a partition `type: crypt` to encrypt it. `Validate` reports every
 problem at once before any disk is touched. See [`demo/uefi-basic.yaml`](demo/uefi-basic.yaml)
 and [`doc/architecture.md`](doc/architecture.md).
+
+### Validation rules
+
+Besides the obvious (one root, an ESP, known filesystems, crypt hashes
+rather than passwords), these are refused before any disk is touched,
+because each used to fail after the wipe or install a system that did not
+work:
+
+- **Partition names.** On a new table a disk's partitions are named 1..n,
+  in order, on their own disk (`sda1`, `sda2`, …), and the partition that
+  fills the disk is the last on it. On a Safe/`reusePartitions` install, a
+  `create` partition is named with the number parted will give it (the
+  lowest free one); the dry run says so when it is not.
+- **Encryption.** `encrypted:` is read on `type: lvm` partitions and on
+  raid arrays only; a plain partition is encrypted with `type: crypt`. A
+  volume group's physical volumes are all encrypted or none.
+- **LVM.** Volume group and logical volume names are ones LVM accepts
+  (letters, digits, `+ _ . -`, not starting with `-`, not a name LVM keeps
+  for itself). Logical volume sizes are checked; a number without a unit
+  is bytes, as everywhere else in the config.
+- **Mountpoints** are clean absolute paths without spaces (`/home`, not
+  `/home/`), not under `/proc`, `/sys`, `/dev` or `/run`. A swap has no
+  mountpoint, and vfat cannot be the root.
+- **Administrators.** At least one administrator has a password, unless
+  the config sees to sudo itself: a `write-files` entry under
+  `/etc/sudoers*`, or post-install or stage hooks. (Root is locked once
+  there is an administrator, and sudo asks for a password.)
+- **Network.** `gateway` and `routes` are IPv4 (IPv6 routes come from
+  router advertisements); `dns` is IP addresses separated by spaces;
+  interface names are letters, digits and `. _ : -`.
+
+Config keys nothing reads are not refused, but each is named in a warning
+(`encryptd: true` would otherwise install unencrypted without a word).
 
 ### Beyond clr-installer's format
 
@@ -212,7 +251,9 @@ already is the partitioned, configured system.
 More on the command line: the config may be an `https://` URL; `--resume`
 continues an install that failed installing the base system without
 partitioning again, and `--resume-from <stage>` does so from any later
-stage; `--json-yaml old.json` converts the JSON descriptor of
+stage — also after a reboot of the live medium: the encrypted volumes,
+arrays and volume groups are brought back first, and the passphrase is
+asked once; `--json-yaml old.json` converts the JSON descriptor of
 clr-installer's predecessor into a config; `--unmount` takes down what a `--through` run left
 mounted and `--in-target "cmd"` runs a command inside it. A partition table
 whose partitions are named `CLR_BOOT`, `CLR_ROOT`, `CLR_SWAP`,

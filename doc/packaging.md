@@ -64,12 +64,12 @@ sunlightlinux repository exists, ship its keys here and point
 
 slinit is not in any remote repository yet, so the ISO carries its own:
 an xbps repository at **`/usr/share/slinstaller/repo`** holding the
-`slinit`, `slinit-services` and `sunlight-base` packages from slpkgs,
-with its index (`scripts/make-iso.sh` in sunlight-os builds it):
+`slinit`, `slinit-services`, `sunlight-base` and `slpam` packages from
+slpkgs, with its index (`scripts/make-iso.sh` in sunlight-os builds it):
 
 ```sh
 mkdir -p <rootfs>/usr/share/slinstaller/repo
-cp slinit-*.xbps slinit-services-*.xbps sunlight-base-*.xbps \
+cp slinit-*.xbps slinit-services-*.xbps sunlight-base-*.xbps slpam-*.xbps \
     <rootfs>/usr/share/slinstaller/repo/
 xbps-rindex -a <rootfs>/usr/share/slinstaller/repo/*.xbps
 ```
@@ -91,11 +91,19 @@ they come from the *target* packages, not the live ISO:
 - `useradd` — from `shadow`
 - `dracut` — builds the initramfs (crypt/lvm/mdraid modules, keyfile embed)
 
-The default target package set is `sunlight-base, grub-x86_64-efi`;
-slinstaller adds the filesystem/feature tools the layout
+The default target package set (`--packages`) is `sunlight-base,
+grub-x86_64-efi, slpam` (`slpam` is `pam_slinit.so`, which registers
+logins with slinit-logind). Besides the configured kernel and the
+config's own `packages`, slinstaller adds the filesystem/feature tools the layout
 needs (`btrfs-progs`, `xfsprogs`, `f2fs-tools`, `cryptsetup`, `lvm2`,
 `mdadm`) to what the target installs, so the installed system can fsck,
-mount, unlock and assemble its own storage at boot.
+mount, unlock and assemble its own storage at boot — plus `os-prober`
+with `probe-other-os`, and `iproute2` for bonds, VLANs and bridges.
+
+An encrypted, LVM or RAID install rebuilds the initramfs in the target
+with `dracut --regenerate-all --force` once crypttab and mdadm.conf are
+written, so the target needs `dracut` (a target without it falls back to
+`xbps-reconfigure -fa`).
 
 ## 5. Firmware: UEFI only
 
@@ -114,8 +122,13 @@ A legacy/BIOS boot of the ISO cannot install.
   including LUKS, LVM, LVM-on-LUKS and RAID). Without `--apply` it prints
   the partitioning plan and touches nothing — a dry run.
 - It must run as **root**, and it confirms the target disk before wiping.
-- The LUKS passphrase is never in the config: it is prompted, or taken from
-  `SLINSTALLER_LUKS_PASSPHRASE` for an unattended encrypted install.
+- The LUKS passphrase is never in the config. For an unattended encrypted
+  install it is read from `--crypt-file <file>` (a trailing newline is not
+  part of it), else from `SLINSTALLER_LUKS_PASSPHRASE`; otherwise it is
+  prompted with echo off — twice on a terminal for a new install, once
+  for a `--resume` (it opens volumes that exist) or from a pipe. The
+  variable is cleared as soon as it is read, so nothing the install runs
+  inherits it.
 
 To autostart it on the live medium, launch `slinstaller` on the console
 login (e.g. from the live user's shell profile or a getty), leaving a
@@ -125,11 +138,15 @@ shell available if the operator exits it.
 
 The base system is fetched with `xbps-install`, which can read several
 repositories at once (`-R` per repository) and installs the **newest**
-version of each package found across them. slinstaller drives this with two
+version of each package found across them. slinstaller drives this with three
 knobs:
 
 - `--repo <url>` — the remote mirror (defaults to the config's `swupdMirror`,
   else Void's official repo).
+- `--extra-repo <url>[,<url>…]` — remote repositories searched ahead of
+  `--repo`; by default the signed Sunlight mirror, whose key is built into
+  slinstaller and seeded into the target. The installed system's
+  `/etc/xbps.d/10-sunlight.conf` names them, so it updates from them too.
 - `--local-repo <path>[,<path>…]` — repositories carried **on the live ISO**,
   searched alongside the remote one. Paths without an xbps repository index
   are skipped.
@@ -179,7 +196,8 @@ official repository; only slinit, its services and the metapackage
 come from the local one.
 
 slinstaller also puts `init=/usr/bin/slinit` on the kernel command line
-whenever slinit is in the target (`/usr/bin/init` points at it too), and
+when the target has slinit and its boot service (`/usr/bin/init` points
+at it too) and the config names no `init=` of its own, and
 writes `/etc/machine-id`: slinit reads it as PID 1 before any service
 runs, and Void creates none.
 

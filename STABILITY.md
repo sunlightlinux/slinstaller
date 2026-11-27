@@ -25,6 +25,11 @@ that travels:
   on (and the Clear Linux specifics it maps or ignores) are documented as
   they are implemented.
 
+  A config that would have failed partway through an install — after the
+  disk was wiped — or installed a system that cannot boot may be refused
+  before any disk is touched, by a newer slinstaller. That is not a break
+  of config compatibility: the install it described never worked.
+
 ## What is not an interface (yet)
 
 - **The Go packages under `pkg/`.** Import them at your own risk; they

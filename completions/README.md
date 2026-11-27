@@ -3,6 +3,8 @@
 Shell completion scripts for the slinstaller command line (bash, zsh,
 fish), as in slinit's `completions/`.
 
-Empty for now: the command line is a single config path and `--apply`,
-which is not worth completing yet. Completions arrive when there are
-subcommands or flags that benefit from them.
+Empty for now. The command line is no longer just a config path and
+`--apply`: it has about 45 flags (`slinstaller --help` lists them, among
+them `--resume-from <stage>` and `--through <stage>`, whose stage names
+are worth completing), so completion scripts are due. None is written or
+generated yet.
