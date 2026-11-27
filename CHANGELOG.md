@@ -10,6 +10,14 @@ change.
 
 ## [Unreleased]
 
+### Changed
+
+- **No LUKS keyfile on an unencrypted root.** An encrypted `/home`, swap
+  or `/boot` on a plain root got a keyfile in `/etc/cryptkeys` - on that
+  plain root, beside the volume it opens, so the encryption kept nobody
+  holding the disk out. Such a volume now asks for its passphrase at
+  boot (`none` in crypttab). With an encrypted root nothing changes.
+
 ### Fixed
 
 - **The dry run shows the whole partition stage.** It printed the disk's
@@ -50,6 +58,14 @@ change.
   space or a line break are refused with `skipValidationAll` too: they
   split into two kernel arguments or shifted the fields of fstab and
   crypttab.
+- A partition kept with no mountpoint (a Windows MSR from `--discover`,
+  a spare ESP) was probed for fstab and, with no signature, failed the
+  install at the fstab stage, after the base system was in.
+- An xfs filesystem under 300 MiB (mkfs.xfs's minimum since xfsprogs
+  5.19), fixed-size or filling the rest, is refused before the wipe, not
+  by mkfs after it.
+- A volume group name the machine already has on a disk the install does
+  not wipe is refused before the wipe; `vgcreate` failed after it.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 
