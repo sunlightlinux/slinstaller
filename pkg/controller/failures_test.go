@@ -381,7 +381,7 @@ func TestWhichVolumeGrubMustUnlock(t *testing.T) {
 	cfg := lvmConfig("/boot/efi", true)
 	disk := cfg.TargetMedia[0]
 	pv2 := *disk.Children[1]
-	pv2.Name = "sdb1"
+	pv2.Name, pv2.Children = "sdb1", nil // the group's volumes are declared once
 	cfg.TargetMedia = append(cfg.TargetMedia, &config.Media{Name: "sdb", Type: "disk", Children: []*config.Media{&pv2}})
 	in = stagedInstaller(t, cfg, &r)
 	if got := in.bootCryptDevices(); len(got) != 2 {

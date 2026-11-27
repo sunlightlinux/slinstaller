@@ -751,6 +751,39 @@ func TestPlanDiskNameIsAKernelName(t *testing.T) {
 	}
 }
 
+// Two things of a layout at one device path cannot both be made: a disk
+// named md0 beside an array md0 passed Validate, and the install
+// partitioned the disk, then ran mdadm --create /dev/md0 on a member of
+// itself and mkfs over the table it had just written — after wiping both
+// disks. An array md2 beside the second partition of a disk md (/dev/md2)
+// is the same.
+// Refused by Plan, with the checks on or off.
+func TestPlanRefusesTwoDevicesAtOnePath(t *testing.T) {
+	for name, c := range map[string]*Config{
+		"disk md0, array md0": {TargetMedia: []*Media{
+			{Name: "md0", Type: "disk", Children: []*Media{
+				{Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+				{Type: "raid", Raid: "md0", Size: "20G"},
+			}},
+			{Name: "sda", Type: "disk", Children: []*Media{{Type: "raid", Raid: "md0", Size: "20G"}}},
+		}, Raid: []*RaidArray{{Name: "md0", Level: "1", FsType: "xfs", Mountpoint: "/"}}},
+		"partition md2, array md2": {TargetMedia: []*Media{
+			{Name: "md", Type: "disk", Children: []*Media{
+				{Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+				{Type: "raid", Raid: "md2", Size: "20G"},
+			}},
+			{Name: "sda", Type: "disk", Children: []*Media{{Type: "raid", Raid: "md2", Size: "20G"}}},
+		}, Raid: []*RaidArray{{Name: "md2", Level: "1", FsType: "xfs", Mountpoint: "/"}}},
+	} {
+		for _, skip := range []bool{false, true} {
+			c.SkipValidationAll = skip
+			if _, err := c.Plan(); err == nil || !strings.Contains(err.Error(), "is both") {
+				t.Errorf("%s, skip %v: Plan: %v", name, skip, err)
+			}
+		}
+	}
+}
+
 // skipValidationAll does not let a value reach a file the installed
 // system runs as code: an interface name or bond mode goes unquoted into
 // /etc/rc.local, a line break in a network field starts a new dhcpcd.conf

@@ -2525,10 +2525,48 @@ func (c *Config) Plan() (*storage.Plan, error) {
 			}
 		}
 	}
+	if err := checkDevices(pl); err != nil {
+		return nil, err
+	}
 	if err := checkFields(pl); err != nil {
 		return nil, err
 	}
 	return pl, nil
+}
+
+// checkDevices refuses a layout with two of its devices at one path — a
+// disk named md0 beside an array md0, an array md2 beside a disk md's
+// second partition: both cannot be made, and the second failed only after
+// the disks were wiped.
+func checkDevices(pl *storage.Plan) error {
+	seen := map[string]string{}
+	add := func(dev, what string) error {
+		if prev, ok := seen[dev]; ok {
+			return fmt.Errorf("config: %s is both %s and %s", dev, prev, what)
+		}
+		seen[dev] = what
+		return nil
+	}
+	for _, d := range pl.DiskList() {
+		if err := add(d, "a disk"); err != nil {
+			return err
+		}
+	}
+	for _, p := range pl.Parts {
+		var err error
+		switch {
+		case p.LV:
+			err = add(p.EffectiveDevice(), "a logical volume")
+		case p.Raid:
+			err = add(storage.RaidDevice(p.RaidName), "an array")
+		default:
+			err = add(p.Device, "a partition")
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // checkFields checks what goes into fstab, crypttab and the kernel command
@@ -2682,6 +2720,9 @@ func (c *Config) planReuse(disks []*Media) (*storage.Plan, error) {
 			pl.Disk = p.Disk
 			break
 		}
+	}
+	if err := checkDevices(pl); err != nil {
+		return nil, err
 	}
 	if err := checkFields(pl); err != nil {
 		return nil, err
