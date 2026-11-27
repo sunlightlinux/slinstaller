@@ -43,7 +43,7 @@ func TestDiskImageCommands(t *testing.T) {
 	// From a URL it is written as it downloads, the URL an argument too —
 	// and its suffix is read from the path, not a signed URL's query.
 	remote := diskImageCommands(nil, "https://img.example/disk.raw.zst?sig=abc", "/dev/sdb", false)[0]
-	if st := diskImageStages("https://img.example/disk.raw.zst?sig=abc", false); strings.Join(st, " | ") != `curl -fsSL --proto-redir =https "$1" | zstd -dc | dd of="$2" bs=4M conv=fsync status=none` || remote[4] != "https://img.example/disk.raw.zst?sig=abc" {
+	if st := diskImageStages("https://img.example/disk.raw.zst?sig=abc", false); strings.Join(st, " | ") != `curl -fsSL --speed-limit 1024 --speed-time 120 --proto-redir =https "$1" | zstd -dc | dd of="$2" bs=4M conv=fsync status=none` || remote[4] != "https://img.example/disk.raw.zst?sig=abc" {
 		t.Errorf("remote image: %q %v", st, remote)
 	}
 }

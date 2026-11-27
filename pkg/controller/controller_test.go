@@ -414,3 +414,16 @@ func TestRootFilesNotThroughLinks(t *testing.T) {
 		t.Errorf("written outside: %v", ents)
 	}
 }
+
+// A write-file under a target directory that links out makes nothing outside.
+func TestWriteFilesMakesNoDirsOutside(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	os.Symlink(outside, filepath.Join(root, "etc"))
+	in := &installer{cfg: &config.Config{WriteFiles: []*config.WriteFile{{Path: "/etc/app/deep/x.conf", Content: "x"}}}, opts: Options{Root: root}}
+	if err := in.writeFiles(); err == nil || !strings.Contains(err.Error(), "leads outside") {
+		t.Errorf("err %v", err)
+	}
+	if ents, _ := os.ReadDir(outside); len(ents) != 0 {
+		t.Errorf("made outside: %v", ents)
+	}
+}

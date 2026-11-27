@@ -1813,6 +1813,20 @@ func (in *installer) writeFiles() error {
 		}
 		dst := filepath.Join(root, filepath.Clean("/"+w.Path))
 		dir := filepath.Dir(dst)
+		// The deepest directory that exists is checked before any is made:
+		// MkdirAll through a link out of the target made directories on the
+		// live system before the check below refused.
+		for d := dir; ; d = filepath.Dir(d) {
+			if _, err := os.Lstat(d); err == nil {
+				if !insideTarget(root, d) {
+					return fmt.Errorf("write-files: %s leads outside the installed system", w.Path)
+				}
+				break
+			}
+			if d == root || d == filepath.Dir(d) {
+				break
+			}
+		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("write-files: %w", err)
 		}
