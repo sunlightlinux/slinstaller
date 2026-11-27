@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,22 +29,58 @@ func TestDiskImageCommands(t *testing.T) {
 	want := []string{
 		"wipefs|-a|/dev/sda1",
 		"wipefs|-a|/dev/sda",
-		`sh|-c|zstd -dc "$1" | dd of="$2" bs=4M conv=fsync status=none|sh|/img/My Image.raw.zst|/dev/sda`,
+		`sh|-c|` + checkedPipeline([]string{`zstd -dc "$1"`, `dd of="$2" bs=4M conv=fsync status=none`}) + `|sh|/img/My Image.raw.zst|/dev/sda`,
 		"partprobe|/dev/sda",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	for ext, reader := range map[string]string{".raw": `cat "$1" | dd`, ".img": `cat "$1" | dd`, ".xz": `xz -dc "$1" | dd`, ".GZ": `gzip -dc "$1" | dd`} {
-		cmds := diskImageCommands(nil, "/img/disk"+ext, "/dev/sdb", false)
-		if !strings.HasPrefix(cmds[0][2], reader) {
-			t.Errorf("%s: %s", ext, cmds[0][2])
+	for ext, reader := range map[string]string{".raw": `cat "$1"`, ".img": `cat "$1"`, ".xz": `xz -dc "$1"`, ".GZ": `gzip -dc "$1"`, ".bz2": `bzip2 -dc "$1"`} {
+		if st := diskImageStages("/img/disk"+ext, false); st[0] != reader {
+			t.Errorf("%s: %q", ext, st)
 		}
 	}
-	// From a URL it is written as it downloads, the URL an argument too.
-	remote := diskImageCommands(nil, "https://img.example/disk.raw.zst", "/dev/sdb", false)[0]
-	if remote[2] != `curl -fsSL --proto-redir =https "$1" | zstd -dc | dd of="$2" bs=4M conv=fsync status=none` || remote[4] != "https://img.example/disk.raw.zst" {
-		t.Errorf("remote image: %v", remote)
+	// From a URL it is written as it downloads, the URL an argument too —
+	// and its suffix is read from the path, not a signed URL's query.
+	remote := diskImageCommands(nil, "https://img.example/disk.raw.zst?sig=abc", "/dev/sdb", false)[0]
+	if st := diskImageStages("https://img.example/disk.raw.zst?sig=abc", false); strings.Join(st, " | ") != `curl -fsSL --proto-redir =https "$1" | zstd -dc | dd of="$2" bs=4M conv=fsync status=none` || remote[4] != "https://img.example/disk.raw.zst?sig=abc" {
+		t.Errorf("remote image: %q %v", st, remote)
+	}
+}
+
+// The write fails when ANY stage of it does: a truncated image or a failed
+// download is not reported as written. (dd alone decided before.)
+func TestDiskImagePipelineFailsOnAnyStage(t *testing.T) {
+	for _, tool := range []string{"sh", "xz", "dd"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("no %s here", tool)
+		}
+	}
+	dir := t.TempDir()
+	raw := filepath.Join(dir, "disk.raw")
+	os.WriteFile(raw, bytes.Repeat([]byte("sunlight"), 1<<16), 0o644)
+	if out, err := exec.Command("xz", "-k", raw).CombinedOutput(); err != nil {
+		t.Fatalf("xz: %v %s", err, out)
+	}
+	whole, _ := os.ReadFile(raw + ".xz")
+	cut := filepath.Join(dir, "cut.raw.xz")
+	os.WriteFile(cut, whole[:len(whole)/2], 0o644)
+	write := func(image string) error {
+		target := filepath.Join(dir, "target")
+		os.WriteFile(target, nil, 0o644)
+		return exec.Command("sh", "-c", checkedPipeline(diskImageStages(image, false)), "sh", image, target).Run()
+	}
+	if err := write(raw + ".xz"); err != nil {
+		t.Fatalf("a good image: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "target")); !bytes.Equal(got, bytes.Repeat([]byte("sunlight"), 1<<16)) {
+		t.Error("a good image was not written whole")
+	}
+	if err := write(cut); err == nil {
+		t.Error("a truncated image was reported as written")
+	}
+	if err := write(filepath.Join(dir, "missing.raw")); err == nil {
+		t.Error("a missing image was reported as written")
 	}
 }
 

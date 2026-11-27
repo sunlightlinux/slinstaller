@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,31 +23,66 @@ func diskImageCommands(devs []blockdev.Device, image, disk string, allowInsecure
 	if d := blockdev.FindByPath(devs, disk); d != nil {
 		cmds = append(cmds, blockdev.Teardown(*d)...)
 	}
+	stages := diskImageStages(image, allowInsecureHTTP)
+	return append(cmds,
+		[]string{"sh", "-c", checkedPipeline(stages), "sh", image, disk},
+		[]string{"partprobe", disk})
+}
+
+// diskImageStages are the stages of the pipeline that writes image to the
+// disk ("$1" the image, "$2" the disk): the reader, any decompressor, dd.
+func diskImageStages(image string, allowInsecureHTTP bool) []string {
 	// A local image is read by its decompressor, or by cat. From a URL it is
 	// written as it downloads; it never has to fit on the live system.
 	unpack := ""
-	switch strings.ToLower(filepath.Ext(image)) {
+	switch imageExt(image) {
 	case ".zst":
 		unpack = "zstd -dc"
 	case ".xz":
 		unpack = "xz -dc"
 	case ".gz":
 		unpack = "gzip -dc"
+	case ".bz2":
+		unpack = "bzip2 -dc"
 	}
-	var reader string
+	var stages []string
 	switch {
 	case config.IsRemote(image) && unpack != "":
-		reader = config.CurlFetch(image, allowInsecureHTTP) + ` | ` + unpack
+		stages = []string{config.CurlFetch(image, allowInsecureHTTP), unpack}
 	case config.IsRemote(image):
-		reader = config.CurlFetch(image, allowInsecureHTTP)
+		stages = []string{config.CurlFetch(image, allowInsecureHTTP)}
 	case unpack != "":
-		reader = unpack + ` "$1"`
+		stages = []string{unpack + ` "$1"`}
 	default:
-		reader = `cat "$1"`
+		stages = []string{`cat "$1"`}
 	}
-	return append(cmds,
-		[]string{"sh", "-c", reader + ` | dd of="$2" bs=4M conv=fsync status=none`, "sh", image, disk},
-		[]string{"partprobe", disk})
+	return append(stages, `dd of="$2" bs=4M conv=fsync status=none`)
+}
+
+// imageExt is the image's compression suffix, lower-cased: of a URL's
+// path, so a signed URL (img.raw.xz?sig=...) is still read as .xz rather
+// than written to the disk compressed.
+func imageExt(image string) string {
+	if config.IsRemote(image) {
+		if u, err := url.Parse(image); err == nil {
+			image = u.Path
+		}
+	}
+	return strings.ToLower(filepath.Ext(image))
+}
+
+// checkedPipeline is a shell pipeline of stages that fails when ANY stage
+// fails, not only the last: sh has no portable pipefail, and the exit
+// status of "curl | xz -dc | dd" is dd's alone — a download that failed or
+// a truncated image was written in part and reported as written. Each
+// stage reports its status on fd 3; all must be 0.
+func checkedPipeline(stages []string) string {
+	parts := make([]string, len(stages))
+	for i, st := range stages {
+		parts[i] = "{ " + st + "; echo $? >&3; }"
+	}
+	return `s=$( { ` + strings.Join(parts, " | ") + `; } 3>&1 ) || exit 1
+for c in $s; do [ "$c" = 0 ] || { echo "disk-image: a step of the write failed (exit statuses: $(echo $s))" >&2; exit 1; }; done`
 }
 
 // installDiskImage is the whole of a disk-image run: resolve the image,
@@ -103,9 +139,9 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply bool, stdin *buf
 	for _, c := range cmds {
 		tools = append(tools, c[0])
 	}
-	// What the shell command runs: the reader and any decompressor.
-	for _, part := range strings.Split(cmds[len(cmds)-2][2], "|") {
-		tools = append(tools, strings.Fields(part)[0])
+	// What the shell command runs: the reader, any decompressor, dd.
+	for _, st := range diskImageStages(image, cfg.AllowInsecureHTTP) {
+		tools = append(tools, strings.Fields(st)[0])
 	}
 	if missing := storage.MissingTools(tools); len(missing) > 0 {
 		return fmt.Errorf("missing tools on the live system: %s", strings.Join(missing, ", "))

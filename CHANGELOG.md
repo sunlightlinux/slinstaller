@@ -37,6 +37,12 @@ change.
 
 ### Fixed
 
+- A `disk-image` write reported success when the download or the
+  decompression failed: the pipeline's status was `dd`'s alone, so a
+  truncated image half-written to the disk, or a failed fetch, was
+  "written" and the machine rebooted. Every stage is checked now. A signed
+  URL (`img.raw.xz?sig=...`) is decompressed as its path says, and `.bz2`
+  is read too.
 - A swap file on a btrfs root was made copy-on-write (and compressed
   under `compress=`), which the kernel refuses: the install succeeded and
   `swapon` failed at every boot. It is marked No_COW before it is
