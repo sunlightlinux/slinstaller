@@ -55,6 +55,9 @@ change.
 
 ### Fixed
 
+- `powerAction: kexec` failed on every btrfs root mounted from a subvolume
+  (GRUB names the files `/@/boot/…`), and with an early microcode image
+  listed first it loaded that instead of the initramfs. Both are handled.
 - `init=/usr/bin/slinit` was added whenever the slinit binary was in the
   target, even with no slinit boot service (a Void base with the slinit
   package added): the system did not boot, and the other stages had set it

@@ -49,7 +49,14 @@ func KexecCommand(root string) ([]string, error) {
 		def = 0
 	}
 	find := func(rel string) (string, error) {
-		for _, p := range []string{filepath.Join(root, rel), filepath.Join(root, "boot", rel)} {
+		candidates := []string{filepath.Join(root, rel), filepath.Join(root, "boot", rel)}
+		// On a btrfs root mounted from a subvolume, GRUB names files by
+		// their path in the filesystem (/@/boot/vmlinuz-…), the subvolume
+		// first; the target is mounted from it, so the path is the rest.
+		if parts := strings.SplitN(strings.TrimPrefix(rel, "/"), "/", 2); len(parts) == 2 {
+			candidates = append(candidates, filepath.Join(root, parts[1]))
+		}
+		for _, p := range candidates {
 			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 				return p, nil
 			}
@@ -66,7 +73,10 @@ func KexecCommand(root string) ([]string, error) {
 			}
 			cmdline = strings.Join(f[2:], " ")
 		case len(f) >= 2 && (f[0] == "initrd" || f[0] == "initrdefi") && initrd == "":
-			if initrd, err = find(f[1]); err != nil {
+			// The last image is the initramfs: GRUB lists early ones (CPU
+			// microcode) before it, and kexec takes a single initrd —
+			// given the microcode alone, the kernel had no root to mount.
+			if initrd, err = find(f[len(f)-1]); err != nil {
 				return nil, err
 			}
 		}

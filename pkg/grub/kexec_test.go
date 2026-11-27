@@ -84,3 +84,19 @@ func TestKexecCommand(t *testing.T) {
 		}
 	}
 }
+
+// A btrfs root on a subvolume: GRUB names the files /@/boot/…, and the
+// target (mounted from @) has them at /boot/…. And with microcode listed
+// first on the initrd line, the initramfs — the last image — is loaded.
+func TestKexecBtrfsSubvolumeAndEarlyImages(t *testing.T) {
+	cfg := strings.ReplaceAll(grubCfg, "/boot/", "/@/boot/")
+	cfg = strings.ReplaceAll(cfg, "initrd	/@/boot/initramfs", "initrd	/@/boot/intel-ucode.img /@/boot/initramfs")
+	root := target(t, cfg, "boot/vmlinuz-6.18.62_1", "boot/initramfs-6.18.62_1.img", "boot/intel-ucode.img")
+	cmd, err := KexecCommand(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd[2] != root+"/boot/vmlinuz-6.18.62_1" || cmd[3] != "--initrd="+root+"/boot/initramfs-6.18.62_1.img" {
+		t.Errorf("kexec command: %v", cmd)
+	}
+}
