@@ -295,7 +295,7 @@ func TestBootloaderForLVMAndRAIDRoots(t *testing.T) {
 	// recorded and dracut's mdraid module forced in.
 	fakeBin(t, map[string]string{"mdadm": `case "$*" in
 *--export*) echo "MD_UUID=aaaa:bbbb:cccc:dddd" ;;
-*--scan*) echo "ARRAY /dev/md0 UUID=aaaa:bbbb:cccc:dddd" ;;
+*--brief*/dev/md0*) echo "ARRAY /dev/md0 UUID=aaaa:bbbb:cccc:dddd" ;;
 esac`})
 	r = recorder{}
 	in = stagedInstaller(t, raidConfig(), &r)
@@ -338,7 +338,7 @@ func TestBootloaderRAIDFailures(t *testing.T) {
 	fakeBin(t, map[string]string{"mdadm": `case "$*" in *--export*) echo "MD_UUID=aa:bb" ;; *) exit 1 ;; esac`})
 	in = stagedInstaller(t, raidConfig(), &r)
 	mkTarget(t, in, "etc", "default")
-	wantErr(t, in.bootloader(), "mdadm --detail --scan")
+	wantErr(t, in.bootloader(), "mdadm --detail --brief /dev/md0")
 
 	// mdadm.conf is written but the dracut drop-in cannot be.
 	fakeBin(t, map[string]string{"mdadm": `case "$*" in *--export*) echo "MD_UUID=aa:bb" ;; *) echo "ARRAY /dev/md0" ;; esac`})

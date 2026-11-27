@@ -12,6 +12,9 @@ change.
 
 ### Fixed
 
+- `/etc/mdadm.conf` on the installed system listed every array the live
+  system had assembled (`mdadm --detail --scan`), data arrays on other
+  disks included. It lists the install's own arrays now.
 - An install from an image kept the image's machine-id, saved random seed
   and SSH host keys, so every machine installed from one image shared
   them. They are removed after the unpack; the first-boot stage writes a

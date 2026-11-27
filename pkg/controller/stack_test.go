@@ -26,7 +26,7 @@ func serverConfig(array *config.RaidArray) *config.Config {
 
 const fakeMdadm = `case "$*" in
 *--export*) echo "MD_UUID=aaaa:bbbb:cccc:dddd" ;;
-*--scan*) echo "ARRAY /dev/md0 UUID=aaaa:bbbb:cccc:dddd" ;;
+*--brief*/dev/md0*) echo "ARRAY /dev/md0 UUID=aaaa:bbbb:cccc:dddd" ;;
 esac`
 
 // Each layer is built on the one below it: the array from its members, LUKS

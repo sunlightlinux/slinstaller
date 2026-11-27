@@ -1336,9 +1336,19 @@ func (in *installer) bootCryptDevice() string {
 // booted system knows them. It reads the live array details (the arrays
 // were just created, so they are running) with `mdadm --detail --scan`.
 func (in *installer) writeMdadmConf() error {
-	out, err := exec.Command("mdadm", "--detail", "--scan").Output()
+	// The install's own arrays only. --scan lists every array the live
+	// system has assembled — a data array on a disk the install does not
+	// touch, an old install's — and the installed system then assembled
+	// those at boot too, under the live system's names.
+	args := []string{"mdadm", "--detail", "--brief"}
+	for _, p := range in.plan.Parts {
+		if p.Raid {
+			args = append(args, storage.RaidDevice(p.RaidName))
+		}
+	}
+	out, err := exec.Command(args[0], args[1:]...).Output()
 	if err != nil {
-		return fmt.Errorf("mdadm --detail --scan: %w", storage.WithStderr(err))
+		return fmt.Errorf("%s: %w", strings.Join(args, " "), storage.WithStderr(err))
 	}
 	dir := filepath.Join(in.opts.Root, "etc")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
