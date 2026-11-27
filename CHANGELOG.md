@@ -33,6 +33,14 @@ change.
   table was opened with, as clr-installer's do. Revert deleted every
   account, those confirmed on an earlier visit too, and Cancel kept the
   changes.
+- **Wizard:** Esc in the static network form puts the interface back as
+  it was (the address and gateway typed before it were installed while
+  the live system kept the old ones); an IPv6 gateway is refused in the
+  form, not only at Install; Install asks for a passphrase left for later
+  (there was no other way back to it); a list's filter takes a pasted
+  name and Backspace removes a whole character (a pasted "Zürich" was
+  ignored and Enter chose the list's first entry); Test Network Settings
+  goes through the proxy typed in the wizard.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 
