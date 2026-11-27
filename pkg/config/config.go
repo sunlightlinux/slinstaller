@@ -1022,6 +1022,10 @@ func (c *Config) expandAliases() {
 
 // hostnameRe is the conservative intersection of what Linux and DNS
 // accept: letters, digits and hyphens, not starting or ending with one.
+// domainRe is a DNS domain: dot-separated labels of letters, digits and
+// hyphens.
+var domainRe = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.?$`)
+
 var hostnameRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
 
 // loginRe is what useradd accepts for a login name.
@@ -1838,8 +1842,8 @@ func (c *Config) Validate() error {
 		if kinds > 1 {
 			add("%s: an interface is a bond, a VLAN or a bridge, not several", who)
 		}
-		if kinds > 0 && !network.ValidIfName(ni.Name) {
-			add("%s: not a name an interface can be created with (1 to 15 characters, no spaces)", who)
+		if ni.Name != "" && !network.ValidIfName(ni.Name) {
+			add("%s: not an interface name (1 to 15 letters, digits and . _ : -)", who)
 		}
 		for _, r := range ni.Routes {
 			if r == nil {
@@ -1850,6 +1854,12 @@ func (c *Config) Validate() error {
 			}
 			if net.ParseIP(r.Via) == nil {
 				add("%s: route via %q is not a valid IP", who, r.Via)
+			}
+			// dhcpcd's static routes are IPv4 only; an IPv6 one was dropped
+			// at boot ("invalid IP address") — IPv6 routes come from router
+			// advertisements.
+			if ip, _, err := net.ParseCIDR(r.To); err == nil && ip.To4() == nil {
+				add("%s: route to %s is IPv6; dhcpcd takes static routes for IPv4 only (IPv6 routes come from router advertisements)", who, r.To)
 			}
 		}
 		if len(ni.Routes) > 0 && !ni.Static() {
@@ -1866,8 +1876,31 @@ func (c *Config) Validate() error {
 				add("%s: address %d: %v", who, j+1, err)
 			}
 		}
-		if ni.Gateway != "" && net.ParseIP(ni.Gateway) == nil {
-			add("%s: gateway %q is not a valid IP", who, ni.Gateway)
+		if ni.Gateway != "" {
+			if ip := net.ParseIP(ni.Gateway); ip == nil {
+				add("%s: gateway %q is not a valid IP", who, ni.Gateway)
+			} else if ip.To4() == nil || strings.Contains(ni.Gateway, ":") {
+				add("%s: gateway %s is IPv6; dhcpcd's static routers are IPv4 only (an IPv6 default route comes from router advertisements)", who, ni.Gateway)
+			}
+		}
+		// Written into dhcpcd.conf and the live resolv.conf as given: a
+		// newline would start a stanza of its own, a comma-separated list
+		// is not a server.
+		for _, d := range strings.Fields(ni.DNS) {
+			if net.ParseIP(d) == nil {
+				add("%s: dns %q is not an IP address (separate several with spaces)", who, d)
+			}
+		}
+		if strings.ContainsAny(ni.DNS, "\n\r") {
+			add("%s: dns is one line of addresses", who)
+		}
+		for _, d := range strings.Fields(ni.Domain) {
+			if len(d) > 253 || !domainRe.MatchString(d) {
+				add("%s: domain %q is not a domain name (separate several with spaces)", who, d)
+			}
+		}
+		if strings.ContainsAny(ni.Domain, "\n\r") {
+			add("%s: domain is one line of names", who)
 		}
 	}
 

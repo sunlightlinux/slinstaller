@@ -143,12 +143,11 @@ func DhcpcdConf(ifaces []Interface) (string, error) {
 		if iface.Domain != "" {
 			fmt.Fprintf(&b, "static domain_search=%s\n", iface.Domain)
 		}
-		if len(iface.Routes) > 0 {
-			var routes []string
-			for _, r := range iface.Routes {
-				routes = append(routes, r.To+" "+r.Via)
-			}
-			fmt.Fprintf(&b, "static routes=%s\n", strings.Join(routes, " "))
+		// One route per line: dhcpcd reads a routes= value as one
+		// destination and one gateway, so two on a line were refused
+		// whole ("invalid CIDR") and the interface had none.
+		for _, r := range iface.Routes {
+			fmt.Fprintf(&b, "static routes=%s %s\n", r.To, r.Via)
 		}
 	}
 	head := ""

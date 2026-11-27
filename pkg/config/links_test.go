@@ -33,10 +33,18 @@ func TestBondVLANBridgeValidation(t *testing.T) {
 		"VLAN id":           {func(c *Config) { c.NetworkInterfaces[2].VLAN.ID = 4095 }, "VLAN id 4095 is not between 1 and 4094"},
 		"VLAN without link": {func(c *Config) { c.NetworkInterfaces[2].VLAN.Link = "" }, "a VLAN needs the interface it is on"},
 		"two kinds":         {func(c *Config) { c.NetworkInterfaces[1].Bridge = &Bridge{} }, "is a bond, a VLAN or a bridge, not several"},
-		"long name":         {func(c *Config) { c.NetworkInterfaces[1].Name = "a-very-long-bond-name" }, "not a name an interface can be created with"},
+		"long name":         {func(c *Config) { c.NetworkInterfaces[1].Name = "a-very-long-bond-name" }, "not an interface name (1 to 15"},
 		"route target":      {func(c *Config) { c.NetworkInterfaces[2].Routes[1].To = "10.1.0.0" }, "is not in CIDR form"},
 		"route gateway":     {func(c *Config) { c.NetworkInterfaces[2].Routes[1].Via = "gw" }, `route via "gw" is not a valid IP`},
 		"routes on DHCP":    {func(c *Config) { c.NetworkInterfaces[2].Addrs = nil }, "static routes need a static address"},
+		// What goes unquoted into the root boot script and dhcpcd.conf.
+		"name runs a command": {func(c *Config) { c.NetworkInterfaces[1].Bond.Members[0] = "$(reboot)" }, `bond member "$(reboot)" is not an interface name`},
+		"name with a newline": {func(c *Config) { c.NetworkInterfaces[1].Name = "bond0\nx" }, "not an interface name"},
+		"dns with commas":     {func(c *Config) { c.NetworkInterfaces[2].DNS = "8.8.8.8,8.8.4.4" }, `dns "8.8.8.8,8.8.4.4" is not an IP address`},
+		"dns with a newline":  {func(c *Config) { c.NetworkInterfaces[2].DNS = "1.1.1.1\ninterface wlan0" }, "dns is one line"},
+		"bad domain":          {func(c *Config) { c.NetworkInterfaces[2].Domain = "ex ample;" }, `domain "ample;" is not a domain name`},
+		"IPv6 gateway":        {func(c *Config) { c.NetworkInterfaces[2].Gateway = "2001:db8::1" }, "gateway 2001:db8::1 is IPv6"},
+		"IPv6 route":          {func(c *Config) { c.NetworkInterfaces[2].Routes[1].To = "2001:db8:1::/48" }, "route to 2001:db8:1::/48 is IPv6"},
 		// The addresses of a bond go on the bond, not on what it is made of.
 		"address on a member": {func(c *Config) {
 			c.NetworkInterfaces = append(c.NetworkInterfaces, &Interface{Name: "eth0", Addrs: []*Address{{IP: "10.0.0.2", Netmask: "24"}}})

@@ -37,6 +37,18 @@ change.
 
 ### Fixed
 
+- Two or more static routes on an interface were written on one
+  `static routes=` line, which dhcpcd refuses whole: the interface came up
+  with none. Each route has its own line now.
+- An IPv6 gateway or static route passed validation, but dhcpcd's static
+  `routers`/`routes` are IPv4 only and dropped it at boot. They are
+  refused, saying that IPv6 routes come from router advertisements.
+- Interface names, DNS servers and the search domain were barely checked,
+  yet go unquoted into the boot script that makes bonds, VLANs and bridges
+  (run as root) and into dhcpcd.conf: a name like `$(cmd)` or a DNS value
+  with a newline passed. Names are letters, digits and `. _ : -`; DNS
+  entries must be IP addresses (space-separated); domains must be domain
+  names.
 - A `disk-image` write reported success when the download or the
   decompression failed: the pipeline's status was `dd`'s alone, so a
   truncated image half-written to the disk, or a failed fetch, was

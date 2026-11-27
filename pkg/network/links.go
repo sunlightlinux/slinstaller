@@ -44,9 +44,20 @@ func ValidBondMode(mode string) bool {
 }
 
 // ValidIfName reports whether s can be a network interface name: 1 to 15
-// characters, none of them a space or a slash.
+// letters, digits and . _ : - (not "." or ".."). Names go unquoted into
+// the boot script that creates bonds, VLANs and bridges, which runs as
+// root, and into dhcpcd.conf: "a\nb" or "$(cmd)" passed the old check
+// (no space, no slash) and would have run at every boot.
 func ValidIfName(s string) bool {
-	return s != "" && len(s) <= 15 && !strings.ContainsAny(s, " \t/") && s != "." && s != ".."
+	if s == "" || len(s) > 15 || s == "." || s == ".." {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._:-", r)) {
+			return false
+		}
+	}
+	return true
 }
 
 // HasLinks reports whether any interface is a bond, a VLAN or a bridge.

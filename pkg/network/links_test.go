@@ -76,8 +76,9 @@ func TestDhcpcdConfForLinks(t *testing.T) {
 	if !strings.Contains(conf, "denyinterfaces eth0 eth1 eth2\n") {
 		t.Errorf("members are not excluded:\n%s", conf)
 	}
-	// The VLAN is addressed like any interface, with its routes.
-	want := "interface bond0.100\nstatic ip_address=10.0.100.2/24\nstatic routers=10.0.100.1\nstatic routes=10.1.0.0/16 10.0.100.254 10.2.0.0/16 10.0.100.253\n"
+	// The VLAN is addressed like any interface, with its routes — one per
+	// line, the only way dhcpcd takes more than one.
+	want := "interface bond0.100\nstatic ip_address=10.0.100.2/24\nstatic routers=10.0.100.1\nstatic routes=10.1.0.0/16 10.0.100.254\nstatic routes=10.2.0.0/16 10.0.100.253\n"
 	if !strings.Contains(conf, want) {
 		t.Errorf("VLAN stanza:\n%s", conf)
 	}
