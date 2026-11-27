@@ -26,7 +26,7 @@ func TestCommands(t *testing.T) {
 		"mkdir -p /mnt/var/db/xbps/keys",
 		"cp -a /var/db/xbps/keys/. /mnt/var/db/xbps/keys/",
 		"env XBPS_TARGET_ARCH=aarch64 xbps-install -Sy -R https://repo.sunlightlinux.org/current -r /mnt base-system slinit",
-		"chroot /mnt xbps-reconfigure -fa",
+		"chroot /mnt xbps-reconfigure -a",
 	}
 	for i, w := range want {
 		if got := strings.Join(cmds[i], " "); got != w {

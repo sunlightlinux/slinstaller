@@ -122,7 +122,13 @@ func (o Options) Commands() ([][]string, error) {
 	install = append(install, o.Packages...)
 	cmds = append(cmds, install)
 
-	cmds = append(cmds, []string{"chroot", o.Root, "xbps-reconfigure", "-fa"})
+	// Only what xbps-install left unconfigured: it configures every package
+	// itself, its scripts chrooted into the target (lib/transaction_commit.c,
+	// lib/external/fexec.c; checked on xbps 0.60.7: all "installed"), so -fa
+	// was a whole second pass — every trigger again, dracut's initramfs
+	// build among them. -a still configures what a cross-arch install
+	// (XBPS_TARGET_ARCH) or a configure interrupted before a resume left.
+	cmds = append(cmds, []string{"chroot", o.Root, "xbps-reconfigure", "-a"})
 
 	return cmds, nil
 }

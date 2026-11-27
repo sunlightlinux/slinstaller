@@ -1475,8 +1475,8 @@ func (in *installer) bootloader() error {
 
 // initramfsCommand rebuilds the target's initramfs for every kernel it
 // has. With dracut there, that is all it runs: `xbps-reconfigure -fa`
-// re-ran every package's configure script (a full pass, and a third
-// dracut build on top of base-install's two) for the one thing needed
+// re-ran every package's configure script (a full pass, and a second
+// dracut build on top of base-install's) for the one thing needed
 // here. Without dracut (an image built otherwise), it falls back to that.
 func (in *installer) initramfsCommand() []string {
 	if exists(filepath.Join(in.opts.Root, "usr", "bin", "dracut")) {

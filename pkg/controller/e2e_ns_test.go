@@ -686,7 +686,7 @@ func e2ePlain(t *testing.T, dir string) {
 		"== mount", "== meta-fs",
 		"== base-install", "run mkdir -p "+e.root+"/var/db/xbps/keys", "run cp -a "+keys+"/.",
 		"run xbps-install -Sy -R /run/initramfs/live/repo -R https://sunlight.example.org/current -R https://repo.example.org/current -r "+e.root+" base-system slinit slinit-services grub-x86_64-efi linux",
-		"run chroot "+e.root+" xbps-reconfigure -fa",
+		"run chroot "+e.root+" xbps-reconfigure -a",
 		"== fstab", "exec blkid -p -s UUID -o value /dev/sda1", "exec blkid -p -s UUID -o value /dev/sda2", "grep -q 'UUID=7A3B-19C2' "+e.root+"/etc/fstab",
 		"== swapfile",
 		"== bootloader",
