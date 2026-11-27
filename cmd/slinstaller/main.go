@@ -721,6 +721,15 @@ restart:
 		}
 	}
 
+	// A plain-http remote repo is refused unless the config opts into it,
+	// staged run or not (it sat with the checks --through skips): the base
+	// is fetched before the disk is anything to salvage, so a
+	// man-in-the-middle swap of the mirror is worth guarding against.
+	// https and local repositories are always allowed.
+	if strings.HasPrefix(repo, "http://") && !cfg.AllowInsecureHTTP {
+		return fmt.Errorf("repository %s is plain http; set allowInsecureHTTP (--allow-insecure-http), or use an https mirror", repo)
+	}
+
 	if through == "" {
 		// UEFI-only: a legacy/BIOS boot of the installer has no
 		// /sys/firmware/efi, so grub-install/efibootmgr would fail at the
@@ -730,13 +739,6 @@ restart:
 				"/sys/firmware/efi")
 		}
 
-		// A plain-http remote repo is refused unless the config opts into it:
-		// the base is fetched before the disk is anything to salvage, so a
-		// man-in-the-middle swap of the mirror is worth guarding against.
-		// https and local repositories are always allowed.
-		if strings.HasPrefix(repo, "http://") && !cfg.AllowInsecureHTTP {
-			return fmt.Errorf("repository %s is plain http; set allowInsecureHTTP in the config (or use an https mirror)", repo)
-		}
 
 		// An offline install has no remote repo, so the base must come from a
 		// local repository on the live medium. Fail here, before wiping, if

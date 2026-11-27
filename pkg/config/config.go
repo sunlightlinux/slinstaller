@@ -1380,6 +1380,15 @@ func (c *Config) Validate() error {
 	default:
 		add("power-state: %q is not reboot, poweroff, halt or kexec", c.PowerState)
 	}
+	// An offline install reaches no network: an image fetched from a URL
+	// would.
+	if c.Offline {
+		for key, v := range map[string]string{"image": c.Image, "disk-image": c.DiskImage} {
+			if IsRemote(v) {
+				add("%s: %s is a URL, but the install is offline - give a file on the live medium", key, v)
+			}
+		}
+	}
 	if c.SystemUpgrade && c.Offline {
 		add("system-upgrade needs the repositories; it cannot be done offline")
 	}

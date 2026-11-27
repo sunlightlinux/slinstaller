@@ -333,6 +333,10 @@ func applyChild(t *testing.T) {
 	e = newApplyEnv(t)
 	_, err = e.run(confirmed, plainConfig(), "--repo", "http://repo.example/current", "--offline=false")
 	e.refused("plain http", err, "is plain http")
+	// A staged run fetches the same base: refused too.
+	e = newApplyEnv(t)
+	_, err = e.run(confirmed, plainConfig(), "--repo", "http://repo.example/current", "--offline=false", "--through", "partition")
+	e.refused("plain http, staged", err, "is plain http")
 
 	e = newApplyEnv(t)
 	os.Remove(filepath.Join(e.repo, "x86_64-repodata"))

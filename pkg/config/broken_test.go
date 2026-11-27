@@ -478,3 +478,16 @@ func TestVolumeGroupIsEncryptedWhole(t *testing.T) {
 		t.Errorf("all encrypted: %v", err)
 	}
 }
+
+// An offline install fetches nothing: an image named by URL is refused.
+func TestOfflineRefusesRemoteImages(t *testing.T) {
+	c := btrfsConfig()
+	c.Offline, c.Image = true, "https://img.example/base.tar.zst"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "image: https://img.example/base.tar.zst is a URL, but the install is offline") {
+		t.Errorf("Validate = %v", err)
+	}
+	c.Image = "/run/media/base.tar.zst"
+	if err := c.Validate(); err != nil {
+		t.Errorf("a local image offline: %v", err)
+	}
+}
