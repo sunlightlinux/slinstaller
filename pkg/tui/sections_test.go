@@ -85,9 +85,24 @@ func TestHubKeys(t *testing.T) {
 		t.Errorf("the hub did not scroll to the last section:\n%s", view)
 	}
 
-	// Esc, Ctrl+C and Cancel quit without confirming.
+	// Esc asks first: one Esc too many, after leaving a section, lost
+	// every answer. y leaves; any other key stays on the menu.
+	asked, cmd := m.Update(escKey)
+	if cmd != nil || asked.(model).popup != popupQuit {
+		t.Fatalf("esc: quit=%v popup=%d", cmd != nil, asked.(model).popup)
+	}
+	if v := asked.(model).View(); !strings.Contains(v, "Leave the installer?") {
+		t.Errorf("the question is not shown:\n%s", v)
+	}
+	if stay, cmd := asked.Update(escKey); cmd != nil || stay.(model).popup != popupNone || stay.(model).view != viewHub {
+		t.Errorf("esc twice: quit=%v popup=%d", cmd != nil, stay.(model).popup)
+	}
+	if _, cmd := asked.Update(runes("y")); cmd == nil {
+		t.Error("y did not leave")
+	}
+
+	// Ctrl+C and Cancel quit without confirming.
 	for name, got := range map[string]func() (tea.Model, tea.Cmd){
-		"esc":    func() (tea.Model, tea.Cmd) { return m.Update(escKey) },
 		"ctrl+c": func() (tea.Model, tea.Cmd) { return m.Update(ctrlC) },
 		"cancel": func() (tea.Model, tea.Cmd) { return m.Update(enter) }, // cursor is on Cancel
 	} {

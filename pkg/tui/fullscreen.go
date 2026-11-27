@@ -283,6 +283,7 @@ const (
 	popupMessage
 	popupSpinner // a running operation with a small animated indicator
 	popupShrink  // Safe Installation: how far to shrink a partition for room
+	popupQuit    // Esc on the menu: leave without installing?
 )
 
 type model struct {
@@ -556,6 +557,14 @@ func (m model) updatePopup(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.popup == popupShrink {
 		return m.updateShrinkPopup(key)
 	}
+	if m.popup == popupQuit {
+		// Leaving loses every answer: only an explicit yes leaves.
+		if k := key.String(); k == "y" || k == "Y" {
+			return m, tea.Quit
+		}
+		m.popup = popupNone
+		return m, nil
+	}
 	// passphrase: typed twice, as a mistake here cannot be undone later. A
 	// mistyped LUKS passphrase locks the disk it was set on.
 	switch key.String() {
@@ -662,6 +671,14 @@ func (m model) popupBox() string {
 		inner = append(inner, "", popupHint.Render("press any key to continue"))
 	case popupShrink:
 		inner = m.shrinkPopupLines()
+	case popupQuit:
+		inner = []string{
+			popupTitle.Render("Leave the installer?"),
+			"",
+			"Nothing has been installed; what was chosen here is lost.",
+			"",
+			popupHint.Render("[y] leave · any other key stays"),
+		}
 	case popupSpinner:
 		inner = []string{
 			popupTitle.Render("Test Network Settings"),

@@ -406,7 +406,9 @@ func (m model) updateHub(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "A":
 		m.tab, m.hubCursor = 1, 0
 	case "esc":
-		return m, tea.Quit
+		// One Esc too many, after leaving a section, lost every answer.
+		m.popup = popupQuit
+		return m, nil
 	case "enter":
 		switch {
 		case m.hubCursor < len(vis):
