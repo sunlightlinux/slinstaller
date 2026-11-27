@@ -93,16 +93,8 @@ change.
   encrypted one - is refused before the wipe, not by mkfs after it. So is
   a swap file under 1 MiB, which mkswap refused.
 - A volume group name the machine already has on a disk the install does
-  not wipe is refused before the wipe; `vgcreate` failed after it.
-- **clr-installer configs read as clr reads them:** sizes in its
-  documented units (`150MiB`, `2.6GiB`, `10GB`, all powers of 1024) were
-  refused; `swapFileSize` reached `fallocate` as written (`1GB` as 10^9,
-  `0` and `2e9` refused after the wipe) and is now given in bytes, `0`
-  meaning none; `dhcp: 1` on an interface with addresses was static; a
-  layout under a `targetMedia` entry that is not a disk was dropped
-  without a word and is refused; an image alias nothing uses is no longer
-  refused; clr's own keys (`targetBundles`, `post-image`, …) are not
-  reported as typos.
+  not wipe is refused before the wipe; `vgcreate` failed after it. The
+  wizard says so at Install, while its answers are still on screen.
 - Ctrl+C closes the stop before it says "Interrupted": in between, the
   next stage could begin.
 - **Found by new property fuzzers** over the partition commands, fstab
@@ -121,6 +113,15 @@ change.
   and the install modes off a 24-line screen.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
+- A target with no `sshd` service (no `openssh` in its packages) is
+  installed: enabling sshd failed the network stage, after the
+  bootloader, and the install with it. It is a warning in the log now.
+- The prompt flow's swap size is held to the 1 MiB that the config check
+  holds a swap partition and a swap file to: a smaller one was taken at
+  the prompt and refused only after the last question, ending the flow.
+- A `--resume` does not print the partition stage as its plan: it runs
+  none. `--skip-validation-all`'s help no longer says it skips all
+  validation.
 
 ## [2.2.0] - 2026-11-27
 
