@@ -543,3 +543,28 @@ func TestSwapfileOnBtrfs(t *testing.T) {
 		t.Errorf("ext4 root: %v\n%s", err, r.flat())
 	}
 }
+
+// A dhcpcd.conf that ends inside an interface block (one carried over from
+// the live system) still gets the bond's members excluded: the global
+// option goes before the first block, where dhcpcd reads it. Written
+// twice (a resume), nothing is repeated.
+func TestDhcpcdGlobalGoesBeforeTheBlocks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dhcpcd.conf")
+	os.WriteFile(path, []byte("hostname\noption rapid_commit\ninterface wlan0\nenv ifwireless=1\n"), 0o644)
+	global := "\n# members of a bond or bridge, configured by slinstaller\ndenyinterfaces eth0 eth1\n"
+	conf := global + "\n# static interfaces configured by slinstaller\ninterface bond0\nstatic ip_address=10.0.0.2/24\n"
+	for i := 0; i < 2; i++ {
+		if err := writeDhcpcdConf(path, global, conf); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := os.ReadFile(path)
+	text := string(got)
+	deny, block := strings.Index(text, "denyinterfaces eth0 eth1"), strings.Index(text, "interface wlan0")
+	if deny < 0 || deny > block || strings.Count(text, "denyinterfaces") != 1 || strings.Count(text, "interface bond0") != 1 {
+		t.Errorf("dhcpcd.conf:\n%s", text)
+	}
+	if !strings.HasSuffix(text, "interface bond0\nstatic ip_address=10.0.0.2/24\n") {
+		t.Errorf("the stanzas are not at the end:\n%s", text)
+	}
+}

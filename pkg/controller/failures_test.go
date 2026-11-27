@@ -458,7 +458,7 @@ func TestNetworkFailures(t *testing.T) {
 
 	in = stagedInstaller(t, static("255.255.255.0"), &r)
 	blockWithDir(t, in, "etc", "dhcpcd.conf")
-	wantErr(t, in.network(), "open")
+	wantErr(t, in.network(), "write")
 
 	in = stagedInstaller(t, static("255.255.255.0"), &r)
 	fullDisk(t, in, "etc", "dhcpcd.conf")

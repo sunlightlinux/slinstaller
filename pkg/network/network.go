@@ -164,16 +164,23 @@ func DhcpcdConf(ifaces []Interface) (string, error) {
 			fmt.Fprintf(&b, "static routes=%s %s\n", r.To, r.Via)
 		}
 	}
-	head := ""
-	// The members of a bond or bridge carry no address of their own: left
-	// alone, dhcpcd would ask for a lease on each of them.
-	if m := members(ifaces); len(m) > 0 {
-		head = "\n# members of a bond or bridge, configured by slinstaller\ndenyinterfaces " + strings.Join(m, " ") + "\n"
-	}
+	head := DhcpcdGlobal(ifaces)
 	if b.Len() == 0 {
 		return head, nil
 	}
 	return head + "\n# static interfaces configured by slinstaller\n" + b.String(), nil
+}
+
+// DhcpcdGlobal is the part of DhcpcdConf that is a global option, not an
+// interface's stanza: the members of a bond or bridge, which carry no
+// address of their own (left alone, dhcpcd would ask for a lease on each).
+// dhcpcd reads a global option only before the first interface block, so
+// the caller must not put it after one.
+func DhcpcdGlobal(ifaces []Interface) string {
+	if m := members(ifaces); len(m) > 0 {
+		return "\n# members of a bond or bridge, configured by slinstaller\ndenyinterfaces " + strings.Join(m, " ") + "\n"
+	}
+	return ""
 }
 
 // maskToCIDR turns a netmask into a prefix length. It accepts a dotted

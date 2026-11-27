@@ -1485,6 +1485,49 @@ func (in *installer) firstBoot() error {
 	return in.writeFiles()
 }
 
+// writeDhcpcdConf adds conf (DhcpcdConf: the global part, then stanzas)
+// to the target's dhcpcd.conf, each part once, so a resumed install does
+// not write them twice. The global part goes before the file's first
+// interface block, not at its end: dhcpcd ignores a global option inside a
+// block, and a dhcpcd.conf carried over from the live system (copyNetwork)
+// may well end in one — the members of a bond would then ask for leases.
+func writeDhcpcdConf(path, global, conf string) error {
+	stanzas := strings.TrimPrefix(conf, global)
+	// Only an ordinary file is read: a path that leads to a device has no
+	// end to read to. Anything else in the way fails the write below.
+	var data []byte
+	if fi, err := os.Stat(path); err == nil && fi.Mode().IsRegular() {
+		if data, err = os.ReadFile(path); err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+	}
+	text := string(data)
+	if global != "" && !strings.Contains(text, global) {
+		at := len(text)
+		lines := strings.SplitAfter(text, "\n")
+		off := 0
+		for _, l := range lines {
+			f := strings.Fields(l)
+			if len(f) > 0 && (f[0] == "interface" || f[0] == "ssid" || f[0] == "profile") {
+				at = off
+				break
+			}
+			off += len(l)
+		}
+		text = text[:at] + strings.TrimPrefix(global, "\n") + "\n" + text[at:]
+	}
+	if stanzas != "" && !strings.Contains(text, stanzas) {
+		text += stanzas
+	}
+	if text == string(data) {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
 // writeFiles writes the config's write-files into the target. A path is
 // taken inside the target whatever links it crosses: the directory it lands
 // in must itself be in the target, and a link at the file's own name is
@@ -1559,18 +1602,9 @@ func (in *installer) network() error {
 	if err := system.NetLinks(in.opts.Root, network.LinkScript(ifaces)); err != nil {
 		return err
 	}
-	if path := filepath.Join(in.opts.Root, "etc", "dhcpcd.conf"); conf != "" && !holds(path, conf) {
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-		if err != nil {
-			return fmt.Errorf("open %s: %w", path, err)
-		}
-		_, werr := f.WriteString(conf)
-		cerr := f.Close()
-		if werr != nil {
-			return werr
-		}
-		if cerr != nil {
-			return cerr
+	if conf != "" {
+		if err := writeDhcpcdConf(filepath.Join(in.opts.Root, "etc", "dhcpcd.conf"), network.DhcpcdGlobal(ifaces), conf); err != nil {
+			return err
 		}
 	}
 

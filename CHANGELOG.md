@@ -55,6 +55,10 @@ change.
 
 ### Fixed
 
+- With `copyNetwork`, the `denyinterfaces` line for bond and bridge
+  members was appended after the live system's dhcpcd.conf; when that
+  ended inside an `interface` block dhcpcd ignored it and asked for a
+  lease on every member. It goes before the first block now.
 - A user's full name with a colon in it was refused by `useradd` at first
   boot, after the disk was wiped; it is refused by the config check now
   (the wizard's included).
