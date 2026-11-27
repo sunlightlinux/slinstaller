@@ -3,6 +3,7 @@ package system
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -148,13 +149,35 @@ func gib(b uint64) string {
 	return strconv.FormatFloat(float64(b)/(1<<30), 'f', 1, 64) + " GiB"
 }
 
-// HugepagesArgs is the kernel command line that reserves n 1 GiB hugepages,
-// or "" for none.
+// HugepagesArgs is the kernel command line that reserves n GiB of
+// hugepages, or "" for none: n 1 GiB pages, or — on an x86 CPU without
+// 1 GiB pages (no pdpe1gb, as QEMU's default model) — the same memory in
+// 2 MiB ones. There the kernel refuses hugepagesz=1G, ignores the
+// hugepages= after it, and reserves nothing without a word.
 func HugepagesArgs(n int) string {
 	if n <= 0 {
 		return ""
 	}
+	if !gigPages() {
+		return fmt.Sprintf("default_hugepagesz=2M hugepagesz=2M hugepages=%d", n*512)
+	}
 	return fmt.Sprintf("default_hugepagesz=1G hugepagesz=1G hugepages=%d", n)
+}
+
+// gigPages reports whether the CPU has 1 GiB pages. Only x86 says (its
+// "flags" line, pdpe1gb); elsewhere, or when cpuinfo cannot be read, they
+// are taken as there.
+func gigPages() bool {
+	data, err := os.ReadFile(cpuinfoFile)
+	if err != nil {
+		return true
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if name, flags, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(name) == "flags" {
+			return slices.Contains(strings.Fields(flags), "pdpe1gb")
+		}
+	}
+	return true
 }
 
 // isolationArg reports whether a kernel argument is one the isolation

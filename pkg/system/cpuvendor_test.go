@@ -100,3 +100,26 @@ func TestRefitVendor(t *testing.T) {
 		t.Errorf("unknown vendor changed the arguments: %q", got)
 	}
 }
+
+// Without 1 GiB pages (x86, no pdpe1gb) the same memory is reserved in 2 MiB
+// pages; elsewhere, or with the flag, in 1 GiB ones.
+func TestHugepagesArgsPageSize(t *testing.T) {
+	saved := cpuinfoFile
+	defer func() { cpuinfoFile = saved }()
+	for info, want := range map[string]string{
+		"flags\t\t: fpu vme pse pdpe1gb lm\n": "default_hugepagesz=1G hugepagesz=1G hugepages=4",
+		"flags\t\t: fpu vme pse lm\n":         "default_hugepagesz=2M hugepagesz=2M hugepages=2048",
+		"Features\t: fp asimd\n":              "default_hugepagesz=1G hugepagesz=1G hugepages=4",
+	} {
+		f := filepath.Join(t.TempDir(), "cpuinfo")
+		os.WriteFile(f, []byte(info), 0o644)
+		cpuinfoFile = f
+		if got := HugepagesArgs(4); got != want {
+			t.Errorf("%q: %s", info, got)
+		}
+	}
+	cpuinfoFile = filepath.Join(t.TempDir(), "missing")
+	if !strings.Contains(HugepagesArgs(1), "1G") {
+		t.Error("unreadable cpuinfo")
+	}
+}
