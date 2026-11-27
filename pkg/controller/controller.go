@@ -2024,6 +2024,9 @@ func (in *installer) runHooks(hooks []*config.Hook) error {
 		vars := map[string]string{"yamlDir": in.opts.ConfigDir}
 		for k, v := range in.cfg.Environment {
 			vars[k] = v
+			if config.SecretName(k) {
+				storage.AddSecret(v) // masked in the command line shown, logged, reported
+			}
 		}
 		cmd := []string{}
 		if h.Chroot {

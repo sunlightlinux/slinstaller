@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
+	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
@@ -134,5 +135,16 @@ func TestForeignArch(t *testing.T) {
 func TestForeignArchWithoutApply(t *testing.T) {
 	if err := run([]string{"--arch", "riscv64", "--version"}); err != nil {
 		t.Errorf("--version with a foreign arch: %v", err)
+	}
+}
+
+// The diagnostics config leaves out secret env values and write-files contents.
+func TestDiagRedactsEnvAndFiles(t *testing.T) {
+	cfg := plainConfig()
+	cfg.Environment = map[string]string{"API_TOKEN": "s3cr3t", "API_URL": "https://api.example"}
+	cfg.WriteFiles = []*config.WriteFile{{Path: "/etc/wpa.conf", Content: `psk="wifi-secret"`}}
+	got := string(redactedConfig(cfg))
+	if strings.Contains(got, "s3cr3t") || strings.Contains(got, "wifi-secret") || !strings.Contains(got, "https://api.example") {
+		t.Errorf("redacted config:\n%s", got)
 	}
 }

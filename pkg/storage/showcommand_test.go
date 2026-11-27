@@ -124,3 +124,21 @@ func TestSlowSinkLosesNothing(t *testing.T) {
 		t.Errorf("err %v, %d lines, want 15001", err, n)
 	}
 }
+
+// Proxy credentials without a scheme, and registered secrets, are masked.
+func TestMaskSecretBareAndRegistered(t *testing.T) {
+	if got := ShowCommand([]string{"env", "https_proxy=user:pw@proxy:3128", "curl"}); strings.Contains(got, "pw@") || !strings.Contains(got, "user:***@proxy:3128") {
+		t.Errorf("bare userinfo: %s", got)
+	}
+	if got := MaskSecret("10:30 and a@b"); got != "10:30 and a@b" {
+		t.Errorf("no userinfo masked: %s", got)
+	}
+	AddSecret("s3cr3t-token", "x")
+	got := ShowCommand([]string{"env", "API_TOKEN=s3cr3t-token", "bash", "-c", `curl -H "Authorization: s3cr3t-token" x`})
+	if strings.Contains(got, "s3cr3t") {
+		t.Errorf("registered secret shown: %s", got)
+	}
+	if MaskSecret("x marks") != "x marks" {
+		t.Error("a one-character value was masked")
+	}
+}

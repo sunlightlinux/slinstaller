@@ -2721,3 +2721,16 @@ func partNumber(name string, fallback int) int {
 	}
 	return n
 }
+
+// SecretName reports whether an environment variable's name says it holds
+// a secret (API_TOKEN, DB_PASSWORD, WIFI_PSK, …): its value is masked
+// wherever commands are shown or reported, and left out of diagnostics.
+func SecretName(name string) bool {
+	n := strings.ToUpper(name)
+	for _, w := range []string{"TOKEN", "SECRET", "PASS", "KEY", "PSK", "AUTH", "CRED", "PRIVATE"} {
+		if strings.Contains(n, w) {
+			return true
+		}
+	}
+	return false
+}

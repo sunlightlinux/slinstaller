@@ -540,3 +540,11 @@ func TestSaveIsPrivate(t *testing.T) {
 		t.Error("written through a link")
 	}
 }
+
+func TestSecretName(t *testing.T) {
+	for n, want := range map[string]bool{"API_TOKEN": true, "db_password": true, "WIFI_PSK": true, "ssh_key": true, "API_URL": false, "HOSTNAME": false} {
+		if SecretName(n) != want {
+			t.Errorf("%s: %v", n, !want)
+		}
+	}
+}

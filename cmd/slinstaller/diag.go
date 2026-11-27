@@ -139,9 +139,27 @@ func redactedConfig(cfg *config.Config) []byte {
 				}
 			}
 		}
+		// Secrets by name in env:, and write-files' contents (Wi-Fi keys,
+		// private keys, sudoers rules) — the archive is handed to others.
+		if env, ok := doc["env"].(map[string]any); ok {
+			for k := range env {
+				if config.SecretName(k) {
+					env[k] = "(removed)"
+				}
+			}
+		}
+		if files, ok := doc["write-files"].([]any); ok {
+			for _, f := range files {
+				if m, ok := f.(map[string]any); ok {
+					if c, ok := m["content"].(string); ok {
+						m["content"] = fmt.Sprintf("(%d bytes removed)", len(c))
+					}
+				}
+			}
+		}
 		maskURLPasswords(doc)
 		var out bytes.Buffer
-		out.WriteString("# password hashes and URL passwords removed; hook commands are as written\n")
+		out.WriteString("# password hashes, URL passwords, secret env values and write-files contents removed; hook commands are as written\n")
 		if enc, err := yaml.Marshal(doc); err == nil {
 			out.Write(enc)
 			return out.Bytes()

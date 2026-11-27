@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Commands returns the full partition-then-format command list — a whole-disk
@@ -379,7 +381,43 @@ func MaskSecret(a string) string {
 	if cryptHashRe.MatchString(a) {
 		return "<password hash>"
 	}
-	return urlPasswordRe.ReplaceAllString(a, "$1:***@")
+	a = urlPasswordRe.ReplaceAllString(a, "$1:***@")
+	// user:password@host with no scheme, as a proxy is often written
+	// (https_proxy=user:pw@proxy:3128): curl and Go take it that way too.
+	a = barePasswordRe.ReplaceAllString(a, "$1$2:***@")
+	secretsMu.Lock()
+	defer secretsMu.Unlock()
+	for _, v := range secrets {
+		a = strings.ReplaceAll(a, v, "***")
+	}
+	return a
+}
+
+// barePasswordRe matches user:password@ at the start of a value or after
+// "=", a space or a quote, where no scheme precedes it.
+var barePasswordRe = regexp.MustCompile(`(^|[\s="'])([^\s:/@="']+):[^\s@/]+@`)
+
+var (
+	secretsMu sync.Mutex
+	secrets   []string
+)
+
+// AddSecret registers values MaskSecret hides wherever they appear — a
+// hook environment's token, which reaches the hook's command line twice
+// (env K=V, and expanded into the bash -c string) and from there the log,
+// a failure's message, the diagnostics and a report-url. Values under four
+// characters are not registered: masking "1" everywhere hides nothing and
+// garbles the rest.
+func AddSecret(values ...string) {
+	secretsMu.Lock()
+	defer secretsMu.Unlock()
+	for _, v := range values {
+		if len(v) >= 4 && !slices.Contains(secrets, v) {
+			secrets = append(secrets, v)
+		}
+	}
+	// Longest first: a secret that contains another is masked whole.
+	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
 }
 
 // FormatCommands renders a command list one per line, for showing a dry
