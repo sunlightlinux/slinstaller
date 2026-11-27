@@ -128,7 +128,18 @@ func (o Options) Commands() ([][]string, error) {
 	// was a whole second pass — every trigger again, dracut's initramfs
 	// build among them. -a still configures what a cross-arch install
 	// (XBPS_TARGET_ARCH) or a configure interrupted before a resume left.
-	cmds = append(cmds, []string{"chroot", o.Root, "xbps-reconfigure", "-a"})
+	//
+	// Not with an --arch: xbps runs no package script at all while
+	// XBPS_TARGET_ARCH is set (lib/package_script.c), even set to the
+	// host's own arch, yet then still marks the packages configured — -a
+	// would find nothing to do, and the system would boot without its
+	// accounts, certificates or initramfs. There every script is run
+	// again, chrooted, where XBPS_TARGET_ARCH is not set.
+	reconf := "-a"
+	if o.Arch != "" {
+		reconf = "-fa"
+	}
+	cmds = append(cmds, []string{"chroot", o.Root, "xbps-reconfigure", reconf})
 
 	return cmds, nil
 }

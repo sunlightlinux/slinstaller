@@ -26,7 +26,7 @@ func TestCommands(t *testing.T) {
 		"mkdir -p /mnt/var/db/xbps/keys",
 		"cp -a /var/db/xbps/keys/. /mnt/var/db/xbps/keys/",
 		"env XBPS_TARGET_ARCH=aarch64 xbps-install -Sy -R https://repo.sunlightlinux.org/current -r /mnt base-system slinit",
-		"chroot /mnt xbps-reconfigure -a",
+		"chroot /mnt xbps-reconfigure -fa", // an --arch: xbps ran no script
 	}
 	for i, w := range want {
 		if got := strings.Join(cmds[i], " "); got != w {
@@ -184,5 +184,20 @@ func TestResolve(t *testing.T) {
 	long := strings.Repeat("x\n", 30) + "Package 'y' not found in repository pool.\n"
 	if got := Unresolved(long); len(got) != 20 || !strings.Contains(got[19], "'y'") {
 		t.Errorf("long output: %d lines", len(got))
+	}
+}
+
+// Without an --arch, xbps-install configured everything: -a, not a second
+// full pass. With one (even the host's own), xbps ran no script: -fa.
+func TestReconfigureMode(t *testing.T) {
+	o := Options{Root: "/mnt", Repo: "https://r", Packages: []string{"base"}}
+	cmds, _ := o.Commands()
+	if got := fmt.Sprint(cmds[len(cmds)-1]); got != "[chroot /mnt xbps-reconfigure -a]" {
+		t.Errorf("no arch: %s", got)
+	}
+	o.Arch = "x86_64"
+	cmds, _ = o.Commands()
+	if got := fmt.Sprint(cmds[len(cmds)-1]); got != "[chroot /mnt xbps-reconfigure -fa]" {
+		t.Errorf("the host's own arch: %s", got)
 	}
 }

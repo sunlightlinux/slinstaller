@@ -245,3 +245,26 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+// A plain install rebuilds the initramfs only when a DKMS module is
+// installed, which the kernel's own build may have preceded.
+func TestDKMSRebuildsInitramfs(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "bin"), "dracut"), nil, 0o755)
+	os.WriteFile(filepath.Join(mkTarget(t, in, "etc", "default"), "grub"), nil, 0o644)
+	if err := in.bootloader(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(r.flat(), "dracut") {
+		t.Errorf("a plain install rebuilt the initramfs:\n%s", r.flat())
+	}
+	r.cmds = nil
+	in.opts.Packages = []string{"base-system", "nvidia-dkms"}
+	if err := in.bootloader(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.flat(), "dracut --regenerate-all --force") {
+		t.Errorf("not rebuilt after a DKMS module:\n%s", r.flat())
+	}
+}

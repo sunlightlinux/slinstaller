@@ -1029,7 +1029,7 @@ restart:
 		// /boot out at the first boot.
 		if opts.Passphrase != "" && interactivePass == "" {
 			if err := config.ValidPassphrase(opts.Passphrase); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: the LUKS passphrase: %v\n", err)
+				fmt.Fprintf(os.Stderr, "warning: the LUKS passphrase is used as given, but the prompts would refuse it (GRUB may not be able to take it at boot): %v\n", err)
 			}
 		}
 

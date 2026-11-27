@@ -1470,10 +1470,24 @@ func (in *installer) bootloader() error {
 	// rd.luks / rd.lvm command line exist, so dracut includes the crypt,
 	// lvm and mdraid modules and the system can assemble the root at boot.
 	// The one built during base-install predates them.
-	if encrypted || lvm.Used(in.plan) || mdadm.Used(in.plan) {
+	// And after a DKMS module: xbps configures in transaction order, so the
+	// kernel's hook may have built the initramfs before the module was
+	// built (the -fa pass base-install no longer runs ran it again).
+	if encrypted || lvm.Used(in.plan) || mdadm.Used(in.plan) || in.installsDKMS() {
 		return storage.RunCommands([][]string{in.initramfsCommand()}, in.opts.Runner)
 	}
 	return nil
+}
+
+// installsDKMS reports whether the install asks for a DKMS module package
+// (nvidia-dkms, zfs, …), whose module the initramfs may need.
+func (in *installer) installsDKMS() bool {
+	for _, p := range in.opts.Packages {
+		if strings.HasSuffix(p, "-dkms") || p == "zfs" {
+			return true
+		}
+	}
+	return false
 }
 
 // initramfsCommand rebuilds the target's initramfs for every kernel it
