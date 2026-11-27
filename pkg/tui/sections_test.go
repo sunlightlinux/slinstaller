@@ -753,3 +753,20 @@ func TestAllowInsecureOnlyWithAnHTTPMirror(t *testing.T) {
 		}
 	}
 }
+
+// The leave question does not say nothing was installed: the wizard runs
+// again after an install, failed or done, when the final screen's "Back
+// to menu" is chosen, and by then the disk may be wiped or installed.
+func TestQuitQuestionClaimsNothingAboutTheDisk(t *testing.T) {
+	m := send(readyModel(), escKey)
+	if m.popup != popupQuit {
+		t.Fatalf("popup %d", m.popup)
+	}
+	v := viewOf(m)
+	if strings.Contains(v, "Nothing has been installed") {
+		t.Errorf("the question says nothing was installed, which is false after Back to menu:\n%s", v)
+	}
+	if !strings.Contains(v, "lost") {
+		t.Errorf("the question does not say the answers are lost:\n%s", v)
+	}
+}

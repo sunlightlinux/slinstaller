@@ -678,7 +678,9 @@ func (m model) popupBox() string {
 		inner = []string{
 			popupTitle.Render("Leave the installer?"),
 			"",
-			"Nothing has been installed; what was chosen here is lost.",
+			// Not "nothing has been installed": after an install, failed
+			// or done, "Back to menu" runs the wizard again.
+			"Leaving installs nothing; what was chosen here is lost.",
 			"",
 			popupHint.Render("[y] leave · any other key stays"),
 		}
