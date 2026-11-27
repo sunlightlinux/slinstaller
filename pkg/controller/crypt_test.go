@@ -162,7 +162,7 @@ func TestCryptRootAndHomeShareOnePassphrase(t *testing.T) {
 	// with the passphrase on stdin.
 	args := readFile(t, filepath.Join(dir, "args"))
 	for _, dev := range []string{"/dev/sda2", "/dev/sda3"} {
-		if !strings.Contains(args, "--key-file=- luksAddKey "+dev+" "+full) {
+		if !strings.Contains(args, "--key-file=- --pbkdf=pbkdf2 --pbkdf-force-iterations=1000 luksAddKey "+dev+" "+full) {
 			t.Errorf("keyfile not added to %s:\n%s", dev, args)
 		}
 	}

@@ -60,8 +60,14 @@ func Open(device, name, passphrase string, out io.Writer) error {
 // the existing passphrase (read from stdin). It lets the initramfs unlock
 // the volume with the keyfile instead of a second passphrase prompt, when
 // /boot is encrypted and the keyfile rides inside the (encrypted) initramfs.
+//
+// The new slot uses pbkdf2 at the fewest iterations cryptsetup allows. The
+// key is 2048 random bytes, which no key derivation makes any harder to
+// guess, while argon2id's cost — seconds and up to a gigabyte of memory —
+// was paid on every volume at install and again at every boot.
 func AddKey(device, keyfile, passphrase string, out io.Writer) error {
-	args := []string{"cryptsetup", "--batch-mode", "--key-file=-", "luksAddKey", device, keyfile}
+	args := []string{"cryptsetup", "--batch-mode", "--key-file=-",
+		"--pbkdf=pbkdf2", "--pbkdf-force-iterations=1000", "luksAddKey", device, keyfile}
 	return run(args, passphrase, out)
 }
 

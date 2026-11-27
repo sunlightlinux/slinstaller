@@ -12,6 +12,10 @@ change.
 
 ### Changed
 
+- The keyfile's LUKS slot (non-root volumes, an encrypted `/boot`) uses
+  pbkdf2 at the minimum iteration count: the key is 2048 random bytes, so
+  argon2id's seconds and memory bought nothing, at install or at boot.
+  The passphrase slot is unchanged.
 - An encrypted, LVM or RAID install rebuilds its initramfs with `dracut
   --regenerate-all --force` in the target instead of a full
   `xbps-reconfigure -fa`, which re-ran every package's configure script

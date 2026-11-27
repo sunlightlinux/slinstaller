@@ -60,7 +60,7 @@ func TestPassphraseGoesOnStdinNeverOnTheCommandLine(t *testing.T) {
 	for _, want := range []string{
 		"--batch-mode luksFormat /dev/sda3 -",
 		"--batch-mode luksOpen /dev/sda3 cryptroot -",
-		"--batch-mode --key-file=- luksAddKey /dev/sda3 /mnt/etc/cryptkeys/k",
+		"--batch-mode --key-file=- --pbkdf=pbkdf2 --pbkdf-force-iterations=1000 luksAddKey /dev/sda3 /mnt/etc/cryptkeys/k",
 	} {
 		if !strings.Contains(args, want) {
 			t.Errorf("cryptsetup not called with %q:\n%s", want, args)
