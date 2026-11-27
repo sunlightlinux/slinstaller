@@ -105,6 +105,43 @@ jobs:
             exit 1
           }
 
+  # The fuzz targets guard what decides which device is destroyed, what
+  # runs as root on the installed system and what a log may show. `go test`
+  # above runs only their seeds; here each one also searches for 20 s. The
+  # targets are discovered, not listed: a hand-kept list goes stale with the
+  # first new one. A failure uploads the input that found it — commit it
+  # under the package's testdata/fuzz/ so the unit job keeps it.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Fuzz every target
+        run: |
+          n=0
+          for pkg in $(go list ./...); do
+            for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
+              echo "::group::$pkg $target"
+              go test -run '^$' -fuzz "^${target}\$" -fuzztime 20s "$pkg"
+              echo "::endgroup::"
+              n=$((n + 1))
+            done
+          done
+          echo "fuzzed $n targets"
+          [ "$n" -gt 0 ] || { echo "::error::no fuzz target found"; exit 1; }
+
+      - name: Keep the failing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failures
+          path: '**/testdata/fuzz/**'
+          if-no-files-found: ignore
+
   # Every config the repository ships has to keep planning. A dry run reads
   # the config, validates it and prints the commands; it touches nothing and
   # needs no root. This is what catches a validation rule that became
