@@ -229,7 +229,7 @@ func TestSectionValues(t *testing.T) {
 	lv(secProxy, "http://proxy:3128")
 	lv(secBundles, "git vim")
 	lv(secHostname, "box")
-	lv(secKernelArgs, "Custom: quiet rhgb")
+	lv(secKernelArgs, "Custom: quiet -rhgb") // rhgb is removed, not added
 	lv(secMirror, "https://mirror.example")
 	lv(secAutoUpdate, "Disabled")
 	lv(secAmdPstate, "amd_pstate=guided (AMD RT/telco profiles)")
