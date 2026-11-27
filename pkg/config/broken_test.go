@@ -352,3 +352,16 @@ func TestEncryptedWhereNotReadIsRefused(t *testing.T) {
 		t.Errorf("RAID member: %v", err)
 	}
 }
+
+func TestValidSwapSize(t *testing.T) {
+	for _, ok := range []string{"auto", "2G", "512M"} {
+		if err := ValidSwapSize(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"0", "2GB", "", "-1G"} {
+		if ValidSwapSize(bad) == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

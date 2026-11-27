@@ -316,7 +316,7 @@ restart:
 		// Full-screen wizard on a real terminal; the plain prompt flow
 		// over a serial console or a pipe, where it would not render.
 		if !textUI && fullScreenCapable() {
-			cfg, interactivePass, err = tui.RunFullscreen()
+			cfg, interactivePass, err = tui.RunFullscreen(skipSize, skipAll)
 			fullscreen = true
 		} else {
 			// --text, a pipe/file, a dumb/unset TERM, or a terminal that
@@ -976,8 +976,17 @@ func installStoppable(cfg *config.Config, opts controller.Options) error {
 	go func() {
 		select {
 		case <-sigs:
-			fmt.Fprintln(os.Stderr, "\nStopping after the current step...")
+			fmt.Fprintln(os.Stderr, "\nStopping after the current step... (Ctrl+C again leaves now)")
 			close(stop)
+		case <-done:
+			return
+		}
+		// A second one is the way out of a step that hangs, which the stop
+		// between steps would wait on for ever.
+		select {
+		case <-sigs:
+			fmt.Fprintln(os.Stderr, "\nLeaving now; the step running is abandoned and the target may still be mounted.")
+			os.Exit(130)
 		case <-done:
 		}
 	}()

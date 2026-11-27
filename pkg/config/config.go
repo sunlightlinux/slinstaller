@@ -1061,10 +1061,13 @@ func ValidHostname(h string) error {
 	return nil
 }
 
-// ValidSwapSize checks a swap size a front-end was given: a size with a
-// unit, more than nothing. ("0" means "fill the disk" for a partition,
+// ValidSwapSize checks a swap size a front-end was given: "auto", or a
+// size with a unit, more than nothing. ("0" means "fill the disk" for a partition,
 // which a swap before the root cannot.)
 func ValidSwapSize(s string) error {
+	if strings.EqualFold(strings.TrimSpace(s), autoSize) { // from the memory (ResolveAutoSwap)
+		return nil
+	}
 	n, err := parseSize(s)
 	if err != nil {
 		return err

@@ -1217,6 +1217,8 @@ func (m model) textView() string {
 func (m model) installProblem() string {
 	cfg, err := m.buildConfig()
 	if err == nil {
+		cfg.SkipValidationSize = cfg.SkipValidationSize || m.skipSize
+		cfg.SkipValidationAll = cfg.SkipValidationAll || m.skipAll
 		err = cfg.Validate()
 	}
 	if err == nil {

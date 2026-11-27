@@ -147,6 +147,21 @@ func TestHubInstallButton(t *testing.T) {
 	if got.hostname != "-bad host" || len(got.users) == 0 {
 		t.Error("the answers were not kept")
 	}
+	// A root below the minimum is refused — unless the command line turned
+	// size validation off, as the installer after the wizard honours.
+	m = onInstall(readyModel())
+	for i := range m.parts {
+		if m.parts[i].Mount == "/" {
+			m.parts[i].Size = "1G"
+		}
+	}
+	if nm, _ = m.Update(enter); nm.(model).confirmed {
+		t.Error("a 1G root went through")
+	}
+	m.skipSize = true
+	if nm, _ = m.Update(enter); !nm.(model).confirmed {
+		t.Errorf("--skip-validation-size was not honoured:\n%s", viewOf(nm.(model)))
+	}
 	m = onInstall(readyModel())
 	m.parts = append(m.parts, m.parts[len(m.parts)-1])
 	if nm, _ = m.Update(enter); nm.(model).confirmed {

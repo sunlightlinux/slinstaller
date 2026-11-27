@@ -27,7 +27,11 @@ import (
 // are configured in any order; Install lights up once the layout is
 // complete. It returns the config and the LUKS passphrase; cmd uses it on a
 // real terminal, the prompt flow otherwise.
-func RunFullscreen() (*config.Config, string, error) {
+//
+// skipSize and skipAll are the command line's --skip-validation-size and
+// --skip-validation-all, which the wizard's own check of the config
+// honours as the installer's does.
+func RunFullscreen(skipSize, skipAll bool) (*config.Config, string, error) {
 	devs, err := blockdev.List()
 	if err != nil {
 		return nil, "", err
@@ -40,6 +44,7 @@ func RunFullscreen() (*config.Config, string, error) {
 	}
 
 	start := newModel(disks)
+	start.skipSize, start.skipAll = skipSize, skipAll
 	start.consoles = system.DetectConsoles() // mirror the live consoles onto the target
 	start.vmName, start.vm = system.VirtualMachine()
 	start.cpuVendor = system.CPUVendor() // rewrite vendor-specific kernel args (intel/amd)
@@ -272,6 +277,9 @@ const (
 )
 
 type model struct {
+	// skipSize and skipAll: the validation the command line turned off.
+	skipSize, skipAll bool
+
 	disks []blockdev.Device
 
 	diskIdx            int

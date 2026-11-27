@@ -512,6 +512,15 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.stopping && m.stop != nil {
 					m.stopping = true
 					close(m.stop)
+					break
+				}
+				// Pressed again while stopping: the way out of a step that
+				// hangs (a download that never ends), which the stop
+				// between steps would wait on for ever. The step running
+				// is abandoned.
+				if m.stopping {
+					m.cancelled = true
+					return m, tea.Quit
 				}
 			case "enter", "d":
 				m.details, m.scroll = true, 0
@@ -800,7 +809,7 @@ func (m installModel) runningView() string {
 	btns := []string{buttonLine(w, button{"Details", btnSel})}
 	hint := "[Enter] or [d] show the full log - [Ctrl+C] stop after this step"
 	if m.stopping {
-		hint = "Stopping after the current step - please wait"
+		hint = "Stopping after the current step - [Ctrl+C] again leaves now, abandoning it"
 	}
 	return frameScreenButtons(m.width, m.height, body, btns, hint)
 }
