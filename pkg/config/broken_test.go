@@ -561,3 +561,27 @@ func TestKernelArgsGrubSafe(t *testing.T) {
 		}
 	}
 }
+
+// The swap file lives on the root, so the root's minimum includes it: a
+// swap file the disk cannot hold is refused before anything is touched.
+func TestSwapFileCountsAgainstRoot(t *testing.T) {
+	c := btrfsConfig()
+	c.SwapFileSize = "999T"
+	min, label := c.RootMinimum()
+	if min < 999<<40 || !strings.Contains(label, "plus the 999T swap file") {
+		t.Errorf("minimum %d %q", min, label)
+	}
+	pl, err := c.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sixty := func(string) (uint64, bool) { return 60 << 30, true }
+	if err := pl.CheckFit(sixty, min, label); err == nil || !strings.Contains(err.Error(), "swap file") {
+		t.Errorf("999T swap file on 60 GiB: %v", err)
+	}
+	c.SwapFileSize = "4G"
+	min, label = c.RootMinimum()
+	if err := pl.CheckFit(sixty, min, label); err != nil {
+		t.Errorf("4G swap file on 60 GiB: %v", err)
+	}
+}

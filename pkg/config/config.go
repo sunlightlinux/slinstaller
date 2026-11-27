@@ -435,13 +435,25 @@ var StageNames = []string{"pre-install", "partition", "mount", "meta-fs", "base-
 // minRoot is the smallest root filesystem the config may ask for, and how
 // to say it.
 func (c *Config) minRoot() (uint64, string) {
+	min, label := storage.MinRootSize, "2 GB"
 	switch c.InstallType {
 	case "server":
-		return 4 * 1000 * 1000 * 1000, "4 GB"
+		min, label = 4*1000*1000*1000, "4 GB"
 	case "desktop":
-		return 20 * 1000 * 1000 * 1000, "20 GB"
+		min, label = 20*1000*1000*1000, "20 GB"
 	}
-	return storage.MinRootSize, "2 GB"
+	// The swap file lives on the root: a root too small for it passed every
+	// check and failed at the swapfile stage, after the wipe and the base
+	// install (999T on a 60 GiB disk).
+	if c.SwapFileSize != "" {
+		if sw, err := parseSize(c.SwapFileSize); err == nil && sw > 0 {
+			if min+sw < min { // saturated: an absurd size
+				return math.MaxUint64, label + " plus the " + c.SwapFileSize + " swap file"
+			}
+			min, label = min+sw, label+" plus the "+c.SwapFileSize+" swap file"
+		}
+	}
+	return min, label
 }
 
 // RootMinimum is the smallest root filesystem the config may ask for, and
