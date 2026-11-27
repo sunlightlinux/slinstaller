@@ -93,6 +93,17 @@ change.
   by mkfs after it.
 - A volume group name the machine already has on a disk the install does
   not wipe is refused before the wipe; `vgcreate` failed after it.
+- **clr-installer configs read as clr reads them:** sizes in its
+  documented units (`150MiB`, `2.6GiB`, `10GB`, all powers of 1024) were
+  refused; `swapFileSize` reached `fallocate` as written (`1GB` as 10^9,
+  `0` and `2e9` refused after the wipe) and is now given in bytes, `0`
+  meaning none; `dhcp: 1` on an interface with addresses was static; a
+  layout under a `targetMedia` entry that is not a disk was dropped
+  without a word and is refused; an image alias nothing uses is no longer
+  refused; clr's own keys (`targetBundles`, `post-image`, …) are not
+  reported as typos.
+- Ctrl+C closes the stop before it says "Interrupted": in between, the
+  next stage could begin.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 

@@ -134,6 +134,10 @@ work:
   (letters, digits, `+ _ . -`, not starting with `-`, not a name LVM keeps
   for itself). Logical volume sizes are checked; a number without a unit
   is bytes, as everywhere else in the config.
+- **Sizes** are bytes, or a number with a unit as clr-installer reads it:
+  `K`, `M`, `G`, `T`, `P`, alone or followed by `B` or `iB`, any case, all
+  powers of 1024 (`512M`, `150MiB`, `2.6GiB`, `10GB` = 10 × 2^30).
+  `swapFileSize: 0` makes no swap file.
 - **Mountpoints** are clean absolute paths without spaces (`/home`, not
   `/home/`), not under `/proc`, `/sys`, `/dev` or `/run`. A swap has no
   mountpoint, and vfat cannot be the root.
