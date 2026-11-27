@@ -81,6 +81,8 @@ func TestBlockReadOnlyAndFreezeBestEffort(t *testing.T) {
 	if setBlockReadOnly(f) != nil || setBlockReadOnly(filepath.Join(t.TempDir(), "none")) != nil {
 		t.Error("a file taken for a block device")
 	}
-	FreezeThaw(t.TempDir())
 	FreezeThaw(filepath.Join(t.TempDir(), "none"))
+	if os.Geteuid() != 0 { // as root it would freeze the host's /tmp
+		FreezeThaw(t.TempDir())
+	}
 }

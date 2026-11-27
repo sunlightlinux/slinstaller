@@ -333,13 +333,17 @@ func setBlockReadOnly(dev string) func() {
 		return nil
 	}
 	fd := int(f.Fd())
-	was, err := unix.IoctlGetInt(fd, unix.BLKROGET)
-	if err != nil || unix.IoctlSetPointerInt(fd, unix.BLKROSET, 1) != nil {
+	if _, err := unix.IoctlGetInt(fd, unix.BLKROGET); err != nil || unix.IoctlSetPointerInt(fd, unix.BLKROSET, 1) != nil {
 		f.Close()
 		return nil
 	}
+	// Back to read-write, not to what BLKROGET said before: a run killed
+	// between the two left the flag set, the next look read it as the
+	// device's own, "restored" it, and every mount after failed with
+	// EACCES until a reboot. (A disk truly read-only cannot be installed
+	// to anyway.)
 	return func() {
-		unix.IoctlSetPointerInt(fd, unix.BLKROSET, was)
+		unix.IoctlSetPointerInt(fd, unix.BLKROSET, 0)
 		f.Close()
 	}
 }
