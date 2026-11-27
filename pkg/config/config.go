@@ -1459,7 +1459,11 @@ func (c *Config) Validate() error {
 			return // the size format is reported elsewhere
 		}
 		if b < min {
-			add("%s: %s %q is below the %s minimum", where, what, s, minLabel)
+			hint := ""
+			if strings.Trim(s, "0123456789") == "" {
+				hint = " (a number without a unit is bytes: write 10M or 10G)"
+			}
+			add("%s: %s %q is below the %s minimum%s", where, what, s, minLabel, hint)
 		}
 	}
 
@@ -2615,7 +2619,7 @@ func parseSize(s string) (uint64, error) {
 
 	f, err := strconv.ParseFloat(num, 64)
 	if err != nil || f < 0 || math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0, fmt.Errorf("size %q is not a byte count or a number with a K/M/G/T unit", s)
+		return 0, fmt.Errorf("size %q is not a byte count or a number with a K/M/G/T unit (e.g. 512M, 10G)", s)
 	}
 	b := math.Round(f * mult)
 	if b >= float64(1<<64) {
