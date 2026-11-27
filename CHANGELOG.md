@@ -55,6 +55,12 @@ change.
 
 ### Fixed
 
+- A logical volume that fills its group, declared before one of a fixed
+  size, was created first and took everything; the next `lvcreate` failed
+  after the disk was wiped. Sized volumes are created first now.
+- Volume group and logical volume names LVM refuses (a space, a leading
+  `-`) passed validation; a space also broke the fstab line. They are
+  refused.
 - **The partition editor after a Safe install formatted existing
   partitions.** The Safe layout's entries (the kept ESP, the root cut in
   free space) stayed in the editor's list, where new entries were numbered

@@ -1022,6 +1022,11 @@ func (c *Config) expandAliases() {
 
 // hostnameRe is the conservative intersection of what Linux and DNS
 // accept: letters, digits and hyphens, not starting or ending with one.
+// lvmNameRe is a volume group or logical volume name LVM accepts; the
+// name also goes into /dev/<vg>/<lv> paths and fstab, where a space
+// breaks the line.
+var lvmNameRe = regexp.MustCompile(`^[a-zA-Z0-9+_.][a-zA-Z0-9+_.-]{0,126}$`)
+
 // domainRe is a DNS domain: dot-separated labels of letters, digits and
 // hyphens.
 var domainRe = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.?$`)
@@ -1544,6 +1549,9 @@ func (c *Config) Validate() error {
 				add("%s: logical volume %q is declared twice in group %s", where, lv.Name, vg)
 			}
 			lvNames[vg+"/"+lv.Name] = true
+			if lv.Name != "" && !lvmNameRe.MatchString(lv.Name) {
+				add("%s: logical volume name %q is not one LVM takes (letters, digits and + _ . -, not starting with -)", where, lv.Name)
+			}
 			checkFS(lvWhere, lv.FsType, lv.Mountpoint)
 			checkMount(lvWhere, lv.FsType, lv.Mountpoint, lv.MountOptions, lv.Subvolumes, false)
 			checkMin(lvWhere, lv.Size, storage.MinPartitionSize, "1 MiB", "size")
@@ -1596,6 +1604,8 @@ func (c *Config) Validate() error {
 			if ch.Type == "lvm" {
 				if ch.VolumeGroup == "" {
 					add("%s: lvm partition has no volumeGroup", where)
+				} else if !lvmNameRe.MatchString(ch.VolumeGroup) {
+					add("%s: volume group name %q is not one LVM takes (letters, digits and + _ . -, not starting with -)", where, ch.VolumeGroup)
 				}
 				checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "physical-volume size")
 				checkLVs(where, ch.VolumeGroup, ch.Children)
@@ -1689,6 +1699,9 @@ func (c *Config) Validate() error {
 				}
 			}
 			continue
+		}
+		if a.VolumeGroup != "" && !lvmNameRe.MatchString(a.VolumeGroup) {
+			add("raid %s: volume group name %q is not one LVM takes", where, a.VolumeGroup)
 		}
 		if a.VolumeGroup != "" {
 			if a.FsType != "" || a.Mountpoint != "" {

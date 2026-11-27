@@ -386,3 +386,22 @@ func TestFullNameUseraddAccepts(t *testing.T) {
 		t.Errorf("a plain full name: %v", err)
 	}
 }
+
+// Volume group and logical volume names LVM refuses — and a space breaks
+// the /dev path in fstab — are refused before the disk is wiped.
+func TestLVMNames(t *testing.T) {
+	lvm := func(vg, lv string) *Config {
+		return &Config{TargetMedia: []*Media{{Name: "sda", Type: "disk", Children: []*Media{
+			{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			{Name: "sda2", Type: "lvm", VolumeGroup: vg, Children: []*Media{{Name: lv, FsType: "ext4", Mountpoint: "/"}}},
+		}}}}
+	}
+	for vg, lv := range map[string]string{"my vg": "root", "vg0": "root vol", "-vg": "root", "vg1": "-x"} {
+		if err := lvm(vg, lv).Validate(); err == nil || !strings.Contains(err.Error(), "not one LVM takes") {
+			t.Errorf("vg %q lv %q: %v", vg, lv, err)
+		}
+	}
+	if err := lvm("vg_0.sys", "root-1").Validate(); err != nil {
+		t.Errorf("good names: %v", err)
+	}
+}

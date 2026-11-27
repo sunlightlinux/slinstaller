@@ -37,8 +37,8 @@ func LVCreate(vg, name, size string) []string {
 }
 
 // Commands returns the full LVM setup for a plan: pvcreate for each
-// physical volume, vgcreate for each group, then lvcreate for every logical volume in
-// its group, in the order the plan lists them.
+// physical volume, vgcreate for each group, then lvcreate for every logical
+// volume in its group, those of a fixed size before one that fills it.
 func Commands(pl *storage.Plan) [][]string {
 	var cmds [][]string
 	// A group may span several physical volumes — partitions, on one disk
@@ -62,9 +62,15 @@ func Commands(pl *storage.Plan) [][]string {
 	for _, vg := range groups {
 		cmds = append(cmds, VGCreate(vg, pvs[vg]...))
 	}
-	for _, p := range pl.Parts {
-		if p.LV {
-			cmds = append(cmds, LVCreate(p.VGName, p.LVName, p.Size))
+	// The volumes of a fixed size first, then any that takes what is left:
+	// created in the order declared, a "fill the group" volume listed
+	// before a sized one took everything and the next lvcreate failed —
+	// after the disk was wiped.
+	for _, fill := range []bool{false, true} {
+		for _, p := range pl.Parts {
+			if p.LV && (p.Size == FillSize || p.Size == "") == fill {
+				cmds = append(cmds, LVCreate(p.VGName, p.LVName, p.Size))
+			}
 		}
 	}
 	return cmds

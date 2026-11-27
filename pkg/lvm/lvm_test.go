@@ -77,3 +77,21 @@ func TestCommandsEncryptedPV(t *testing.T) {
 		t.Errorf("pvcreate/vgcreate should use the mapper, not the raw partition:\n%s", flat)
 	}
 }
+
+// A volume that fills the group is created after the sized ones, wherever
+// it is declared: first, it took everything and the next lvcreate failed.
+func TestFillVolumeIsCreatedLast(t *testing.T) {
+	pl := &storage.Plan{Parts: []storage.Partition{
+		{IsPV: true, Device: "/dev/sda2", VGName: "vg0"},
+		{LV: true, VGName: "vg0", LVName: "root", Size: storage.SizeRest},
+		{LV: true, VGName: "vg0", LVName: "data", Size: "10G"},
+	}}
+	var got []string
+	for _, c := range Commands(pl) {
+		got = append(got, strings.Join(c, " "))
+	}
+	all := strings.Join(got, "\n")
+	if strings.Index(all, "-n data") > strings.Index(all, "-n root") {
+		t.Errorf("the fill volume came first:\n%s", all)
+	}
+}
