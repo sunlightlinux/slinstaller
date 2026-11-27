@@ -53,8 +53,8 @@ func TestResolvePackages(t *testing.T) {
 	if err := resolvePackages(opts, cfg); err == nil || !strings.Contains(err.Error(), "'linux' not found") || !strings.Contains(err.Error(), "nothing was touched") {
 		t.Errorf("unresolvable: %v", err)
 	}
-	if last := strings.Join(ran[len(ran)-1], " "); !strings.Contains(last, "-Sny") {
-		t.Errorf("not a dry run: %s", last)
+	if last, sync := strings.Join(ran[len(ran)-1], " "), strings.Join(ran[len(ran)-2], " "); !strings.Contains(last, "xbps-install -n ") || !strings.HasSuffix(sync, "xbps-install -S -R https://repo -r "+ran[len(ran)-2][len(ran[len(ran)-2])-1]) {
+		t.Errorf("not a sync then a dry run: %s / %s", sync, last)
 	}
 
 	cfg.Kernel, cfg.KernelFallback = "linux", "linux-lts"

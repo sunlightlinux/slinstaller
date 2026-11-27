@@ -1239,7 +1239,9 @@ func resolvePackages(opts controller.Options, cfg *config.Config) error {
 	}
 	switch {
 	case len(bad) > 0:
-		return fmt.Errorf("the packages do not resolve from the repositories (nothing was touched):\n  %s", strings.Join(bad, "\n  "))
+		// xbps drops a repository it could not sync without a word, so a
+		// package it carries reads as "not found": say so.
+		return fmt.Errorf("the packages do not resolve from the repositories (nothing was touched):\n  %s\n(if a repository was unreachable just now, its packages read as not found: retry)", strings.Join(bad, "\n  "))
 	case err != nil:
 		fmt.Fprintf(os.Stderr, "warning: could not check that the packages resolve (%v); going on\n", err)
 	}

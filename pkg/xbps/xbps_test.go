@@ -163,7 +163,7 @@ func TestResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprint(cmds)
-	if !strings.Contains(got, "xbps-install -Sny -R https://mirror -R https://repo -r /tmp/scratch base linux") ||
+	if !strings.Contains(got, "[xbps-install -S -R https://mirror -R https://repo -r /tmp/scratch] [xbps-install -n -R https://mirror -R https://repo -r /tmp/scratch base linux]") ||
 		strings.Contains(got, "/mnt") || strings.Contains(got, "reconfigure") || !strings.Contains(got, "/tmp/scratch/var/db/xbps/keys") {
 		t.Errorf("resolve commands: %s", got)
 	}

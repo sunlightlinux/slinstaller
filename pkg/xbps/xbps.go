@@ -129,9 +129,14 @@ func (o Options) Commands() ([][]string, error) {
 
 // ResolveCommands returns the commands that check, installing nothing, that
 // the packages resolve from the repositories: the keys are seeded into
-// scratch, a throwaway root, and xbps-install runs there as a dry run (-n).
-// A typo, a kernel no repository carries or an offline repository missing
-// part of the base would otherwise fail at base-install, after the wipe.
+// scratch, a throwaway root; the repositories are synced into it (xbps-install
+// -S with no packages syncs and stops); then xbps-install runs there as a dry
+// run (-n). Two runs, because xbps does not sync under -n (bin/xbps-install
+// main.c: "if (syncf && !drun)"): every remote repository would have had no
+// index in the scratch root and been dropped, and a package from one
+// reported "not found". A typo, a kernel no repository carries or an offline
+// repository missing part of the base would otherwise fail at base-install,
+// after the wipe.
 func (o Options) ResolveCommands(scratch string) ([][]string, error) {
 	o.Root = scratch
 	cmds, err := o.Commands()
@@ -140,13 +145,23 @@ func (o Options) ResolveCommands(scratch string) ([][]string, error) {
 	}
 	cmds = cmds[:len(cmds)-1] // no reconfigure
 	install := cmds[len(cmds)-1]
+	cmds = cmds[:len(cmds)-1]
+	var sync, dry []string
 	for i, a := range install {
-		if a == "-Sy" {
-			install[i] = "-Sny"
-			break
+		switch {
+		case a == "-Sy":
+			sync = append(sync, "-S")
+			dry = append(dry, "-n")
+		case a == "-r":
+			sync = append(sync, "-r", scratch) // and no packages: sync only
+			dry = append(dry, install[i:]...)
+			return append(cmds, sync, dry), nil
+		default:
+			sync = append(sync, a)
+			dry = append(dry, a)
 		}
 	}
-	return cmds, nil
+	return nil, fmt.Errorf("xbps: no -r in %v", install)
 }
 
 // Unresolved reports a dry run's output when it says the package set
