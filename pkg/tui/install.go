@@ -76,7 +76,21 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 		// ASCII frames: the console font has no braille or box spinner glyphs.
 		spin: spinner.New(spinner.WithSpinner(spinner.Line), spinner.WithStyle(stepRun)),
 	}
-	final, runErr := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	// Without bubbletea's own signal handler: it reacts to SIGTERM with a
+	// blocking send that the SIGTERM abandonChildren sends its own group
+	// could leave stuck as the program quits — Run never returned and the
+	// terminal stayed raw. A SIGTERM from outside is taken here instead,
+	// as the Ctrl+C it stands for (stop after this step; again, leave).
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithoutSignalHandler())
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM)
+	defer func() { signal.Stop(sigs); close(sigs) }()
+	go func() {
+		for range sigs {
+			p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+		}
+	}()
+	final, runErr := p.Run()
 	if runErr != nil {
 		return false, runErr
 	}

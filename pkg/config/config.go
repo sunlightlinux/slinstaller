@@ -2411,7 +2411,11 @@ func lvcreateSize(s string) string {
 	if err != nil {
 		return s // Validate reports it
 	}
-	return fmt.Sprintf("%dm", (b+(1<<20)-1)>>20)
+	mib := b >> 20
+	if b&(1<<20-1) != 0 {
+		mib++ // rounded up, without b+MiB overflowing for a huge size
+	}
+	return fmt.Sprintf("%dm", mib)
 }
 
 // lvParts turns a group's declared children into its logical volumes.

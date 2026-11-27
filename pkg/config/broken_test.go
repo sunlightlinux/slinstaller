@@ -422,7 +422,8 @@ func TestLVSizes(t *testing.T) {
 		t.Errorf("10GB: %v", err)
 	}
 	// Every size without a unit lvcreate reads as the config does: in MiB.
-	for in, want := range map[string]string{"1500000000": "1431m", "2e9": "1908m", "1048576.5": "2m", "10G": "10G", "10.5G": "10.5G", "512m": "512m"} {
+	for in, want := range map[string]string{"1500000000": "1431m", "2e9": "1908m", "1048576.5": "2m", "10G": "10G", "10.5G": "10.5G", "512m": "512m",
+		"18446744073709549568": "17592186044416m"} { // near 2^64: no wrap to 0m
 		pl, err := lv(in).Plan()
 		if err != nil {
 			t.Fatal(err)
