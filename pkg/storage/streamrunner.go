@@ -34,6 +34,13 @@ func SinkRunner(sink func(line string)) Runner {
 			for sc.Scan() {
 				sink(sc.Text())
 			}
+			// A line past the buffer stops the scanner. The child still
+			// writes to the pipe, so keep reading until EOF or it blocks
+			// and Run never returns.
+			if err := sc.Err(); err != nil {
+				sink("(output line dropped: " + err.Error() + ")")
+			}
+			io.Copy(io.Discard, pr)
 			close(done)
 		}()
 

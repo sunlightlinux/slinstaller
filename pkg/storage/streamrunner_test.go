@@ -3,6 +3,7 @@ package storage
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSinkRunnerStreams(t *testing.T) {
@@ -30,5 +31,25 @@ func TestSinkRunnerError(t *testing.T) {
 	}
 	if err := run(nil); err == nil {
 		t.Error("an empty command should return an error")
+	}
+}
+
+// A line past the scanner's limit must not stop the pipe from draining:
+// the child would block on write and the install would hang.
+func TestSinkRunnerLongLine(t *testing.T) {
+	var got []string
+	run := SinkRunner(func(line string) { got = append(got, line) })
+
+	errc := make(chan error, 1)
+	go func() {
+		errc <- run([]string{"sh", "-c", "head -c 2097152 /dev/zero | tr '\\0' x; echo; echo after"})
+	}()
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("SinkRunner hung on an output line longer than its buffer")
 	}
 }

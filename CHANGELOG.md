@@ -12,6 +12,10 @@ change.
 
 ### Fixed
 
+- **A very long output line no longer hangs the TUI install.** The TUI
+  runner read command output with a 1 MiB line limit and stopped reading
+  at the first longer line; the command then blocked writing to the pipe
+  and the install never finished. The rest of the output is now drained.
 - **A root that fills the disk was never held to the root minimum.** The
   disk-fit check summed only the fixed sizes, so a 3 GB disk with a 512M
   ESP, 2G swap and a filling root was wiped and given a 0.3 GB root. What
