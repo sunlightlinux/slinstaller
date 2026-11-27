@@ -61,7 +61,8 @@ func parsePartedFree(out string) (parts []existingPart, free []FreeRegion) {
 func parseMiB(s string) uint64 {
 	s = strings.TrimSuffix(strings.TrimSpace(s), "MiB")
 	v, err := strconv.ParseFloat(s, 64)
-	if err != nil || v < 0 {
+	// NaN and Inf parse as numbers too; no disk is 2^53 MiB.
+	if err != nil || !(v >= 0 && v < 1<<53) {
 		return 0
 	}
 	return uint64(math.Round(v))
