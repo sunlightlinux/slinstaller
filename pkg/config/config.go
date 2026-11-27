@@ -22,6 +22,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -732,11 +733,14 @@ func (c *Config) ResolveDisks(disks []DiskInfo) error {
 		taken[name] = mt.String()
 		old := m.Name
 		m.Name = name
-		for i, ch := range m.Children {
+		// Counted as Plan counts them: an empty entry is not a partition.
+		pos := 0
+		for _, ch := range m.Children {
 			if ch == nil {
 				continue
 			}
-			n := i + 1
+			pos++
+			n := pos
 			if old != "" && strings.HasPrefix(ch.Name, old) {
 				n = partNumber(strings.TrimPrefix(ch.Name, old), n)
 			}
@@ -1723,11 +1727,6 @@ func (c *Config) Validate() error {
 	switch {
 	case esps == 0:
 		add("no EFI System Partition (vfat at /boot or /boot/efi); Sunlight Linux is UEFI-only")
-	case esps > 1:
-		// The bootloader goes to one ESP; another vfat partition at /boot
-		// or /boot/efi is mounted over or under it. A spare ESP for RAID
-		// is esp: true without a mountpoint.
-		add("%d EFI System Partitions (vfat at /boot or /boot/efi); give one the mountpoint, and a spare esp: true and none", esps)
 	}
 
 	logins := map[string]bool{}
@@ -1764,7 +1763,16 @@ func (c *Config) Validate() error {
 			adminWithPassword = adminWithPassword || u.Password != ""
 		}
 	}
-	if len(admins) > 0 && !adminWithPassword {
+	// A config that sees to sudo itself — a sudoers file of its own, or a
+	// hook that can write one — is trusted to: a key-only administrator
+	// with NOPASSWD is the usual headless setup.
+	ownSudo := len(c.PostInstall) > 0 || len(c.StageHooks) > 0
+	for _, w := range c.WriteFiles {
+		if w != nil && strings.HasPrefix(path.Clean("/"+w.Path), "/etc/sudoers") {
+			ownSudo = true
+		}
+	}
+	if len(admins) > 0 && !adminWithPassword && !ownSudo {
 		add("no administrator has a password (%s): root is locked once there is an administrator, and sudo asks for one - give an administrator a password hash", strings.Join(admins, ", "))
 	}
 

@@ -58,6 +58,18 @@ func TestResolveDisksBySerial(t *testing.T) {
 	if d = c.TargetMedia[0]; d.Name != "sda" || d.Children[0].Name != "sda1" || d.Children[1].Name != "sda2" {
 		t.Errorf("by WWN: %s %s %s", d.Name, d.Children[0].Name, d.Children[1].Name)
 	}
+	// An empty entry is no partition, here as in Plan: the next is 2.
+	c = matchConfig("", &DiskMatch{WWN: "0x5000C500A1B2C3D4"}, "", "")
+	c.TargetMedia[0].Children = []*Media{c.TargetMedia[0].Children[0], nil, c.TargetMedia[0].Children[1]}
+	if err := c.ResolveDisks(machineDisks()); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.TargetMedia[0].Children[2].Name; got != "sda2" {
+		t.Errorf("after an empty entry: %s", got)
+	}
+	if _, err := c.Plan(); err != nil {
+		t.Errorf("plan after an empty entry: %v", err)
+	}
 	c = matchConfig("sdx", &DiskMatch{Serial: "S1BBB"}, "sdx1", "sdx5")
 	_ = c.ResolveDisks(machineDisks())
 	if got := c.TargetMedia[0].Children[1].Name; got != "sdb5" {

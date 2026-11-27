@@ -318,6 +318,13 @@ func TestAnAdministratorNeedsAPassword(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Errorf("no administrator at all (root left as it is): %v", err)
 	}
+	// A config that writes its own sudoers rule (NOPASSWD for a key-only
+	// admin, the usual headless setup) is trusted to.
+	c.Users = []*User{{Login: "ops", Admin: true, SSHKeys: []string{"ssh-ed25519 AAAA"}}}
+	c.WriteFiles = []*WriteFile{{Path: "/etc/sudoers.d/ops", Content: "ops ALL=(ALL) NOPASSWD: ALL\n"}}
+	if err := c.Validate(); err != nil {
+		t.Errorf("a key-only admin with a sudoers file of the config's own: %v", err)
+	}
 }
 
 // `encrypted: true` where nothing reads it installed the volume in the

@@ -135,8 +135,7 @@ change.
 - **A swap or vfat partition could pass for the root.** Any entry
   mounted at `/` was counted as the root, so `{fstype: swap, mountpoint: /}`
   validated and the install had no root filesystem. A swap with a
-  mountpoint and a vfat root are refused, and so is a second vfat
-  partition at `/boot` or `/boot/efi` (a spare `esp: true` still works).
+  mountpoint and a vfat root are refused.
 - An install from an image unpacked it with the live system's `/proc`,
   `/sys` and `/dev` bound into the target: the image's own `dev/`,
   `proc/` and `sys/` entries landed on the live ones, and its
@@ -161,7 +160,8 @@ change.
 - A config whose administrators had no password between them (an SSH key
   only) installed a system nobody could become root on: root's password
   is locked once there is an administrator, and sudo asks for one. It is
-  refused now.
+  refused now, unless the config sees to sudo itself (a `write-files`
+  entry under `/etc/sudoers*`, or hooks).
 - A staged run (`--through`) skipped the disk checks along with the tool
   checks: it would partition and format a partition given as the disk, a
   disk in use, or one sharing an array with another. The disk checks now

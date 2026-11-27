@@ -49,8 +49,9 @@ func TestValidateRootAndESPShape(t *testing.T) {
 		{"vfat root", sdaLayout(esp("sda1", "/boot/efi"),
 			&Media{Name: "sda2", Type: "part", FsType: "vfat", Mountpoint: "/", Size: "rest"}),
 			"sda2: vfat cannot hold the root"},
-		{"two ESPs", sdaLayout(esp("sda1", "/boot/efi"), esp("sda2", "/boot"), root("sda3")),
-			"2 EFI System Partitions"},
+		// A vfat /boot beside the ESP at /boot/efi is a layout that has
+		// always installed.
+		{"vfat /boot beside the ESP", sdaLayout(esp("sda1", "/boot/efi"), esp("sda2", "/boot"), root("sda3")), ""},
 		{"one ESP", sdaLayout(esp("sda1", "/boot"), root("sda2")), ""},
 		{"spare ESP for RAID", raidWithSpareESP(), ""},
 	} {
