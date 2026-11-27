@@ -12,6 +12,10 @@ change.
 
 ### Fixed
 
+- **A Safe install's shrink no longer stops when e2fsck fixes something.**
+  `e2fsck -f -p` exits 1 or 2 after correcting errors, which counted as a
+  failure and aborted the resize of a filesystem that was now clean. Exit
+  codes 1 and 2 now let the shrink go on; 4 and above still stop it.
 - **Absurd sizes are rejected instead of wrapping.** A config size of
   `inf`, `nan`, `1e30` or a byte count past 64 bits was accepted and
   converted to an arbitrary number, and a plan size like `16777216T`

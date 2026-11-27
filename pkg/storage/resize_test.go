@@ -2,6 +2,8 @@ package storage
 
 import (
 	"errors"
+	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -190,5 +192,29 @@ func TestResizeBtrfs(t *testing.T) {
 	})
 	if !errors.Is(err, boom) || strings.Join(ran, ",") != "e2fsck,resize2fs" {
 		t.Errorf("failed Resize: %v, ran %v", err, ran)
+	}
+}
+
+// e2fsck exits 1 or 2 after correcting errors; that is not a failure of the
+// check before a shrink. 4 and above are, and stop before resize2fs.
+func TestResizeE2fsckCorrected(t *testing.T) {
+	pl := &Plan{Disk: "/dev/sda", Parts: []Partition{
+		{Device: "/dev/sda2", Number: 2, Filesystem: "ext4", ResizeMiB: 1024},
+	}}
+	for code, wantOK := range map[int]bool{1: true, 2: true, 4: false, 8: false} {
+		var ran []string
+		err := pl.Resize(func(args []string) error {
+			ran = append(ran, args[0])
+			if args[0] == "e2fsck" {
+				return exec.Command("sh", "-c", fmt.Sprintf("exit %d", code)).Run()
+			}
+			return nil
+		})
+		if wantOK && (err != nil || strings.Join(ran, ",") != "e2fsck,resize2fs,sh,partprobe") {
+			t.Errorf("e2fsck exit %d: %v, ran %v", code, err, ran)
+		}
+		if !wantOK && (err == nil || strings.Join(ran, ",") != "e2fsck") {
+			t.Errorf("e2fsck exit %d should stop the resize: %v, ran %v", code, err, ran)
+		}
 	}
 }

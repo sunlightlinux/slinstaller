@@ -1,6 +1,10 @@
 package storage
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"os/exec"
+)
 
 // Resizable reports whether a partition holding this filesystem can be
 // shrunk in place.
@@ -64,6 +68,12 @@ var WithMountedFS = func(fs string) string { return fs }
 // the tool needs.
 func (pl *Plan) Resize(run Runner) error {
 	for _, c := range pl.ResizeCommands() {
+		if c[0] == "e2fsck" {
+			if err := run(c); err != nil && !e2fsckFixed(err) {
+				return fmt.Errorf("storage: %s: %w", ShowCommand(c), err)
+			}
+			continue
+		}
 		if c[0] != "btrfs" {
 			if err := RunCommands([][]string{c}, run); err != nil {
 				return err
@@ -79,6 +89,19 @@ func (pl *Plan) Resize(run Runner) error {
 		}
 	}
 	return nil
+}
+
+// e2fsckFixed reports whether an e2fsck failure is one it recovered from:
+// exit 1 (errors corrected) or 2 (corrected, reboot advised). Per e2fsck(8)
+// 4 and up mean errors were left. The reboot advice is for a mounted root;
+// this filesystem is unmounted, so after a fix it is safe to shrink.
+func e2fsckFixed(err error) bool {
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		return false
+	}
+	code := ee.ExitCode()
+	return code == 1 || code == 2
 }
 
 // PlaceInFree gives every CreateInFree partition its place: the largest
