@@ -124,3 +124,30 @@ func TestValidateMountpointShape(t *testing.T) {
 		Subvolumes: []*Subvolume{{Name: "@", Mountpoint: "/"}, {Name: "@log", Mountpoint: "/var/log "}}}
 	validateWants(t, "subvolume", sv, "subvolume \"@log\": mountpoint \"/var/log \" has a space")
 }
+
+// Each LUKS container needs a mapper name of its own; two that come out
+// the same are refused, naming both entries.
+func TestValidateMapperNamesUnique(t *testing.T) {
+	esp := &Media{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"}
+	root := &Media{Name: "sda9", Type: "crypt", FsType: "ext4", Mountpoint: "/", Size: "rest"}
+	crypt := func(n, fs, mnt string) *Media {
+		return &Media{Name: n, Type: "crypt", FsType: fs, Mountpoint: mnt, Size: "1G"}
+	}
+	validateWants(t, "two encrypted swaps",
+		sdaLayout(esp, crypt("sda2", "swap", ""), crypt("sda3", "swap", ""), root),
+		"sda2 and sda3 would both be opened as /dev/mapper/cryptswap")
+	validateWants(t, "/var/lib and /var-lib",
+		sdaLayout(esp, crypt("sda2", "ext4", "/var/lib"), crypt("sda3", "ext4", "/var-lib"), root),
+		"sda2 and sda3 would both be opened as /dev/mapper/cryptvar-lib")
+	validateWants(t, "distinct names",
+		sdaLayout(esp, crypt("sda2", "swap", ""), crypt("sda3", "ext4", "/var/lib"), root), "")
+
+	// An encrypted array named root beside an encrypted root partition.
+	arr := raidConfig()
+	arr.Raid[0].Mountpoint = "/srv"
+	arr.Raid[0].Encrypted = true
+	arr.TargetMedia[0].Children[1].Size = "1G"
+	arr.TargetMedia[0].Children = append(arr.TargetMedia[0].Children,
+		&Media{Name: "vda3", Type: "crypt", FsType: "ext4", Mountpoint: "/", Size: "rest"})
+	validateWants(t, "array named root", arr, "vda3 and raid root would both be opened as /dev/mapper/cryptroot")
+}

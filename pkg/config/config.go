@@ -1588,6 +1588,37 @@ func (c *Config) Validate() error {
 		add("spare ESPs (esp: true) need the main ESP at /boot/efi, not /boot: at /boot the kernels would be on one disk only")
 	}
 
+	// Every LUKS container is opened under its mapper name, and two that
+	// come out the same (two encrypted swaps, /var/lib and /var-lib, an
+	// array named root beside an encrypted root) cannot both be open.
+	if !c.ReusePartitions {
+		mappers := map[string]string{}
+		mapper := func(where, name string) {
+			if other, ok := mappers[name]; ok {
+				add("%s and %s would both be opened as /dev/mapper/%s", other, where, name)
+				return
+			}
+			mappers[name] = where
+		}
+		for _, disk := range disks {
+			for i, ch := range disk.Children {
+				if ch == nil || !(ch.Type == "crypt" || ch.Type == "lvm" && ch.Encrypted) {
+					continue
+				}
+				where := ch.Name
+				if where == "" {
+					where = fmt.Sprintf("partition %d", i+1)
+				}
+				mapper(where, cryptMapName(ch))
+			}
+		}
+		for _, a := range c.Raid {
+			if a != nil && a.Encrypted {
+				mapper("raid "+a.Name, raidMapName(a.Name))
+			}
+		}
+	}
+
 	for name := range raidMembers {
 		if !declared[name] {
 			add("raid member references undeclared array %q", name)
@@ -1890,7 +1921,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 		if a.Encrypted {
 			// LUKS on the array: the array device is what is formatted and
 			// opened, and everything above it is on the mapper.
-			rp.Encrypted, rp.Device, rp.MapName = true, storage.RaidDevice(a.Name), "crypt"+a.Name
+			rp.Encrypted, rp.Device, rp.MapName = true, storage.RaidDevice(a.Name), raidMapName(a.Name)
 		}
 		if len(a.Partitions) > 0 {
 			// A partitioned array: it is a disk in its own right, cut after
@@ -2178,6 +2209,9 @@ func lvParts(vg string, children []*Media) []storage.Partition {
 	}
 	return lvs
 }
+
+// raidMapName is the LUKS mapper name for an encrypted RAID array.
+func raidMapName(array string) string { return "crypt" + array }
 
 // mountpointProblem says what is wrong with an absolute mountpoint, or "".
 // Mountpoints are compared and written to fstab as given, so each has to

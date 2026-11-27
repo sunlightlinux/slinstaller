@@ -12,6 +12,12 @@ change.
 
 ### Fixed
 
+- **Two LUKS containers could get the same mapper name.** Every
+  encrypted swap was `cryptswap`, `/var/lib` and `/var-lib` were both
+  `cryptvar-lib`, and an encrypted array named `root` was `cryptroot`
+  beside an encrypted root partition, so the second `luksOpen` failed
+  after the disks were wiped. Such layouts are refused up front, naming
+  both entries.
 - **Mountpoints are checked for shape.** They were compared and written
   to fstab as given: `/home/` and `/home` both passed as different
   mountpoints, `/boot/../tmp` passed, and `/a b` produced a broken fstab
