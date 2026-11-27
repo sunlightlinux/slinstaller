@@ -803,6 +803,10 @@ func TestSkipValidationAllKeepsWrittenChecks(t *testing.T) {
 // is checked by Plan, which skipValidationAll does not skip: crypt-options
 // "a, discard" was two kernel arguments and a crypttab line with a field
 // too many; a space in mount-options or a mountpoint the same in fstab.
+//
+// A reuse install (reusePartitions) is planned apart, and skipped the
+// check: a kept /srv with mount-options "noatime, nodev" was an fstab
+// line of seven fields.
 func TestPlanRefusesFieldsWithSpacesUnderSkipValidationAll(t *testing.T) {
 	for name, set := range map[string]func(*Media){
 		"crypt-options": func(m *Media) { m.Type, m.CryptOptions = "crypt", "discard, no-read-workqueue" },
@@ -810,17 +814,22 @@ func TestPlanRefusesFieldsWithSpacesUnderSkipValidationAll(t *testing.T) {
 		"mountpoint":    func(m *Media) { m.Mountpoint = "/srv/my data" },
 		"line break":    func(m *Media) { m.MountOptions = "noatime\n/dev/sdz / ext4" },
 	} {
-		c := &Config{SkipValidationAll: true, TargetMedia: []*Media{{Name: "sda", Type: "disk", Children: []*Media{
-			{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
-			{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/srv", Size: "1G"},
-			{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: "/"},
-		}}}}
-		set(c.TargetMedia[0].Children[1])
-		if c.Validate() != nil {
-			t.Fatalf("%s: refused by Validate under skipValidationAll, not what is tested", name)
-		}
-		if _, err := c.Plan(); err == nil || !strings.Contains(err.Error(), "space or a control character") {
-			t.Errorf("%s: Plan: %v", name, err)
+		for _, reuse := range []bool{false, true} {
+			if reuse && name == "crypt-options" {
+				continue // a reuse install keeps only plain partitions
+			}
+			c := &Config{SkipValidationAll: true, ReusePartitions: reuse, TargetMedia: []*Media{{Name: "sda", Type: "disk", Children: []*Media{
+				{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
+				{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/srv", Size: "1G", Preserve: reuse},
+				{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: "/"},
+			}}}}
+			set(c.TargetMedia[0].Children[1])
+			if c.Validate() != nil {
+				t.Fatalf("%s: refused by Validate under skipValidationAll, not what is tested", name)
+			}
+			if _, err := c.Plan(); err == nil || !strings.Contains(err.Error(), "space or a control character") {
+				t.Errorf("%s, reuse %v: Plan: %v", name, reuse, err)
+			}
 		}
 	}
 }
