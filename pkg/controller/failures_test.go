@@ -479,12 +479,15 @@ func TestNetworkFailures(t *testing.T) {
 		}
 	}
 
-	// A slinit target without an sshd service to enable: reported, not
-	// left with a dangling link.
+	// A slinit target whose sshd service cannot be enabled (boot.d is a
+	// file): reported. (One with no sshd service at all is a warning, see
+	// TestNetworkWithoutSshdService.)
 	in = stagedInstaller(t, twoPartConfig(), &r)
 	dir := mkTarget(t, in, "usr", "lib", "slinit.d")
 	os.WriteFile(filepath.Join(dir, "boot"), nil, 0o644)
-	wantErr(t, in.network(), "enable slinit service sshd")
+	os.WriteFile(filepath.Join(dir, "sshd"), nil, 0o644)
+	os.WriteFile(filepath.Join(mkTarget(t, in, "etc", "slinit.d"), "boot.d"), nil, 0o644)
+	wantErr(t, in.network(), "system:")
 }
 
 func TestCopyNetworkFromTheLiveSystem(t *testing.T) {
