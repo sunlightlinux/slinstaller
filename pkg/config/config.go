@@ -1319,6 +1319,15 @@ func (c *Config) Validate() error {
 		case !storage.KnownFilesystem(fsType):
 			add("%s: filesystem %q is not supported", where, fsType)
 		}
+		switch {
+		case fsType == "swap" && mnt != "":
+			// A swap area is not mounted: counted as / it would pass for
+			// the root the install needs and leave none.
+			add("%s: swap is not mounted; drop mountpoint %q", where, mnt)
+			return
+		case fsType == "vfat" && mnt == "/":
+			add("%s: vfat cannot hold the root filesystem (no owners, modes or links)", where)
+		}
 		if mnt != "" {
 			if !strings.HasPrefix(mnt, "/") {
 				add("%s: mountpoint %q is not absolute", where, mnt)
@@ -1587,8 +1596,14 @@ func (c *Config) Validate() error {
 	default:
 		add("%d partitions mount /", roots)
 	}
-	if esps == 0 {
+	switch {
+	case esps == 0:
 		add("no EFI System Partition (vfat at /boot or /boot/efi); Sunlight Linux is UEFI-only")
+	case esps > 1:
+		// The bootloader goes to one ESP; another vfat partition at /boot
+		// or /boot/efi is mounted over or under it. A spare ESP for RAID
+		// is esp: true without a mountpoint.
+		add("%d EFI System Partitions (vfat at /boot or /boot/efi); give one the mountpoint, and a spare esp: true and none", esps)
 	}
 
 	logins := map[string]bool{}
