@@ -13,14 +13,20 @@ const SwapFileFstab = SwapFileName + " none swap defaults 0 0\n"
 // its mode (swap refuses a world-readable file), then mkswap. The caller
 // adds SwapFileFstab to the target's fstab so it is used on boot.
 //
-// This is for ext4, the default root filesystem; btrfs needs a
-// no-copy-on-write file, which is a separate case if a btrfs root ever
-// wants a swap file.
-func SwapFileCommands(root, size string) [][]string {
+// On btrfs (rootFS) the file must not be copy-on-write, and so not
+// compressed either, or the kernel refuses it at every boot: it is made
+// empty and marked No_COW (chattr +C, which only takes on an empty file)
+// before it is allocated.
+func SwapFileCommands(root, size, rootFS string) [][]string {
 	path := filepath.Join(root, "swapfile")
-	return [][]string{
-		{"fallocate", "-l", size, path},
-		{"chmod", "600", path},
-		{"mkswap", path},
+	var cmds [][]string
+	if rootFS == "btrfs" {
+		cmds = append(cmds,
+			[]string{"truncate", "-s", "0", path},
+			[]string{"chattr", "+C", path})
 	}
+	return append(cmds,
+		[]string{"fallocate", "-l", size, path},
+		[]string{"chmod", "600", path},
+		[]string{"mkswap", path})
 }

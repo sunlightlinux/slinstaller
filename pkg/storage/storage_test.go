@@ -178,7 +178,7 @@ func TestMissingTools(t *testing.T) {
 }
 
 func TestSwapFileCommands(t *testing.T) {
-	cmds := SwapFileCommands("/mnt", "2G")
+	cmds := SwapFileCommands("/mnt", "2G", "ext4")
 	want := []string{
 		"fallocate -l 2G /mnt/swapfile",
 		"chmod 600 /mnt/swapfile",
@@ -191,6 +191,15 @@ func TestSwapFileCommands(t *testing.T) {
 		if got := strings.Join(cmds[i], " "); got != w {
 			t.Errorf("command %d = %q, want %q", i, got, w)
 		}
+	}
+	// On btrfs the file is emptied and marked No_COW before it is
+	// allocated, or swapon refuses it at boot.
+	var got []string
+	for _, c := range SwapFileCommands("/mnt", "2G", "btrfs") {
+		got = append(got, strings.Join(c, " "))
+	}
+	if strings.Join(got[:3], "; ") != "truncate -s 0 /mnt/swapfile; chattr +C /mnt/swapfile; fallocate -l 2G /mnt/swapfile" {
+		t.Errorf("btrfs swap file: %q", got)
 	}
 	if SwapFileFstab != "/swapfile none swap defaults 0 0\n" {
 		t.Errorf("fstab line = %q", SwapFileFstab)

@@ -520,3 +520,26 @@ func TestNetworkStageOnASlinitTarget(t *testing.T) {
 		t.Errorf("update service not installed: %v", err)
 	}
 }
+
+// A btrfs root gets a No_COW swap file; an ext4 one a plain one.
+func TestSwapfileOnBtrfs(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.SwapFileSize = "2G"
+	cfg.TargetMedia[0].Children[1].FsType = "btrfs"
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	mkTarget(t, in, "etc")
+	if err := in.swapfile(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.flat(), "chattr +C "+filepath.Join(in.opts.Root, "swapfile")) {
+		t.Errorf("btrfs root, swap file not No_COW:\n%s", r.flat())
+	}
+	cfg.TargetMedia[0].Children[1].FsType = "ext4"
+	r = recorder{}
+	in = stagedInstaller(t, cfg, &r)
+	mkTarget(t, in, "etc")
+	if err := in.swapfile(); err != nil || strings.Contains(r.flat(), "chattr") {
+		t.Errorf("ext4 root: %v\n%s", err, r.flat())
+	}
+}

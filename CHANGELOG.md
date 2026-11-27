@@ -12,6 +12,10 @@ change.
 
 ### Fixed
 
+- A swap file on a btrfs root was made copy-on-write (and compressed
+  under `compress=`), which the kernel refuses: the install succeeded and
+  `swapon` failed at every boot. It is marked No_COW before it is
+  allocated.
 - `/etc/mdadm.conf` on the installed system listed every array the live
   system had assembled (`mdadm --detail --scan`), data arrays on other
   disks included. It lists the install's own arrays now.

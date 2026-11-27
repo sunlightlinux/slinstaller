@@ -1001,8 +1001,14 @@ func (in *installer) swapfile() error {
 	if in.cfg.SwapFileSize == "" {
 		return nil
 	}
+	rootFS := ""
+	for _, p := range in.plan.Parts {
+		if p.Mountpoint == "/" && !p.IsPV && !p.IsRaidMember {
+			rootFS = p.Filesystem
+		}
+	}
 	if err := storage.RunCommands(
-		storage.SwapFileCommands(in.opts.Root, in.cfg.SwapFileSize), in.opts.Runner); err != nil {
+		storage.SwapFileCommands(in.opts.Root, in.cfg.SwapFileSize, rootFS), in.opts.Runner); err != nil {
 		return err
 	}
 
