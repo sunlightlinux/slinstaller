@@ -141,7 +141,7 @@ func TestDiscoverHonoursRoleLabels(t *testing.T) {
 	}
 	for i, w := range []want{
 		{"vfat", "/boot", true},    // the ESP, kept
-		{"swap", "", true},         //
+		{"swap", "", false},        // no filesystem yet: made, as clr-installer does (kept, --apply refused it)
 		{"ext4", "/", false},       // _F: formatted, and nothing was there to say as what
 		{"xfs", "/srv/data", true}, // kept
 		{"ext4", "/home", false},   // _F wins; _E is said to be unsupported here
@@ -170,9 +170,26 @@ func TestDiscoverHonoursRoleLabels(t *testing.T) {
 	}
 	plan, _ := cfg.Plan()
 	for _, p := range plan.Parts {
-		formatted := p.Device == "/dev/sda3" || p.Device == "/dev/sda5"
+		formatted := p.Device == "/dev/sda2" || p.Device == "/dev/sda3" || p.Device == "/dev/sda5"
 		if p.Preserve == formatted {
 			t.Errorf("%s: preserve = %v", p.Device, p.Preserve)
 		}
+	}
+}
+
+// A role on a partition with no filesystem formats it; CLR_SWAP on one that
+// holds a filesystem leaves it as it is.
+func TestRoleFromLabelUnformatted(t *testing.T) {
+	ch := &config.Media{Name: "sda3", Preserve: true}
+	if ok, _ := roleFromLabel("CLR_ROOT", ch); !ok || ch.Preserve || ch.FsType != "ext4" || ch.Mountpoint != "/" {
+		t.Errorf("empty CLR_ROOT: %+v", ch)
+	}
+	ch = &config.Media{Name: "sda1", Preserve: true}
+	if ok, _ := roleFromLabel("CLR_BOOT", ch); !ok || ch.Preserve || ch.FsType != "vfat" {
+		t.Errorf("empty CLR_BOOT: %+v", ch)
+	}
+	ch = &config.Media{Name: "sda2", FsType: "ext4", Preserve: true}
+	if ok, said := roleFromLabel("CLR_SWAP", ch); ok || !ch.Preserve || ch.FsType != "ext4" || !strings.Contains(said, "holds ext4") {
+		t.Errorf("CLR_SWAP on ext4: %v %+v %s", ok, ch, said)
 	}
 }

@@ -88,8 +88,9 @@ func printDiscovered(out, notes io.Writer, disk string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "# The layout on %s, as slinstaller found it. Every partition is kept\n", disk)
-	fmt.Fprintf(out, "# (preserve: true). To install: give one partition mountpoint: / and remove\n")
+	fmt.Fprintf(out, "# The layout on %s, as slinstaller found it. A partition is kept\n", disk)
+	fmt.Fprintf(out, "# where it says preserve: true (see the notes for any its name has set to\n")
+	fmt.Fprintf(out, "# be formatted). To install: give one partition mountpoint: / and remove\n")
 	fmt.Fprintf(out, "# its preserve, give the ESP its mountpoint, and add users.\n%s", data)
 	for _, n := range remarks {
 		fmt.Fprintln(notes, "note:", n)
@@ -121,14 +122,21 @@ func roleFromLabel(label string, ch *config.Media) (bool, string) {
 		break
 	}
 	var said string
+	// A role on a partition with no filesystem (one slinstaller knows) is
+	// formatted, as clr-installer does: kept, it was refused at --apply
+	// ("to be kept as swap, but holds -"), or failed validation outright.
+	if ch.FsType == "" || !storage.KnownFilesystem(ch.FsType) {
+		format = true
+	}
 	switch {
 	case name == "CLR_BOOT":
 		ch.Mountpoint, said = "/boot", "the EFI System Partition, mounted at /boot"
-		if ch.FsType == "" {
-			ch.FsType = "vfat"
-		}
 	case name == "CLR_ROOT":
 		ch.Mountpoint, said = "/", "the root filesystem"
+	case name == "CLR_SWAP" && !format && ch.FsType != "swap":
+		// Labelled swap but holding a filesystem: what it holds is kept,
+		// as clr-installer keeps it, not relabelled as a swap to keep.
+		return false, "labelled swap, but holds " + ch.FsType + "; left as it is"
 	case name == "CLR_SWAP":
 		ch.FsType, said = "swap", "swap"
 	case strings.HasPrefix(name, "CLR_MNT_/"):
