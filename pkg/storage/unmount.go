@@ -63,6 +63,10 @@ next:
 // UnmountTree unmounts everything mounted at or below root — what a staged
 // install (--through) leaves behind. It returns what it unmounted.
 func UnmountTree(root string) ([]string, error) {
+	// Everything under / is the live system itself.
+	if root = filepath.Clean(root); !filepath.IsAbs(root) || root == "/" {
+		return nil, fmt.Errorf("storage: will not unmount everything under %q", root)
+	}
 	data, err := os.ReadFile(mountsFile)
 	if err != nil {
 		return nil, fmt.Errorf("storage: %w", err)

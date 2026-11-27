@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -213,6 +214,31 @@ func run(args []string) error {
 
 	if completion != "" {
 		return printCompletion(os.Stdout, fs, completion)
+	}
+
+	// The target tree is mounted on and unmounted under: never the live
+	// root — `--unmount --root /` detached the running system's / — and
+	// never a path relative to wherever the installer was started.
+	if !filepath.IsAbs(root) || filepath.Clean(root) == "/" {
+		return fmt.Errorf("--root %q must be an absolute path other than / (e.g. /mnt)", root)
+	}
+	root = filepath.Clean(root)
+	// Stage names are known now: a misspelt one was found only once the
+	// disk path had been retyped, or not at all in a dry run.
+	for flagName, stage := range map[string]string{"--through": through, "--resume-from": resumeFrom} {
+		if stage == "" {
+			continue
+		}
+		known := controller.StageNames()
+		if flagName == "--resume-from" {
+			known = controller.ResumableStages()
+		}
+		if !slices.Contains(known, stage) {
+			if flagName == "--resume-from" {
+				return fmt.Errorf("--resume-from: an install cannot be resumed at %q; it can be from %s", stage, strings.Join(known, ", "))
+			}
+			return fmt.Errorf("%s %q is not a stage; it is one of %s", flagName, stage, strings.Join(known, ", "))
+		}
 	}
 
 	if showVersion {

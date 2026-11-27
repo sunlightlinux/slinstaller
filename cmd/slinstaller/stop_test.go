@@ -11,6 +11,7 @@ import (
 
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
+	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
 // Ctrl+C (SIGINT) during an install stops it after the stage running,
@@ -92,5 +93,21 @@ targetMedia:
 	_, errOut, err := runWith(t, "", path)
 	if err != nil || !strings.Contains(errOut, "(it will refuse:") || !strings.Contains(errOut, "parted will number it 5") {
 		t.Errorf("err %v, stderr:\n%s", err, errOut)
+	}
+}
+
+// --root is never the live root nor relative, and stage names are checked
+// before anything else is.
+func TestRootAndStageFlags(t *testing.T) {
+	for _, root := range []string{"/", "mnt", "/mnt/..", "//"} {
+		if err := run([]string{"--root", root, "--unmount"}); err == nil || !strings.Contains(err.Error(), "--root") {
+			t.Errorf("--root %q: %v", root, err)
+		}
+	}
+	if err := run([]string{"--through", "bootlaoder", "x.yaml"}); err == nil || !strings.Contains(err.Error(), `--through "bootlaoder" is not a stage`) {
+		t.Errorf("--through typo: %v", err)
+	}
+	if _, err := storage.UnmountTree("/"); err == nil {
+		t.Error("UnmountTree(/) was not refused")
 	}
 }
