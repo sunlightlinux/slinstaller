@@ -113,6 +113,15 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 **Resume**
 
+- **A resume needs the install it resumes.** `--resume` used to mount
+  whatever the disk held — another system, or an old install of the same
+  layout after a stop in the pre-install hooks — and install into it with
+  no confirmation. The mount stage marks the target
+  (`/var/lib/slinstaller/in-progress`), a complete install removes the
+  mark, and a resume without it is refused. A resize install can be
+  resumed (its partition already shrunk is not refused), a first-boot
+  stopped while generating the locale generates it on resume, and a stop
+  says which `--resume-from` goes on.
 - **`--resume` works after a reboot of the live medium.** It used to fail
   at the mount ("mount /dev/mapper/X: no such file or directory"):
   nothing re-opened the encrypted volumes, assembled the arrays or
@@ -147,6 +156,11 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 **Disks and partitions**
 
+- **Intel RST/DDF containers, multipath and dmraid** are released before
+  the wipe: lsblk names them "container", "mpath" and "dmraid", which
+  were not taken for holders, and wipefs then failed with EBUSY after
+  the confirmation. zram devices, an eMMC's boot areas and empty card
+  readers are no longer offered as disks.
 - **Partition names are checked against what parted makes.** A
   partition's device came from its `name` unchecked, while parted numbers
   what it cuts itself. A child named for another disk (`nvme0n1p2` under
