@@ -441,6 +441,12 @@ restart:
 		fmt.Print(storage.FormatCommands(cmds))
 		printRelease(plan)
 	}
+	// A key the config carries that nothing reads is most likely a typo
+	// (encryptd: true installs unencrypted); said where the plan ends, so
+	// it is in view when the operator confirms.
+	for _, k := range cfg.UnknownKeys() {
+		fmt.Fprintf(os.Stderr, "warning: config key %s is not one slinstaller knows; it is ignored\n", k)
+	}
 
 	if !apply && !systemCheck {
 		if plan.Wipe {

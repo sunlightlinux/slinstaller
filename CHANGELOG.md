@@ -12,6 +12,11 @@ change.
 
 ### Fixed
 
+- **A misspelt config key was silently ignored.** `encryptd: true`
+  loaded without a word and the install was not encrypted. Keys nothing
+  reads are now listed as warnings, with their path, where the plan
+  ends; the config still loads (clr-installer's probe and telemetry keys
+  are known and not warned about).
 - **Two LUKS containers could get the same mapper name.** Every
   encrypted swap was `cryptswap`, `/var/lib` and `/var-lib` were both
   `cryptvar-lib`, and an encrypted array named `root` was `cryptroot`

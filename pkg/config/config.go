@@ -12,7 +12,9 @@
 // (model, majMin, ro, rm, state) and Clear Linux specifics (bundles,
 // telemetry, swupd*). Unknown fields are ignored rather than rejected,
 // so a config meant for clr-installer still loads; what maps to a
-// Sunlight install is honoured and the rest is carried but unused.
+// Sunlight install is honoured and the rest is carried but unused. Keys
+// slinstaller does not know at all are listed by UnknownKeys, so a typo
+// (encryptd: true) is warned about rather than silently dropped.
 package config
 
 import (
@@ -21,6 +23,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -225,6 +228,70 @@ type Config struct {
 	BlockDevices []*StorageAlias `yaml:"block-devices,omitempty"`
 
 	Version uint `yaml:"version,omitempty"`
+
+	// unknown are the keys of the loaded file no field reads (UnknownKeys).
+	unknown []string
+}
+
+// UnknownKeys lists the keys of the loaded file that slinstaller does not
+// read, as paths (targetMedia[0].children[1].encryptd), leaving out the
+// clr-installer keys it knows and ignores. They do not stop the install —
+// a clr-installer config has to keep loading — but one is usually a typo.
+func (c *Config) UnknownKeys() []string { return c.unknown }
+
+// clrIgnored are keys a clr-installer config carries that slinstaller
+// knows and deliberately ignores: the lsblk probe fields on each device
+// and Clear's telemetry settings.
+var clrIgnored = map[string]bool{
+	"model": true, "majMin": true, "ro": true, "rm": true, "state": true,
+	"telemetry": true, "telemetryURL": true, "telemetryTID": true, "telemetryPolicy": true,
+}
+
+// unknownKeys walks a YAML node against the type it is decoded into and
+// appends the mapping keys no field of that type reads.
+func unknownKeys(n *yaml.Node, t reflect.Type, at string, out *[]string) {
+	for n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch {
+	case n.Kind == yaml.DocumentNode:
+		for _, x := range n.Content {
+			unknownKeys(x, t, at, out)
+		}
+	case n.Kind == yaml.SequenceNode && t.Kind() == reflect.Slice:
+		for i, x := range n.Content {
+			unknownKeys(x, t.Elem(), fmt.Sprintf("%s[%d]", at, i), out)
+		}
+	case n.Kind == yaml.MappingNode && t.Kind() == reflect.Map:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			unknownKeys(n.Content[i+1], t.Elem(), at+"."+n.Content[i].Value, out)
+		}
+	case n.Kind == yaml.MappingNode && t.Kind() == reflect.Struct:
+		fields := map[string]reflect.Type{}
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			name, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+			if !f.IsExported() || name == "-" {
+				continue
+			}
+			if name == "" {
+				name = strings.ToLower(f.Name)
+			}
+			fields[name] = f.Type
+		}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key, path := n.Content[i].Value, strings.TrimPrefix(at+"."+n.Content[i].Value, ".")
+			switch ft, ok := fields[key]; {
+			case ok:
+				unknownKeys(n.Content[i+1], ft, path, out)
+			case !clrIgnored[key] && key != "<<":
+				*out = append(*out, path)
+			}
+		}
+	}
 }
 
 // AutoUpdates reports whether the installed system updates itself: the
@@ -812,6 +879,10 @@ func LoadWith(path string, aliases []*StorageAlias) (*Config, error) {
 	var c Config
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err == nil {
+		unknownKeys(&doc, reflect.TypeOf(c), "", &c.unknown)
 	}
 next:
 	for _, a := range aliases {

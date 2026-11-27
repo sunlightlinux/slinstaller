@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -150,4 +152,47 @@ func TestValidateMapperNamesUnique(t *testing.T) {
 	arr.TargetMedia[0].Children = append(arr.TargetMedia[0].Children,
 		&Media{Name: "vda3", Type: "crypt", FsType: "ext4", Mountpoint: "/", Size: "rest"})
 	validateWants(t, "array named root", arr, "vda3 and raid root would both be opened as /dev/mapper/cryptroot")
+}
+
+// A key no field reads loads (a clr-installer config must keep working)
+// but is listed, with its path, so a typo is not silently dropped. The
+// clr-installer keys slinstaller knows and ignores are not listed.
+func TestUnknownKeysAreListed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(path, []byte(`
+telemetry: true
+hostnme: box
+stage-hooks:
+  partition: [{cmd: "true", chrot: true}]
+targetMedia:
+- name: sda
+  type: disk
+  model: 'Ultra USB 3.0'
+  majMin: "8:32"
+  ro: "false"
+  children:
+  - {name: sda1, type: part, fstype: vfat, mountpoint: /boot, size: 512M, rm: "false"}
+  - &root {name: sda2, type: crypt, fstype: ext4, mountpoint: /, size: 0, encryptd: true}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := strings.Join(c.UnknownKeys(), " ")
+	if want := "hostnme stage-hooks.partition[0].chrot targetMedia[0].children[1].encryptd"; got != want {
+		t.Errorf("UnknownKeys = %q, want %q", got, want)
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+
+	clean, err := Load("testdata/real-example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k := clean.UnknownKeys(); len(k) != 0 {
+		t.Errorf("a clr-installer config's ignored keys were listed: %v", k)
+	}
 }

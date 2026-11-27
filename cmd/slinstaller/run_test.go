@@ -258,6 +258,17 @@ func TestDryRun(t *testing.T) {
 		t.Error("an unparseable --swap-file-size was accepted")
 	}
 
+	// A key nothing reads is warned about, and the dry run goes on.
+	typo := filepath.Join(dir, "typo.yaml")
+	data, _ := os.ReadFile(path)
+	if err := os.WriteFile(typo, append(data, "encryptd: true\n"...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut, err = runWith(t, "", typo)
+	if err != nil || !strings.Contains(errOut, "warning: config key encryptd is not one slinstaller knows") {
+		t.Errorf("unknown key: %v\n%s", err, errOut)
+	}
+
 	// A config that cannot be planned is refused.
 	bad := plainConfig()
 	bad.TargetMedia[0].Children[2].FsType = "ntfs"
