@@ -1074,6 +1074,10 @@ func ValidHostname(h string) error {
 	return nil
 }
 
+// SizeBytes parses a size as the config does ("60G", "59.5G", "512M"),
+// for a front-end to read one the same way the install will.
+func SizeBytes(s string) (uint64, error) { return parseSize(s) }
+
 // ValidSwapSize checks a swap size a front-end was given: "auto", or a
 // size with a unit, more than nothing. ("0" means "fill the disk" for a partition,
 // which a swap before the root cannot.)

@@ -426,7 +426,9 @@ func TestSafeInstallOffersToShrink(t *testing.T) {
 		t.Errorf("offered size = %q", m.input.Value())
 	}
 	// A size that is not one, that does not shrink, or that frees too little.
-	for size, want := range map[string]string{"lots": "not a size", "200G": "would not shrink it", "118G": "frees too little"} {
+	for size, want := range map[string]string{"lots": "not a size", "200G": "would not shrink it", "118G": "frees too little",
+		"60000": "not a size"} { // a bare number: bytes, refused at Install before
+
 		got := send(typeText(m, size), enter)
 		if got.popup != popupShrink || !strings.Contains(got.popupErr, want) || len(got.parts) != 0 {
 			t.Errorf("size %q: popup %d, error %q", size, got.popup, got.popupErr)
@@ -436,6 +438,10 @@ func TestSafeInstallOffersToShrink(t *testing.T) {
 		t.Error("Esc did not cancel the shrink")
 	}
 
+	// A decimal size, as the config takes it, in whole MiB.
+	if half := send(typeText(m, "59.5G"), enter); half.popup != popupNone || len(half.parts) != 3 || half.parts[1].Resize != "60928M" {
+		t.Errorf("59.5G: popup %d, error %q, parts %+v", half.popup, half.popupErr, half.parts)
+	}
 	done := send(typeText(m, "60G"), enter)
 	if done.popup != popupNone || done.view != viewHub || !done.safeInstall || len(done.parts) != 3 {
 		t.Fatalf("after choosing a size: popup %d view %d parts %+v", done.popup, done.view, done.parts)

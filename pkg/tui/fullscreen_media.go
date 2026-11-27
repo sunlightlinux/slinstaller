@@ -376,10 +376,12 @@ func (m model) updateShrinkPopup(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		v := strings.TrimSpace(m.input.Value())
-		size, err := storage.ParseSize(v)
+		// Read as the install reads it (59.5G is a size), and with a unit:
+		// a bare number was taken as bytes here and refused at Install.
+		size, err := config.SizeBytes(v)
 		p := m.shrinkPart
 		switch {
-		case err != nil || size == 0:
+		case err != nil || size < 1<<20 || strings.Trim(v, "0123456789.") == "":
 			m.popupErr = "not a size (e.g. 60G)"
 			return m, nil
 		case size >= p.Size:
@@ -397,7 +399,8 @@ func (m model) updateShrinkPopup(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.parts = []partEntry{
 			{Name: strings.TrimPrefix(m.shrinkESP, "/dev/"), Type: "part", FS: "vfat", Mount: "/boot/efi", Preserve: true},
-			{Name: p.Name, Type: "part", FS: p.FsType, Preserve: true, Resize: v},
+			// In whole MiB, as the shrink is carried out.
+			{Name: p.Name, Type: "part", FS: p.FsType, Preserve: true, Resize: fmt.Sprintf("%dM", size>>20)},
 			// No start: it goes in the room the shrink leaves.
 			{Name: partDevName(disk.Name, num), Type: "part", FS: "ext4", Mount: "/", Create: true},
 		}
