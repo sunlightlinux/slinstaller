@@ -12,6 +12,13 @@ change.
 
 ### Fixed
 
+- **Mountpoints are checked for shape.** They were compared and written
+  to fstab as given: `/home/` and `/home` both passed as different
+  mountpoints, `/boot/../tmp` passed, and `/a b` produced a broken fstab
+  line. A mountpoint now has to be a clean absolute path without spaces
+  or control characters, and not under `/proc`, `/sys`, `/dev` or `/run`,
+  on partitions, logical volumes, RAID arrays and their partitions, and
+  btrfs subvolumes alike.
 - **A swap or vfat partition could pass for the root.** Any entry
   mounted at `/` was counted as the root, so `{fstype: swap, mountpoint: /}`
   validated and the install had no root filesystem. A swap with a

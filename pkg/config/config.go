@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/sunlightlinux/slinstaller/pkg/mdadm"
 	"github.com/sunlightlinux/slinstaller/pkg/network"
@@ -1331,6 +1332,8 @@ func (c *Config) Validate() error {
 		if mnt != "" {
 			if !strings.HasPrefix(mnt, "/") {
 				add("%s: mountpoint %q is not absolute", where, mnt)
+			} else if p := mountpointProblem(mnt); p != "" {
+				add("%s: %s", where, p)
 			}
 			if seen[mnt] {
 				add("%s: mountpoint %q is used more than once", where, mnt)
@@ -1386,6 +1389,8 @@ func (c *Config) Validate() error {
 				main = true
 			case !strings.HasPrefix(sv.Mountpoint, "/"):
 				add("%s: subvolume %q: mountpoint %q is not absolute", where, sv.Name, sv.Mountpoint)
+			case mountpointProblem(sv.Mountpoint) != "":
+				add("%s: subvolume %q: %s", where, sv.Name, mountpointProblem(sv.Mountpoint))
 			case seen[sv.Mountpoint]:
 				add("%s: mountpoint %q is used more than once", where, sv.Mountpoint)
 			default:
@@ -2172,6 +2177,27 @@ func lvParts(vg string, children []*Media) []storage.Partition {
 		lvs = append(lvs, lp)
 	}
 	return lvs
+}
+
+// mountpointProblem says what is wrong with an absolute mountpoint, or "".
+// Mountpoints are compared and written to fstab as given, so each has to
+// be one clean path fstab can carry (/home, not /home/ or /boot/../home);
+// the API filesystems are mounted by the system itself.
+func mountpointProblem(m string) string {
+	if clean := filepath.Clean(m); clean != m {
+		return fmt.Sprintf("mountpoint %q is not a clean path (write %q)", m, clean)
+	}
+	for _, r := range m {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return fmt.Sprintf("mountpoint %q has a space or control character, which fstab cannot carry", m)
+		}
+	}
+	for _, api := range []string{"/proc", "/sys", "/dev", "/run"} {
+		if m == api || strings.HasPrefix(m, api+"/") {
+			return fmt.Sprintf("mountpoint %q is under %s, which the system mounts itself", m, api)
+		}
+	}
+	return ""
 }
 
 // cryptMapName is the LUKS mapper name for an encrypted partition,

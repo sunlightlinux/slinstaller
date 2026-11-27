@@ -66,3 +66,61 @@ func raidWithSpareESP() *Config {
 	}
 	return c
 }
+
+// A mountpoint is compared and written to fstab as given: it has to be
+// one clean path, and not one of the system's own mounts. Every entry
+// that carries one is checked.
+func TestValidateMountpointShape(t *testing.T) {
+	part := func(mnt string) *Config {
+		return sdaLayout(
+			&Media{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			&Media{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/home", Size: "1G"},
+			&Media{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: mnt, Size: "1G"},
+			&Media{Name: "sda4", Type: "part", FsType: "ext4", Mountpoint: "/", Size: "rest"},
+		)
+	}
+	for mnt, want := range map[string]string{
+		"/srv":         "",
+		"/home/":       `"/home/" is not a clean path (write "/home")`,
+		"/boot/../tmp": "not a clean path",
+		"//srv":        "not a clean path",
+		"/a b":         "space or control character",
+		"/a\tb":        "space or control character",
+		"/a\x01":       "space or control character",
+		"/proc":        "under /proc",
+		"/sys/fs":      "under /sys",
+		"/dev":         "under /dev",
+		"/run/media":   "under /run",
+		"/devices":     "",
+		"/running":     "",
+	} {
+		validateWants(t, "partition at "+mnt, part(mnt), want)
+	}
+
+	// Logical volumes, RAID arrays, RAID partitions and btrfs subvolumes
+	// carry mountpoints too.
+	lv := part("/srv")
+	lv.TargetMedia[0].Children[2] = &Media{Name: "sda3", Type: "lvm", VolumeGroup: "vg", Size: "2G",
+		Children: []*Media{{Name: "data", FsType: "ext4", Mountpoint: "/data/", Size: "1G"}}}
+	validateWants(t, "logical volume", lv, "sda3/data: mountpoint \"/data/\" is not a clean path")
+
+	arr := raidConfig()
+	arr.Raid = append(arr.Raid, &RaidArray{Name: "srv", Level: "1", FsType: "ext4", Mountpoint: "/run/srv"})
+	arr.TargetMedia[0].Children[1].Size = "1G"
+	arr.TargetMedia[0].Children = append(arr.TargetMedia[0].Children, &Media{Name: "vda3", Type: "raid", Raid: "srv", Size: "rest"})
+	arr.TargetMedia[1].Children[0].Size = "1G"
+	arr.TargetMedia[1].Children = append(arr.TargetMedia[1].Children, &Media{Name: "vdb2", Type: "raid", Raid: "srv", Size: "rest"})
+	validateWants(t, "raid array", arr, "raid srv: mountpoint \"/run/srv\" is under /run")
+
+	rp := raidConfig()
+	rp.Raid[0] = &RaidArray{Name: "root", Level: "1", Partitions: []*Media{
+		{FsType: "ext4", Mountpoint: "/", Size: "10G"},
+		{FsType: "ext4", Mountpoint: "/var/./log", Size: "rest"},
+	}}
+	validateWants(t, "raid partition", rp, "raid root partition 2: mountpoint \"/var/./log\" is not a clean path")
+
+	sv := part("/srv")
+	sv.TargetMedia[0].Children[3] = &Media{Name: "sda4", Type: "part", FsType: "btrfs", Mountpoint: "/", Size: "rest",
+		Subvolumes: []*Subvolume{{Name: "@", Mountpoint: "/"}, {Name: "@log", Mountpoint: "/var/log "}}}
+	validateWants(t, "subvolume", sv, "subvolume \"@log\": mountpoint \"/var/log \" has a space")
+}
