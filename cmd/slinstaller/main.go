@@ -114,6 +114,8 @@ func run(args []string) error {
 	fs.StringVar(&arch, "arch", "", "XBPS_TARGET_ARCH for the base system (default: host architecture)")
 	fs.StringVar(&pkgs, "packages", defaultPackages, "comma-separated base packages to install")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
+	var completion string
+	fs.StringVar(&completion, "completion", "", "print a shell completion script for bash or fish, and exit")
 	var listDisks bool
 	fs.BoolVar(&listDisks, "list-disks", false, "list the machine's disks and exit")
 	var textUI bool
@@ -207,6 +209,10 @@ func run(args []string) error {
 			return nil
 		}
 		return err
+	}
+
+	if completion != "" {
+		return printCompletion(os.Stdout, fs, completion)
 	}
 
 	if showVersion {

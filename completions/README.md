@@ -3,8 +3,16 @@
 Shell completion scripts for the slinstaller command line (bash, zsh,
 fish), as in slinit's `completions/`.
 
-Empty for now. The command line is no longer just a config path and
-`--apply`: it has about 45 flags (`slinstaller --help` lists them, among
-them `--resume-from <stage>` and `--through <stage>`, whose stage names
-are worth completing), so completion scripts are due. None is written or
-generated yet.
+`slinstaller.bash` and `slinstaller.fish` complete every flag, the stage
+names after `--through` and `--resume-from`, and config files otherwise.
+They are generated from the flags themselves:
+
+```sh
+slinstaller --completion bash > completions/slinstaller.bash
+slinstaller --completion fish > completions/slinstaller.fish
+```
+
+and a test fails when a shipped script no longer matches what the binary
+generates. Install them as `/usr/share/bash-completion/completions/slinstaller`
+and `/usr/share/fish/vendor_completions.d/slinstaller.fish`; zsh can use
+the bash one through `bashcompinit`.

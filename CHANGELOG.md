@@ -17,6 +17,11 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 ### Changed
 
+- **Shell completions.** `slinstaller --completion bash|fish` prints a
+  completion script made from the flags themselves (stage names after
+  `--through`/`--resume-from`, config files otherwise); the generated
+  scripts ship in `completions/`, and a test keeps them current.
+
 **Confirming and stopping**
 
 - The full-screen confirmation selects **Cancel** to begin with: one Enter
