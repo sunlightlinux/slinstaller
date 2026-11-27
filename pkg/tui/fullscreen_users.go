@@ -151,7 +151,14 @@ func (m model) updateUserForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.userForm.Login = v
 		case userStepName: // optional
-			m.userForm.UserName = strings.TrimSpace(m.input.Value())
+			v := strings.TrimSpace(m.input.Value())
+			// Refused by Validate (useradd -c takes no colon); said here,
+			// where it is typed, rather than at Install.
+			if strings.Contains(v, ":") {
+				m.formErr = "the full name cannot hold a colon"
+				return m, nil
+			}
+			m.userForm.UserName = v
 		case userStepPassword: // not trimmed
 			if err := config.ValidPassword(m.input.Value()); err != nil {
 				m.formErr = err.Error()

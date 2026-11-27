@@ -23,6 +23,10 @@ func TestManageUsers(t *testing.T) {
 	if !strings.Contains(viewOf(m), "User Name") {
 		t.Errorf("name step:\n%s", viewOf(m))
 	}
+	// A colon, which useradd refuses, is refused where it is typed.
+	if got := send(typeText(m, "Ion: Pop"), enter); got.formStep != m.formStep || !strings.Contains(got.formErr, "colon") {
+		t.Errorf("a colon in the full name: step %d err %q", got.formStep, got.formErr)
+	}
 	m = send(typeText(m, "Ion Pop"), enter)
 	m = send(typeText(m, "correct horse"), enter)
 	if !strings.Contains(viewOf(m), "Confirm Password") {
