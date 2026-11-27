@@ -122,11 +122,25 @@ jobs:
 
       - name: Fuzz every target
         run: |
+          set -o pipefail
           n=0
           for pkg in $(go list ./...); do
             for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
               echo "::group::$pkg $target"
-              go test -run '^$' -fuzz "^${target}\$" -fuzztime 20s "$pkg"
+              # The fuzz engine itself can fail a clean run with "context
+              # deadline exceeded" when -fuzztime ends while a worker is
+              # mid-call (seen once on a commit that passed elsewhere). A
+              # real find always writes its input to testdata/fuzz; only a
+              # failure without one is run again, once.
+              for try in 1 2; do
+                if go test -run '^$' -fuzz "^${target}\$" -fuzztime 20s "$pkg" 2>&1 | tee fuzz.out; then
+                  break
+                fi
+                if grep -q 'Failing input written' fuzz.out || ! grep -q 'context deadline exceeded' fuzz.out || [ "$try" = 2 ]; then
+                  exit 1
+                fi
+                echo "::warning::$pkg $target: engine deadline with no failing input, running again"
+              done
               echo "::endgroup::"
               n=$((n + 1))
             done
