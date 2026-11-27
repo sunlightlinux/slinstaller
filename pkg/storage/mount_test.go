@@ -186,3 +186,29 @@ func TestReadRootFileWantsTheRoot(t *testing.T) {
 		t.Errorf("ReadRootFile with only /boot: %v", err)
 	}
 }
+
+// A look at a filesystem on a device set read-only skips its journal or
+// log, keeping the options it is mounted with; on anything else (not a
+// block device) the options are as they are, and a filesystem with no
+// journal gets nothing added.
+func TestLookOptions(t *testing.T) {
+	for _, c := range []struct {
+		fs, opts string
+		ro       bool
+		want     string
+	}{
+		{"ext4", "", true, "noload"},
+		{"ext3", "", true, "noload"},
+		{"xfs", "", true, "norecovery"},
+		{"f2fs", "", true, "norecovery"},
+		{"btrfs", "subvol=@", true, "subvol=@,rescue=nologreplay"},
+		{"btrfs", "subvol=@", false, "subvol=@"},
+		{"ext4", "", false, ""},
+		{"ext2", "", true, ""},
+		{"vfat", "umask=0077", true, "umask=0077"},
+	} {
+		if got := lookOptions(c.fs, c.opts, c.ro); got != c.want {
+			t.Errorf("lookOptions(%q, %q, %v) = %q, want %q", c.fs, c.opts, c.ro, got, c.want)
+		}
+	}
+}

@@ -325,17 +325,11 @@ func (m *Mounter) ReadRootFile(pl *Plan, rel string) ([]byte, error) {
 		// device), it is a plain read-only mount, replay and all.
 		flags := uintptr(syscall.MS_RDONLY | syscall.MS_NOEXEC | syscall.MS_NOSUID | syscall.MS_NODEV)
 		dev, opts := p.EffectiveDevice(), p.mountData()
-		mdata := opts
-		if restore := setBlockReadOnly(dev); restore != nil {
+		restore := setBlockReadOnly(dev)
+		if restore != nil {
 			defer restore()
-			nr := map[string]string{"ext3": "noload", "ext4": "noload", "xfs": "norecovery", "btrfs": "rescue=nologreplay", "f2fs": "norecovery"}[p.Filesystem]
-			if nr != "" && opts != "" {
-				mdata = opts + "," + nr
-			} else if nr != "" {
-				mdata = nr
-			}
 		}
-		if err := syscall.Mount(dev, m.root, p.Filesystem, flags, mdata); err != nil {
+		if err := syscall.Mount(dev, m.root, p.Filesystem, flags, lookOptions(p.Filesystem, opts, restore != nil)); err != nil {
 			// %v, not %w: a device node not there is ENOENT, which
 			// would read as the file not being there — "nothing to
 			// resume" for a target that cannot be looked at.
@@ -348,6 +342,21 @@ func (m *Mounter) ReadRootFile(pl *Plan, rel string) ([]byte, error) {
 		return data, err
 	}
 	return nil, fmt.Errorf("storage: the plan has no root filesystem")
+}
+
+// lookOptions is the mount data for a read-only look at a filesystem of
+// type fs mounted with opts: on a device set read-only, with the option
+// that skips its journal or log (without it a dirty one does not mount on
+// a read-only device); elsewhere opts as they are.
+func lookOptions(fs, opts string, roDevice bool) string {
+	nr := map[string]string{"ext3": "noload", "ext4": "noload", "xfs": "norecovery", "btrfs": "rescue=nologreplay", "f2fs": "norecovery"}[fs]
+	switch {
+	case !roDevice || nr == "":
+		return opts
+	case opts == "":
+		return nr
+	}
+	return opts + "," + nr
 }
 
 // setBlockReadOnly sets a block device read-only (BLKROSET) and returns
