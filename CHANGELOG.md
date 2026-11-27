@@ -55,6 +55,11 @@ change.
 
 ### Fixed
 
+- `--resume-from` after a reboot of the live system failed at the mount:
+  nothing re-opened the encrypted volumes, assembled the arrays or
+  activated the volume groups. A resume now brings back whatever of that
+  stack is missing, and asks for the passphrase once (it is an existing
+  one, not a new one to type twice).
 - A static address applied to the live system from the full-screen
   installer flushed the interface's IPv6 link-local address too; only
   global addresses are flushed now.

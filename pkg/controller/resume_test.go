@@ -389,3 +389,36 @@ func TestCleanupPutsTheTargetsResolvConfBack(t *testing.T) {
 		t.Error("the set-aside copy was left behind")
 	}
 }
+
+// A resume after a reboot finds nothing of the stack the first attempt
+// built: it opens the encrypted volumes, assembles the arrays and
+// activates the volume groups before mounting.
+func TestResumeReassemblesTheStack(t *testing.T) {
+	args := fakeCryptsetup(t)
+	var r recorder
+	in, _ := cryptInstaller(t, lvmConfig("/boot", true), &r)
+	in.opts.ResumeFrom, in.opts.Passphrase = "bootloader", "a long passphrase"
+	if err := in.reassemble(); err != nil {
+		t.Fatal(err)
+	}
+	opened, _ := os.ReadFile(filepath.Join(args, "args"))
+	if !strings.Contains(string(opened), "open /dev/sda2 cryptvg0") && !strings.Contains(string(opened), "luksOpen /dev/sda2 cryptvg0") {
+		t.Errorf("the encrypted PV was not opened:\n%s", opened)
+	}
+	if !strings.Contains(r.flat(), "vgchange -ay vg0") {
+		t.Errorf("the volume group was not activated:\n%s", r.flat())
+	}
+	// No passphrase, nothing can be opened: said so.
+	in.opts.Passphrase = ""
+	wantErr(t, in.reassemble(), "resuming needs its passphrase")
+
+	r = recorder{}
+	raid := stagedInstaller(t, raidConfig(), &r)
+	raid.opts.ResumeFrom = "bootloader"
+	if err := raid.reassemble(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.flat(), "mdadm --assemble /dev/md0 ") {
+		t.Errorf("the array was not assembled:\n%s", r.flat())
+	}
+}

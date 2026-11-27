@@ -873,7 +873,9 @@ restart:
 			// Read it with echo off so the passphrase is not shown on screen,
 			// and on a terminal twice, as a typo here locks the disk. A pipe
 			// gives it once, as it always has.
-			if isTerminal(os.Stdin) {
+			// A resume opens volumes that exist, with the passphrase they
+			// have: asked once, not as a new one to be typed twice.
+			if isTerminal(os.Stdin) && !resume {
 				if opts.Passphrase, err = tui.PromptNewPassphrase(stdin, os.Stderr); err != nil {
 					return err
 				}

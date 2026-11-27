@@ -465,6 +465,66 @@ func (in *installer) partition() error {
 	return storage.RunCommands(mkfs, in.opts.Runner)
 }
 
+// reassemble brings back, for a resumed install, the stack the first
+// attempt built under its filesystems, where it is not there any more —
+// after a reboot of the live system, nothing is: encrypted partitions
+// opened, arrays assembled from their members, encrypted arrays opened,
+// volume groups activated, in that order. Without it a resume after a
+// reboot failed at the mount with "no such file or directory".
+func (in *installer) reassemble() error {
+	gone := func(dev string) bool {
+		_, err := os.Stat(dev)
+		return err != nil
+	}
+	open := func(onArrays bool) error {
+		for _, p := range in.plan.Parts {
+			if !p.Encrypted || p.Raid != onArrays || !gone(p.EffectiveDevice()) {
+				continue
+			}
+			if in.opts.Passphrase == "" {
+				return fmt.Errorf("%s is encrypted: resuming needs its passphrase", p.Device)
+			}
+			if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase, in.output()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := open(false); err != nil {
+		return err
+	}
+	var cmds [][]string
+	for _, p := range in.plan.Parts {
+		if p.Raid && gone(storage.RaidDevice(p.RaidName)) {
+			cmds = append(cmds, append([]string{"mdadm", "--assemble", storage.RaidDevice(p.RaidName)}, append(append([]string{}, p.RaidMembers...), p.RaidSpares...)...))
+		}
+	}
+	if err := storage.RunCommands(cmds, in.opts.Runner); err != nil {
+		return err
+	}
+	if len(cmds) > 0 {
+		in.settle()
+	}
+	if err := open(true); err != nil {
+		return err
+	}
+	cmds = nil
+	seen := map[string]bool{}
+	for _, p := range in.plan.Parts {
+		if p.LV && !seen[p.VGName] && gone(p.EffectiveDevice()) {
+			seen[p.VGName] = true
+			cmds = append(cmds, []string{"vgchange", "-ay", p.VGName})
+		}
+	}
+	if err := storage.RunCommands(cmds, in.opts.Runner); err != nil {
+		return err
+	}
+	if len(cmds) > 0 {
+		in.settle()
+	}
+	return nil
+}
+
 // output is where sub-command output that cannot go through Runner (the
 // stdin-fed cryptsetup) is written: the configured Output, or stderr.
 func (in *installer) output() io.Writer {
@@ -522,6 +582,8 @@ func (in *installer) mount() error {
 		if err := storage.CreateSubvolumes(in.plan, in.opts.Runner); err != nil {
 			return err
 		}
+	} else if err := in.reassemble(); err != nil {
+		return err
 	}
 	if err := in.mnt.MountAll(in.plan); err != nil {
 		return err
