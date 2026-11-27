@@ -60,8 +60,10 @@ var doneButtons = []struct {
 // down; an error aborts as before.
 func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan) (back bool, err error) {
 	ch := make(chan tea.Msg, 1024)
+	stop := make(chan struct{})
+	opts.Stop = stop
 	m := installModel{
-		cfg: cfg, opts: opts, disk: plan.Disk, ch: ch,
+		cfg: cfg, opts: opts, disk: plan.Disk, ch: ch, stop: stop,
 		total: 12, // the controller's stage count; the first update corrects it
 		bar:   progress.New(progress.WithSolidFill(barFill(termenv.ColorProfile()))),
 		// ASCII frames: the console font has no braille or box spinner glyphs.
@@ -409,6 +411,11 @@ type installModel struct {
 	err         error
 	cancelled   bool
 
+	// stop is closed by Ctrl+C while the install runs: the controller stops
+	// before its next stage and cleans up, and the screen waits for that.
+	stop     chan struct{}
+	stopping bool
+
 	steps   []installStep // every stage, with how far it has got
 	spin    spinner.Model // turns beside the running stage
 	details bool          // the full command log is on screen
@@ -456,12 +463,17 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case phaseRunning:
 			// Keys do nothing to the install itself: a half-done install
 			// must not be abandoned by a stray keypress. Enter (the Details
-			// button) or d shows the full log. Ctrl+C still quits the
-			// program (the goroutine is left to finish its current command).
+			// button) or d shows the full log. Ctrl+C asks the install to
+			// stop once the step running is done; it then unmounts and the
+			// final screen says where it stopped. Quitting here instead left
+			// the command running orphaned, the target mounted and no
+			// diagnostics written.
 			switch msg.String() {
 			case "ctrl+c":
-				m.cancelled = true
-				return m, tea.Quit
+				if !m.stopping && m.stop != nil {
+					m.stopping = true
+					close(m.stop)
+				}
 			case "enter", "d":
 				m.details, m.scroll = true, 0
 			}
@@ -693,7 +705,11 @@ func (m installModel) runningView() string {
 		body = append(body, lineBG.Width(w).Render(spread(left, stepWait.Render(m.stepTime(s)), w)))
 	}
 	btns := []string{buttonLine(w, button{"Details", btnSel})}
-	return frameScreenButtons(m.width, m.height, body, btns, "[Enter] or [d] show the full log - please wait")
+	hint := "[Enter] or [d] show the full log - [Ctrl+C] stop after this step"
+	if m.stopping {
+		hint = "Stopping after the current step - please wait"
+	}
+	return frameScreenButtons(m.width, m.height, body, btns, hint)
 }
 
 // detailsView is the full command log, scrollable, behind the Details

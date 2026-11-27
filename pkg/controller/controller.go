@@ -18,6 +18,7 @@ package controller
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -109,6 +110,12 @@ type Options struct {
 	// own view so the output does not leak onto the terminal; nil sends it
 	// to stderr.
 	Output io.Writer
+
+	// Stop, when closed, asks the install to stop before its next stage.
+	// The stage running finishes first — a command cut off half-way
+	// (mkfs, xbps) leaves worse than one let finish — then the target is
+	// unmounted and Install returns an error wrapping ErrStopped.
+	Stop <-chan struct{}
 
 	// Progress, if set, is called as each stage starts with the number of
 	// stages already completed, the total to run, and the stage's name —
@@ -223,6 +230,9 @@ func StageNames() []string {
 	return names
 }
 
+// ErrStopped is what an install asked to stop (Options.Stop) returns.
+var ErrStopped = errors.New("stopped by the operator")
+
 func (in *installer) run() error {
 	stages := in.stages()
 
@@ -242,6 +252,12 @@ func (in *installer) run() error {
 	}
 
 	for i, s := range stages[:limit] {
+		select {
+		case <-in.opts.Stop:
+			_ = in.mnt.UnmountAll()
+			return fmt.Errorf("controller: %w before %s", ErrStopped, s.name)
+		default:
+		}
 		if in.opts.Progress != nil {
 			in.opts.Progress(i, limit, s.name)
 		}

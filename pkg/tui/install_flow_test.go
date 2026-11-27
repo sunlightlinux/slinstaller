@@ -109,8 +109,24 @@ func TestInstallIgnoresKeysWhileRunning(t *testing.T) {
 			t.Errorf("%s while installing changed the install", k)
 		}
 	}
-	if got, cmd := stepInstall(m, keyNamed("ctrl+c")); !got.cancelled || cmd == nil {
-		t.Error("Ctrl+C did not quit")
+	// Ctrl+C asks the install to stop after the step running, and stays
+	// on screen until it has; pressed again it does no more (and does not
+	// close the channel twice).
+	m.stop = make(chan struct{})
+	got, cmd := stepInstall(m, keyNamed("ctrl+c"))
+	if got.cancelled || cmd != nil || !got.stopping || got.phase != phaseRunning {
+		t.Errorf("Ctrl+C while installing: cancelled=%v stopping=%v cmd=%v", got.cancelled, got.stopping, cmd != nil)
+	}
+	select {
+	case <-m.stop:
+	default:
+		t.Error("Ctrl+C did not ask the install to stop")
+	}
+	if again, cmd := stepInstall(got, keyNamed("ctrl+c")); again.cancelled || cmd != nil {
+		t.Error("a second Ctrl+C quit")
+	}
+	if !strings.Contains(got.runningView(), "Stopping after the current step") {
+		t.Error("the screen does not say it is stopping")
 	}
 	if got, _ := stepInstall(m, keyNamed("d")); !got.details {
 		t.Error("d did not open the log")
@@ -274,8 +290,9 @@ func TestLogViewScrollingAndColours(t *testing.T) {
 	if got, _ := stepInstall(m, keyNamed("q")); got.details {
 		t.Error("q did not close the log")
 	}
-	if got, cmd := stepInstall(m, keyNamed("ctrl+c")); !got.cancelled || cmd == nil {
-		t.Error("Ctrl+C did not quit from the log")
+	m.stop = make(chan struct{})
+	if got, cmd := stepInstall(m, keyNamed("ctrl+c")); got.cancelled || cmd != nil || !got.stopping {
+		t.Error("Ctrl+C in the log did not ask the install to stop")
 	}
 
 	// The view keeps a bounded amount of output.

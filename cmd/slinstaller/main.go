@@ -15,8 +15,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -913,7 +915,7 @@ restart:
 	} else if !confirm(stdin, plan) {
 		return fmt.Errorf("aborted")
 	}
-	err = controller.Install(cfg, opts)
+	err = installStoppable(cfg, opts)
 	report.finish(err)
 	if err != nil {
 		reportFailure(diagnostics, cfg, logPath, err)
@@ -951,6 +953,31 @@ func powerAfter(action string, delay int) error {
 		fmt.Fprintf(os.Stderr, "install finished: %s...\n", action)
 	}
 	return powerCommand(action)
+}
+
+// installStoppable runs the install with SIGINT and SIGTERM turned into a
+// request to stop after the current stage. Left to their default, Ctrl+C
+// killed the installer between two commands: the target stayed mounted,
+// the encrypted volumes open, and no diagnostics were written. (Ctrl+C on
+// the terminal also reaches the command running, which then fails; the
+// stage fails with it and the usual cleanup runs.)
+func installStoppable(cfg *config.Config, opts controller.Options) error {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigs)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-sigs:
+			fmt.Fprintln(os.Stderr, "\nStopping after the current step...")
+			close(stop)
+		case <-done:
+		}
+	}()
+	opts.Stop = stop
+	return controller.Install(cfg, opts)
 }
 
 // checkLocale rejects a timezone or keymap the live system does not know.

@@ -12,6 +12,11 @@ change.
 
 ### Fixed
 
+- Ctrl+C while installing quit the program at once: the command running
+  was orphaned, the target stayed mounted and no diagnostics were written.
+  It now asks the install to stop after the current step (full-screen and
+  text alike, and SIGTERM too); the install unmounts, and the failure is
+  reported with its diagnostics.
 - Reinstalling over a RAID array or volume group spanning several disks
   failed while releasing the disks: each disk's teardown stopped the
   shared array again (`mdadm --stop /dev/md127`: no such device). The

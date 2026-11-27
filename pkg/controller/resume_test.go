@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -297,5 +298,26 @@ func TestResolvConfOfTheTargetIsKept(t *testing.T) {
 	again.opts.Root = in.opts.Root
 	if err := again.copyResolv(live); err != nil || again.resolvSaved != "" {
 		t.Errorf("a resume set its own copy aside: %q, %v", again.resolvSaved, err)
+	}
+}
+
+// Asked to stop, the install finishes the stage running, runs no further
+// one, and says it was stopped.
+func TestStopBetweenStages(t *testing.T) {
+	stop := make(chan struct{})
+	var r recorder
+	var stages []string
+	err := Install(twoPartConfig(), Options{Through: "partition", Runner: r.run, Devices: noDevices, Stop: stop,
+		Progress: func(done, total int, stage string) {
+			stages = append(stages, stage)
+			if stage == "pre-install" {
+				close(stop)
+			}
+		}})
+	if !errors.Is(err, ErrStopped) || !strings.Contains(err.Error(), "before ") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(stages) != 1 || strings.Contains(r.flat(), "parted") {
+		t.Errorf("went on past the stop: stages %v\n%s", stages, r.flat())
 	}
 }
