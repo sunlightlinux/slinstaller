@@ -41,6 +41,14 @@ change.
   name and Backspace removes a whole character (a pasted "Zürich" was
   ignored and Enter chose the list's first entry); Test Network Settings
   goes through the proxy typed in the wizard.
+- **The installed system's primary console is the live one's.** A
+  `console=` repeated last on the live command line kept its first place,
+  so `console=tty0 console=ttyS0,115200n8 console=tty0` installed a
+  system whose `/dev/console` was the serial port.
+- `crypt-options`, `mount-options`, mountpoints and subvolumes holding a
+  space or a line break are refused with `skipValidationAll` too: they
+  split into two kernel arguments or shifted the fields of fstab and
+  crypttab.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 
