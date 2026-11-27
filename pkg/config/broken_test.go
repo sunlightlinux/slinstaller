@@ -76,6 +76,25 @@ func TestConfigWithoutADiskLayout(t *testing.T) {
 	}
 }
 
+// A targetMedia entry that carries partitions but is not type disk was
+// skipped with them: a second disk written `type: Disk` (clr-installer
+// refuses the type) or `type: loop` (an image, which slinstaller does not
+// install to) installed without its /home and without a word.
+func TestLayoutOnANonDiskIsRefused(t *testing.T) {
+	for _, typ := range []string{"Disk", "loop", "part"} {
+		c := btrfsConfig()
+		c.TargetMedia = append(c.TargetMedia, &Media{Name: "sdb", Type: typ, Children: []*Media{
+			{Name: "sdb1", Type: "part", FsType: "ext4", Mountpoint: "/home"}}})
+		want := `targetMedia sdb has type "` + typ + `"`
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: Validate: %v", typ, err)
+		}
+		if _, err := c.Plan(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: Plan: %v", typ, err)
+		}
+	}
+}
+
 func TestPlanRefusesWhatItCannotLayOut(t *testing.T) {
 	disk := func(children ...*Media) *Config {
 		return &Config{TargetMedia: []*Media{{Name: "sda", Type: "disk", Children: children}}}

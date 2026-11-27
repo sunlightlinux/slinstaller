@@ -2890,8 +2890,13 @@ func (c *Config) DiskImageTarget() (*Media, error) {
 func (c *Config) installDisks() ([]*Media, error) {
 	var disks []*Media
 	for _, m := range c.TargetMedia {
-		if m == nil || (m.Type != "" && m.Type != "disk") || len(m.Children) == 0 {
+		if m == nil || len(m.Children) == 0 {
 			continue
+		}
+		// Skipped, its partitions went with it: a second disk written
+		// `type: Disk` installed without its /home, and without a word.
+		if m.Type != "" && m.Type != "disk" {
+			return nil, fmt.Errorf("config: targetMedia %s has type %q; partitions go on a disk (type: disk)", m.Name, m.Type)
 		}
 		disks = append(disks, m)
 	}

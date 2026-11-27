@@ -34,6 +34,10 @@ change.
   statically here; a value that is not a boolean (`yes`), which
   clr-installer refuses to load, was taken as static too. The first is
   DHCP now, the second refused.
+- **A layout on a targetMedia entry that is not a disk is refused.** It was
+  skipped, partitions and all: a second disk written `type: Disk` (which
+  clr-installer refuses) or `type: loop` installed without the `/home` it
+  carried, and nothing said so.
 - **The dry run shows the whole partition stage.** It printed the disk's
   own commands only: for an LVM, RAID or encrypted layout, `pvcreate`,
   `vgcreate`, `lvcreate`, `mdadm --create` and `cryptsetup luksFormat`
