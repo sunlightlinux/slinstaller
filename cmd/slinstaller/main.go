@@ -136,7 +136,7 @@ func run(args []string) error {
 	fs.BoolVar(&skipSize, "skip-validation-size", false,
 		"skip the minimum-size and disk-fit checks (same as the config's skipValidationSize)")
 	fs.BoolVar(&skipAll, "skip-validation-all", false,
-		"skip all config validation (same as the config's skipValidationAll); use with care")
+		"skip config validation, all but the safety checks (same as the config's skipValidationAll); use with care")
 	var forceDestructive bool
 	fs.BoolVar(&forceDestructive, "force-destructive", false,
 		"wipe a target disk even when a RAID array or LVM volume group on it also uses another disk, which that breaks (clr-installer's flag)")

@@ -33,7 +33,7 @@ complete -c slinstaller -l report-url -r -d 'POST the install\'s progress to thi
 complete -c slinstaller -l resume -d 'with --apply, continue an install that failed while installing the base system'
 complete -c slinstaller -l resume-from -x -a 'base-install fstab swapfile bootloader first-boot network save-config post-install' -d 'as --resume, but from the named stage'
 complete -c slinstaller -l root -r -d 'with --apply, the target mount tree'
-complete -c slinstaller -l skip-validation-all -d 'skip all config validation'
+complete -c slinstaller -l skip-validation-all -d 'skip config validation, all but the safety checks'
 complete -c slinstaller -l skip-validation-size -d 'skip the minimum-size and disk-fit checks'
 complete -c slinstaller -l swap-file-size -r -d 'create a swap file of this size, e.g. 2G'
 complete -c slinstaller -l system-check -d 'check that this machine can install the config - tools, disks, repository - and exit without touching anything'
