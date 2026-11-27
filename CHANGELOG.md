@@ -17,6 +17,13 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 ### Changed
 
+- **Fuzzing.** Ten fuzz targets check properties, not only the absence of
+  a panic: the shared-member and teardown verdicts before a wipe, every
+  plan (with `skipValidationAll` too) naming clean device paths on the
+  disks it lists, what sh reads back from `/etc/default/grub`, the
+  network files, masking however the output is split. CI fuzzes each for
+  20 s (targets found with `go test -list`, not listed); about 70 tests
+  more kill the mutants a mutation pass found alive.
 - **Shell completions.** `slinstaller --completion bash|fish` prints a
   completion script made from the flags themselves (stage names after
   `--through`/`--resume-from`, config files otherwise); the generated
@@ -219,6 +226,20 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
   partitions. The teardown re-checks its own listing. A resume looks for
   its mark on the root mounted read-only, with no journal replayed,
   before mounting anything writable.
+- **`skipValidationAll` skips the layout checks, not the safety ones.** It
+  turned the whole config check off, and with it the only check on a
+  RAID name (`../sdz` planned `mkfs.ext4 /dev/md/../sdz`), a disk name
+  (`../sdz`, `""`), an LV or VG name, an interface name or bond mode
+  (written unquoted into `/etc/rc.local`, run by sh as root at every
+  boot) and a line break in a network field or the hostname (a new
+  directive in `dhcpcd.conf`, a new entry in `/etc/hosts`). Those are
+  refused with it set too; a layout it is meant to force through still
+  goes. A keyboard or language that is not a plain name is single-quoted
+  in `/etc/rc.conf` and `/etc/locale.conf` (`KEYMAP="us$(cmd)"` ran cmd).
+- A secret printed across the 64 KiB point of a long line with no line
+  break was shown in part; a NaN or Inf in parted's output was read as a
+  position on the disk; a volume group of physical volumes all too small
+  for LVM's own space was not checked.
 - **Intel RST/DDF containers, multipath and dmraid** are released before
   the wipe: lsblk names them "container", "mpath" and "dmraid", which
   were not taken for holders, and wipefs then failed with EBUSY after
