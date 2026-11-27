@@ -1027,6 +1027,29 @@ func (c *Config) expandAliases() {
 // breaks the line.
 var lvmNameRe = regexp.MustCompile(`^[a-zA-Z0-9+_.][a-zA-Z0-9+_.-]{0,126}$`)
 
+// validLVMName reports whether LVM takes name for a volume group, or with
+// lv for a logical volume: lvmNameRe, not "." or "..", and for a logical
+// volume none of the names LVM keeps for its own (lvm2's
+// lib/misc/lvm-string.c).
+func validLVMName(name string, lv bool) bool {
+	if !lvmNameRe.MatchString(name) || name == "." || name == ".." {
+		return false
+	}
+	if !lv {
+		return true
+	}
+	if strings.HasPrefix(name, "snapshot") || strings.HasPrefix(name, "pvmove") {
+		return false
+	}
+	for _, r := range []string{"_cdata", "_cmeta", "_corig", "_cpool", "_cvol", "_wcorig", "_mimage", "_mlog",
+		"_rimage", "_rmeta", "_tdata", "_tmeta", "_vdata", "_imeta", "_iorig", "_pmspare", "_vorigin"} {
+		if strings.Contains(name, r) {
+			return false
+		}
+	}
+	return true
+}
+
 // domainRe is a DNS domain: dot-separated labels of letters, digits and
 // hyphens.
 var domainRe = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.?$`)
@@ -1553,8 +1576,8 @@ func (c *Config) Validate() error {
 				add("%s: logical volume %q is declared twice in group %s", where, lv.Name, vg)
 			}
 			lvNames[vg+"/"+lv.Name] = true
-			if lv.Name != "" && !lvmNameRe.MatchString(lv.Name) {
-				add("%s: logical volume name %q is not one LVM takes (letters, digits and + _ . -, not starting with -)", where, lv.Name)
+			if lv.Name != "" && !validLVMName(lv.Name, true) {
+				add("%s: logical volume name %q is not one LVM takes (letters, digits and + _ . -, not starting with -, not a name LVM keeps)", where, lv.Name)
 			}
 			checkFS(lvWhere, lv.FsType, lv.Mountpoint)
 			checkMount(lvWhere, lv.FsType, lv.Mountpoint, lv.MountOptions, lv.Subvolumes, false)
@@ -1613,7 +1636,7 @@ func (c *Config) Validate() error {
 			if ch.Type == "lvm" {
 				if ch.VolumeGroup == "" {
 					add("%s: lvm partition has no volumeGroup", where)
-				} else if !lvmNameRe.MatchString(ch.VolumeGroup) {
+				} else if !validLVMName(ch.VolumeGroup, false) {
 					add("%s: volume group name %q is not one LVM takes (letters, digits and + _ . -, not starting with -)", where, ch.VolumeGroup)
 				}
 				checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "physical-volume size")
@@ -1709,7 +1732,7 @@ func (c *Config) Validate() error {
 			}
 			continue
 		}
-		if a.VolumeGroup != "" && !lvmNameRe.MatchString(a.VolumeGroup) {
+		if a.VolumeGroup != "" && !validLVMName(a.VolumeGroup, false) {
 			add("raid %s: volume group name %q is not one LVM takes", where, a.VolumeGroup)
 		}
 		if a.VolumeGroup != "" {
@@ -2347,6 +2370,27 @@ func lvmParts(disk string, i int, ch *Media) (storage.Partition, []storage.Parti
 	return pv, lvParts(ch.VolumeGroup, ch.Children), nil
 }
 
+// lvSizeRe is a size lvcreate reads as the config does: a plain or
+// decimal number with a K/M/G/T unit.
+var lvSizeRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KkMmGgTt]$`)
+
+// lvcreateSize is a logical volume's size as lvcreate -L must be given it.
+// A size with a unit is passed as written. Anything else — a bare number,
+// bytes in a config — would be read by lvcreate as MiB (1073741824 asked
+// for a pebibyte, 2e9 and 1048576.5 likewise), and a byte count it takes
+// only in multiples of 512: such a size is converted to whole MiB, rounded
+// up (lvcreate rounds up to an extent anyway).
+func lvcreateSize(s string) string {
+	if lvSizeRe.MatchString(s) {
+		return s
+	}
+	b, err := parseSize(s)
+	if err != nil {
+		return s // Validate reports it
+	}
+	return fmt.Sprintf("%dm", (b+(1<<20)-1)>>20)
+}
+
 // lvParts turns a group's declared children into its logical volumes.
 func lvParts(vg string, children []*Media) []storage.Partition {
 	var lvs []storage.Partition
@@ -2357,10 +2401,8 @@ func lvParts(vg string, children []*Media) []storage.Partition {
 		lvSize := strings.TrimSpace(lv.Size)
 		if lvSize == "" || lvSize == "0" || strings.EqualFold(lvSize, "rest") {
 			lvSize = storage.SizeRest
-		} else if strings.Trim(lvSize, "0123456789") == "" {
-			// A bare number is bytes in a config, but lvcreate -L reads it
-			// as MiB: 1073741824 asked for a pebibyte. Said in bytes.
-			lvSize += "b"
+		} else {
+			lvSize = lvcreateSize(lvSize)
 		}
 		lp := storage.Partition{
 			LV: true, VGName: vg, LVName: lv.Name,

@@ -396,7 +396,8 @@ func TestLVMNames(t *testing.T) {
 			{Name: "sda2", Type: "lvm", VolumeGroup: vg, Children: []*Media{{Name: lv, FsType: "ext4", Mountpoint: "/"}}},
 		}}}}
 	}
-	for vg, lv := range map[string]string{"my vg": "root", "vg0": "root vol", "-vg": "root", "vg1": "-x"} {
+	for vg, lv := range map[string]string{"my vg": "root", "vg0": "root vol", "-vg": "root", "vg1": "-x",
+		".": "root", "..": "root", "vg2": "snapshot", "vg3": "pvmove1", "vg4": "a_mlog"} {
 		if err := lvm(vg, lv).Validate(); err == nil || !strings.Contains(err.Error(), "not one LVM takes") {
 			t.Errorf("vg %q lv %q: %v", vg, lv, err)
 		}
@@ -420,12 +421,24 @@ func TestLVSizes(t *testing.T) {
 	if err := lv("10GB").Validate(); err == nil || !strings.Contains(err.Error(), `size "10GB" is not a byte count`) {
 		t.Errorf("10GB: %v", err)
 	}
+	// Every size without a unit lvcreate reads as the config does: in MiB.
+	for in, want := range map[string]string{"1500000000": "1431m", "2e9": "1908m", "1048576.5": "2m", "10G": "10G", "10.5G": "10.5G", "512m": "512m"} {
+		pl, err := lv(in).Plan()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range pl.Parts {
+			if p.LV && p.LVName == "data" && p.Size != want {
+				t.Errorf("LV size %q reaches lvcreate as %q, want %q", in, p.Size, want)
+			}
+		}
+	}
 	pl, err := lv("1073741824").Plan()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range pl.Parts {
-		if p.LV && p.LVName == "data" && p.Size != "1073741824b" {
+		if p.LV && p.LVName == "data" && p.Size != "1024m" {
 			t.Errorf("bare-number LV size = %q", p.Size)
 		}
 	}
