@@ -1813,6 +1813,12 @@ func (c *Config) Validate() error {
 			where = fmt.Sprintf("raid[%d]", i)
 			add("%s: array has no name", where)
 		}
+		// The name becomes /dev/md/<name> (or /dev/mdN): "../sdz" made it
+		// /dev/sdz, and mdadm --create, parted and mkfs were pointed at a
+		// disk the confirmation never named.
+		if a.Name != "" && !raidNameRe.MatchString(a.Name) {
+			add("raid %q: an array name is letters, digits and . _ - (not starting with . or -)", a.Name)
+		}
 		declared[a.Name] = true
 		if !mdadm.KnownLevel(a.Level) {
 			add("raid %s: level %q is not supported (use 0, 1, 5, 6 or 10)", where, a.Level)
@@ -2750,6 +2756,10 @@ func partNumber(name string, fallback int) int {
 	}
 	return n
 }
+
+// raidNameRe is what an array's name may be: one path component under
+// /dev/md, never "." or "..".
+var raidNameRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,31}$`)
 
 // SecretName reports whether an environment variable's name says it holds
 // a secret (API_TOKEN, DB_PASSWORD, WIFI_PSK, …): its value is masked

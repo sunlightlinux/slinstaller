@@ -622,3 +622,22 @@ func TestLVsFitTheirVG(t *testing.T) {
 		}
 	}
 }
+
+// An array's name is one component under /dev/md: "../sdz" is refused.
+func TestRaidNamePath(t *testing.T) {
+	for name, ok := range map[string]bool{"root": true, "md0": true, "data.1": true, "../sdz": false, "a/b": false, "..": false, ".x": false} {
+		c := raidConfig()
+		c.Raid[0].Name = name
+		for _, d := range c.TargetMedia {
+			for _, ch := range d.Children {
+				if ch.Type == "raid" {
+					ch.Raid = name
+				}
+			}
+		}
+		err := c.Validate()
+		if bad := err != nil && strings.Contains(err.Error(), "an array name is"); bad == ok {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+}
