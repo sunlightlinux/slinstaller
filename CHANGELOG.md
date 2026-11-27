@@ -116,7 +116,9 @@ change.
   every answer); Allow Insecure Installation goes with the plain-http
   mirror it was ticked for, not into the config unseen once the mirror
   was cleared; Installation Media marks the disk Confirm will take before
-  one is chosen.
+  one is chosen; long lists (disks, accounts, partitions, interfaces,
+  the disk chooser) scroll with the cursor instead of pushing the title
+  and the install modes off a 24-line screen.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 
