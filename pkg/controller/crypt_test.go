@@ -120,6 +120,16 @@ func TestCryptRootOnUnencryptedBoot(t *testing.T) {
 	if flat := r.flat(); !strings.Contains(flat, "chroot "+in.opts.Root+" xbps-reconfigure -fa") {
 		t.Errorf("initramfs not rebuilt for an encrypted root:\n%s", flat)
 	}
+	// With dracut in the target, only the initramfs is rebuilt: not every
+	// package's configure script again.
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "bin"), "dracut"), nil, 0o755)
+	r.cmds = nil
+	if err := in.bootloader(); err != nil {
+		t.Fatal(err)
+	}
+	if flat := r.flat(); !strings.Contains(flat, "chroot "+in.opts.Root+" dracut --regenerate-all --force") || strings.Contains(flat, "-fa") {
+		t.Errorf("initramfs rebuild with dracut there:\n%s", flat)
+	}
 }
 
 func TestCryptRootAndHomeShareOnePassphrase(t *testing.T) {

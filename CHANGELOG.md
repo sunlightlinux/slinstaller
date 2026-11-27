@@ -12,6 +12,11 @@ change.
 
 ### Changed
 
+- An encrypted, LVM or RAID install rebuilds its initramfs with `dracut
+  --regenerate-all --force` in the target instead of a full
+  `xbps-reconfigure -fa`, which re-ran every package's configure script
+  for that one purpose (tens of seconds to minutes). A target without
+  dracut still gets `-fa`.
 - The full-screen confirmation selects **Cancel** to begin with: one Enter
   no longer starts erasing a disk (Tab to Install, then Enter). It names
   every disk with its size and model, and an install that keeps the

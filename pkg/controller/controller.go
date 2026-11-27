@@ -1228,11 +1228,21 @@ func (in *installer) bootloader() error {
 	// lvm and mdraid modules and the system can assemble the root at boot.
 	// The one built during base-install predates them.
 	if encrypted || lvm.Used(in.plan) || mdadm.Used(in.plan) {
-		return storage.RunCommands(
-			[][]string{{"chroot", in.opts.Root, "xbps-reconfigure", "-fa"}},
-			in.opts.Runner)
+		return storage.RunCommands([][]string{in.initramfsCommand()}, in.opts.Runner)
 	}
 	return nil
+}
+
+// initramfsCommand rebuilds the target's initramfs for every kernel it
+// has. With dracut there, that is all it runs: `xbps-reconfigure -fa`
+// re-ran every package's configure script (a full pass, and a third
+// dracut build on top of base-install's two) for the one thing needed
+// here. Without dracut (an image built otherwise), it falls back to that.
+func (in *installer) initramfsCommand() []string {
+	if exists(filepath.Join(in.opts.Root, "usr", "bin", "dracut")) {
+		return []string{"chroot", in.opts.Root, "dracut", "--regenerate-all", "--force"}
+	}
+	return []string{"chroot", in.opts.Root, "xbps-reconfigure", "-fa"}
 }
 
 // fillSpareESPs gives each spare EFI System Partition what the firmware
