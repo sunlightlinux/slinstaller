@@ -12,6 +12,10 @@ change.
 
 ### Fixed
 
+- A staged run (`--through`) skipped the disk checks along with the tool
+  checks: it would partition and format a partition given as the disk, a
+  disk in use, or one sharing an array with another. The disk checks now
+  run whenever the partition stage does; only `--resume` goes without.
 - Ctrl+C while installing quit the program at once: the command running
   was orphaned, the target stayed mounted and no diagnostics were written.
   It now asks the install to stop after the current step (full-screen and

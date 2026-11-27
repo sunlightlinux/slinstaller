@@ -409,6 +409,19 @@ func applyChild(t *testing.T) {
 	_, err = e.run(confirmed, plainConfig(), "--force-destructive")
 	e.refused("disk in use", err, "is in use: "+testDisk+"p1 is in use as swap")
 
+	// A staged run cuts and formats the disk too: the same refusals, though
+	// it skips the tool and network checks.
+	e = newApplyEnv(t)
+	setListing(t, e.bin, `{"name":"sdz","path":"/dev/sdz","size":1000,"type":"disk","children":[
+		{"name":"slitest0","path":"`+testDisk+`","size":1000,"type":"part"}]}`)
+	_, err = e.run(confirmed, plainConfig(), "--through", "partition")
+	e.refused("staged: target is a partition", err, "is a part, not a whole disk")
+	e = newApplyEnv(t)
+	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":64000000000,"type":"disk","children":[
+		{"name":"slitest0p1","path":"`+testDisk+`p1","size":1000,"type":"part","mountpoint":"[SWAP]"}]}`)
+	_, err = e.run(confirmed, plainConfig(), "--through", "partition")
+	e.refused("staged: disk in use", err, "is in use: "+testDisk+"p1 is in use as swap")
+
 	// A RAID array shared with a disk the install does not wipe: refused
 	// unless forced, and then the tool that stops the array is needed.
 	shared := `{"name":"slitest0","path":"` + testDisk + `","size":64000000000,"type":"disk","children":[
