@@ -571,7 +571,7 @@ restart:
 		// is all refuses is for.)
 		if !resume {
 			fmt.Print(storage.FormatCommands(cmds))
-			refuses = printRelease(plan)
+			refuses = printRelease(plan, forceDestructive)
 		}
 		// A Safe install's new partitions are checked against the disk's
 		// table when it runs; the dry run says now what it would refuse,
@@ -1461,7 +1461,7 @@ func powerCommand(action string) error {
 // before partitioning (blockdev.Teardown), as the controller finds them
 // now. It is read from the live system, so it is shown apart from the
 // plan's own commands.
-func printRelease(plan *storage.Plan) (refuses bool) {
+func printRelease(plan *storage.Plan, force bool) (refuses bool) {
 	devs, err := blockdev.List()
 	if err != nil {
 		return false
@@ -1500,6 +1500,22 @@ func printRelease(plan *storage.Plan) (refuses bool) {
 			fmt.Fprintf(os.Stderr, "  (it will refuse: %s)\n", why)
 			refuses = true
 		}
+	}
+	// What --apply refuses before the confirmation, said here: the dry run
+	// otherwise invited an --apply that then refused.
+	vgs := blockdev.VolumeGroups()
+	var shared []string
+	for _, disk := range plan.DiskList() {
+		shared = append(shared, blockdev.Shared(devs, disk, plan.DiskList(), vgs)...)
+	}
+	shared = append(shared, blockdev.SharedMembers(devs, plan.DiskList())...)
+	if len(shared) > 0 && !force {
+		fmt.Fprintf(os.Stderr, "  (it will refuse, unless --force-destructive: wiping would break other disks: %s)\n", strings.Join(shared, "; "))
+		refuses = true
+	}
+	for _, c := range blockdev.VGNameClashes(devs, vgs, plan.VGNames(), plan.DiskList()) {
+		fmt.Fprintf(os.Stderr, "  (it will refuse: %s; name this install's group differently)\n", c)
+		refuses = true
 	}
 	return refuses
 }

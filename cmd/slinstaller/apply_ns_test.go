@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -499,6 +500,12 @@ func applyChild(t *testing.T) {
 	os.WriteFile(filepath.Join(e.bin, "pvs.out"), []byte("  "+testDisk+"p2:data\n  /dev/sdz1:data\n"), 0o644)
 	_, err = e.run(confirmed, plainConfig())
 	e.refused("a volume group spanning another disk", err, "volume group data also has physical volumes on /dev/sdz")
+	// The dry run says so, rather than invite an --apply that refuses.
+	dry := slices.DeleteFunc(append([]string{}, e.args...), func(a string) bool { return a == "--apply" })
+	_, dryErr, err := runWith(t, "", append(dry, writeConfig(t, e.base, plainConfig()))...)
+	if err != nil || !strings.Contains(dryErr, "it will refuse, unless --force-destructive") || !strings.Contains(dryErr, "--apply would refuse this") {
+		t.Errorf("the dry run of a wipe --apply refuses: %v\n%s", err, dryErr)
+	}
 
 	// A reuse install shrinking a member of a btrfs spanning another disk
 	// (its resize would act on devid 1, there), or formatting a PV of a
