@@ -160,12 +160,40 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply, forceDestructiv
 	if !confirm(stdin, &storage.Plan{Disk: disk, Wipe: true}) {
 		return fmt.Errorf("aborted")
 	}
+	// Checked again on a fresh listing, and the teardown made from it (as
+	// the controller's own release does): a disk swapped, or an array
+	// assembled, while the prompt waited was otherwise written over by
+	// the listing from before it.
+	now, err := blockdev.List()
+	if err != nil {
+		return err
+	}
+	if err := sameDisk(devs, now, disk); err != nil {
+		return err
+	}
+	if err := checkTargetDisks([]string{disk}, now); err != nil {
+		return fmt.Errorf("since the confirmation: %w; nothing was written", err)
+	}
+	if shared := append(blockdev.Shared(now, disk, []string{disk}, blockdev.VolumeGroups()), blockdev.SharedMembers(now, []string{disk})...); len(shared) > 0 && !forceDestructive {
+		return fmt.Errorf("since the confirmation, writing over %s would break other disks:\n  %s\nnothing was written", disk, strings.Join(shared, "\n  "))
+	}
+	cmds = diskImageCommands(now, image, disk, cfg.AllowInsecureHTTP)
 	if err := storage.RunCommands(cmds, storage.VerboseRunner); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "\n%s is written to %s.\n", filepath.Base(image), disk)
 	if action := cfg.PowerAction(); action != "" {
 		return powerAfter(action, cfg.PowerStateDelay)
+	}
+	return nil
+}
+
+// sameDisk refuses when disk, between two listings, is no longer the same
+// device (its serial, WWN or size changed: swapped while a prompt waited).
+func sameDisk(before, after []blockdev.Device, disk string) error {
+	a, b := blockdev.FindByPath(before, disk), blockdev.FindByPath(after, disk)
+	if a == nil || b == nil || a.Serial != b.Serial || a.WWN != b.WWN || a.Size != b.Size {
+		return fmt.Errorf("%s is not the disk that was confirmed any more (swapped?); nothing was written", disk)
 	}
 	return nil
 }

@@ -212,3 +212,17 @@ func applyDiskImage(t *testing.T, confirmed string) {
 	_, err = run(confirmed)
 	e.refused("no curl", err, "missing tools on the live system: curl")
 }
+
+func TestSameDisk(t *testing.T) {
+	d := func(serial string, size uint64) []blockdev.Device {
+		return []blockdev.Device{{Name: "sda", Path: "/dev/sda", Type: "disk", Serial: serial, Size: size}}
+	}
+	if err := sameDisk(d("A", 1<<30), d("A", 1<<30), "/dev/sda"); err != nil {
+		t.Error(err)
+	}
+	for _, after := range [][]blockdev.Device{d("B", 1<<30), d("A", 2<<30), nil} {
+		if err := sameDisk(d("A", 1<<30), after, "/dev/sda"); err == nil || !strings.Contains(err.Error(), "not the disk that was confirmed") {
+			t.Errorf("%v: %v", after, err)
+		}
+	}
+}
