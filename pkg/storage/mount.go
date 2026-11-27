@@ -307,7 +307,10 @@ func (m *Mounter) ReadRootFile(pl *Plan, rel string) ([]byte, error) {
 		}
 		if merr != nil {
 			if err := syscall.Mount(p.EffectiveDevice(), m.root, p.Filesystem, flags, opts); err != nil {
-				return nil, fmt.Errorf("storage: mount %s read-only on %s: %w", p.EffectiveDevice(), m.root, err)
+				// %v, not %w: a device node not there is ENOENT, which
+				// would read as the file not being there — "nothing to
+				// resume" for a target that cannot be looked at.
+				return nil, fmt.Errorf("storage: mount %s read-only on %s: %v", p.EffectiveDevice(), m.root, err)
 			}
 		}
 		data, err := os.ReadFile(filepath.Join(m.root, rel))
