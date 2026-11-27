@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,12 +39,15 @@ type Device struct {
 	// PartLabel is the partition's name in the partition table (GPT),
 	// which is not the filesystem's label.
 	PartLabel string
+	// UUID is the filesystem's or the member signature's UUID: the members
+	// of one RAID array, LVM group or multi-device btrfs share it.
+	UUID string
 }
 
 // List runs lsblk and returns the top-level block devices, each with its
 // partitions as children.
 func List() ([]Device, error) {
-	out, err := exec.Command("lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,TYPE,MODEL,SERIAL,WWN,MOUNTPOINT,FSTYPE,LABEL,PARTLABEL").Output()
+	out, err := exec.Command("lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,TYPE,MODEL,SERIAL,WWN,MOUNTPOINT,FSTYPE,LABEL,PARTLABEL,UUID").Output()
 	if err != nil {
 		return nil, fmt.Errorf("blockdev: lsblk: %w", storage.WithStderr(err))
 	}
@@ -104,6 +108,7 @@ func convert(in []jsonDev) []Device {
 			FsType:     j.FsType,
 			Label:      j.Label,
 			PartLabel:  j.PartLabel,
+			UUID:       j.UUID,
 		})
 	}
 	return out
@@ -123,6 +128,7 @@ type jsonDev struct {
 	FsType     string `json:"fstype"`
 	Label      string `json:"label"`
 	PartLabel  string `json:"partlabel"`
+	UUID       string `json:"uuid"`
 }
 
 // flexUint accepts a size that lsblk may emit as a JSON number (newer)
@@ -392,4 +398,56 @@ func parseVolumeGroups(s string) map[string][]string {
 		}
 	}
 	return vgs
+}
+
+// memberTypes are the signatures of a device that is one part of something
+// spanning several: a RAID array, an LVM volume group, a ZFS pool, a
+// bcache set, a multi-device btrfs. Their members share one UUID.
+var memberTypes = map[string]bool{"linux_raid_member": true, "LVM2_member": true, "zfs_member": true, "bcache": true, "btrfs": true}
+
+// SharedMembers reports the members, among the devices targets destroy
+// (each target and what is under it), of an array, group or pool that also
+// has a member outside them: wiping or formatting it breaks that one too.
+// Shared sees only what the live system has assembled or activated; this
+// sees the signatures on disk — an array not assembled, a group whose
+// tools are missing, a multi-device btrfs mounted through another member.
+func SharedMembers(devs []Device, targets []string) []string {
+	type entry struct {
+		dev    Device
+		inside bool
+	}
+	isTarget := map[string]bool{}
+	for _, t := range targets {
+		isTarget[t] = true
+	}
+	var all []entry
+	var walk func(d Device, inside bool)
+	walk = func(d Device, inside bool) {
+		inside = inside || isTarget[d.Path]
+		all = append(all, entry{d, inside})
+		for _, c := range d.Children {
+			walk(c, inside)
+		}
+	}
+	for _, d := range devs {
+		walk(d, false)
+	}
+	var out []string
+	said := map[string]bool{}
+	for _, e := range all {
+		if !e.inside || !memberTypes[e.dev.FsType] || e.dev.UUID == "" || said[e.dev.Path] {
+			continue
+		}
+		var others []string
+		for _, o := range all {
+			if !o.inside && o.dev.UUID == e.dev.UUID && o.dev.FsType == e.dev.FsType && !slices.Contains(others, o.dev.Path) {
+				others = append(others, o.dev.Path)
+			}
+		}
+		if len(others) > 0 {
+			said[e.dev.Path] = true
+			out = append(out, fmt.Sprintf("%s (%s %s) has a fellow member on %s", e.dev.Path, e.dev.FsType, e.dev.UUID, strings.Join(others, ", ")))
+		}
+	}
+	return out
 }

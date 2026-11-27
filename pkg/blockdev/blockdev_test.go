@@ -231,3 +231,35 @@ func TestInstallable(t *testing.T) {
 		t.Error("a real disk refused")
 	}
 }
+
+// Members on disk, assembled or not, of something with a member outside
+// what is destroyed are reported; the whole of it inside is not.
+func TestSharedMembers(t *testing.T) {
+	devs := []Device{
+		{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 1 << 40, Children: []Device{
+			{Name: "sda1", Path: "/dev/sda1", Type: "part", FsType: "linux_raid_member", UUID: "r1"},
+			{Name: "sda2", Path: "/dev/sda2", Type: "part", FsType: "btrfs", UUID: "b1"},
+			{Name: "sda3", Path: "/dev/sda3", Type: "part", FsType: "ext4", UUID: "e1"},
+		}},
+		{Name: "sdz", Path: "/dev/sdz", Type: "disk", Size: 1 << 40, Children: []Device{
+			{Name: "sdz1", Path: "/dev/sdz1", Type: "part", FsType: "linux_raid_member", UUID: "r1"},
+			{Name: "sdz2", Path: "/dev/sdz2", Type: "part", FsType: "btrfs", UUID: "b1", Mountpoint: "/data"},
+		}},
+	}
+	got := SharedMembers(devs, []string{"/dev/sda"})
+	if len(got) != 2 || !strings.Contains(got[0], "/dev/sda1 (linux_raid_member r1) has a fellow member on /dev/sdz1") || !strings.Contains(got[1], "/dev/sdz2") {
+		t.Errorf("wiping sda: %q", got)
+	}
+	if got := SharedMembers(devs, []string{"/dev/sda", "/dev/sdz"}); len(got) != 0 {
+		t.Errorf("both wiped: %q", got)
+	}
+	if got := SharedMembers(devs, []string{"/dev/sda3"}); len(got) != 0 {
+		t.Errorf("a plain ext4: %q", got)
+	}
+	// A reuse install formatting one member of an array on the same disk.
+	devs[1].Children[0].UUID = "other"
+	devs[0].Children = append(devs[0].Children, Device{Name: "sda4", Path: "/dev/sda4", Type: "part", FsType: "linux_raid_member", UUID: "r1"})
+	if got := SharedMembers(devs, []string{"/dev/sda1"}); len(got) != 1 || !strings.Contains(got[0], "/dev/sda4") {
+		t.Errorf("formatting sda1: %q", got)
+	}
+}

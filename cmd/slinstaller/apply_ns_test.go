@@ -443,6 +443,14 @@ func applyChild(t *testing.T) {
 	_, err = e.run(confirmed, plainConfig())
 	e.refused("shared array", err, "would break other disks")
 	wantRunErr(t, "shared array", err, "--force-destructive")
+	// The same array not assembled: its members' signatures say so.
+	e = newApplyEnv(t)
+	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":64000000000,"type":"disk","children":[
+		{"name":"slitest0p1","path":"`+testDisk+`p1","size":1000,"type":"part","fstype":"linux_raid_member","uuid":"a1b2"}]},
+		{"name":"sdz","path":"/dev/sdz","size":1000,"type":"disk","children":[
+		{"name":"sdz1","path":"/dev/sdz1","size":1000,"type":"part","fstype":"linux_raid_member","uuid":"a1b2"}]}`)
+	_, err = e.run(confirmed, plainConfig())
+	e.refused("unassembled shared array", err, "has a fellow member on /dev/sdz1")
 	e = newApplyEnv(t)
 	setListing(t, e.bin, shared)
 	_, err = e.run(confirmed, plainConfig(), "--force-destructive")

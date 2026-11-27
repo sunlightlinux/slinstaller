@@ -28,7 +28,7 @@ func TestListRunsLsblk(t *testing.T) {
 	}
 	// JSON, sizes in bytes, and the columns the installer reads.
 	args, _ := os.ReadFile(filepath.Join(dir, "args"))
-	if got := strings.TrimSpace(string(args)); got != "-J -b -o NAME,PATH,SIZE,TYPE,MODEL,SERIAL,WWN,MOUNTPOINT,FSTYPE,LABEL,PARTLABEL" {
+	if got := strings.TrimSpace(string(args)); got != "-J -b -o NAME,PATH,SIZE,TYPE,MODEL,SERIAL,WWN,MOUNTPOINT,FSTYPE,LABEL,PARTLABEL,UUID" {
 		t.Errorf("lsblk called with %q", got)
 	}
 }

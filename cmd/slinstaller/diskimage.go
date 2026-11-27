@@ -142,7 +142,7 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply, forceDestructiv
 	if err := checkTargetDisks([]string{disk}, devs); err != nil {
 		return err
 	}
-	if shared := blockdev.Shared(devs, disk, []string{disk}, blockdev.VolumeGroups()); len(shared) > 0 && !forceDestructive {
+	if shared := append(blockdev.Shared(devs, disk, []string{disk}, blockdev.VolumeGroups()), blockdev.SharedMembers(devs, []string{disk})...); len(shared) > 0 && !forceDestructive {
 		return fmt.Errorf("writing over %s would break other disks:\n  %s\npass --force-destructive to write it anyway",
 			disk, strings.Join(shared, "\n  "))
 	}

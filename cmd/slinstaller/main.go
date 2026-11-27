@@ -956,6 +956,7 @@ restart:
 			for _, disk := range plan.DiskList() {
 				shared = append(shared, blockdev.Shared(devs, disk, plan.DiskList(), vgs)...)
 			}
+			shared = append(shared, blockdev.SharedMembers(devs, plan.DiskList())...)
 			if len(shared) > 0 && !forceDestructive {
 				return fmt.Errorf("wiping %s would break other disks:\n  %s\npass --force-destructive to wipe it anyway",
 					strings.Join(plan.DiskList(), ", "), strings.Join(shared, "\n  "))
@@ -979,6 +980,19 @@ restart:
 		// must already exist on the disk. A Safe/alongside install's Create
 		// partitions are cut in free space, so they are expected NOT to exist.
 		if !plan.Wipe {
+			// A partition formatted here that is one member of an array or
+			// group with members elsewhere breaks it (Shared is for wiped
+			// disks; this is the reuse install's own).
+			var formatted []string
+			for _, p := range plan.Parts {
+				if !p.LV && !p.Raid && !p.Create && !p.Preserve {
+					formatted = append(formatted, p.Device)
+				}
+			}
+			if shared := blockdev.SharedMembers(devs, formatted); len(shared) > 0 && !forceDestructive {
+				return fmt.Errorf("formatting %s would break what it is a member of:\n  %s\npass --force-destructive to format it anyway",
+					strings.Join(formatted, ", "), strings.Join(shared, "\n  "))
+			}
 			for _, p := range plan.Parts {
 				if p.LV || p.Raid || p.Create {
 					continue
