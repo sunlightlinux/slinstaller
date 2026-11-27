@@ -124,6 +124,23 @@ func mountStagesChild(t *testing.T) {
 	fillSpareESPsOnTmpfs(t, base)
 	unpackImageWithBinds(t, sub("img"))
 
+	// A resolv.conf that cannot be taken out fails the finish, but the
+	// target is unmounted all the same.
+	r := nsInstaller(sub("r"))
+	defer r.mnt.UnmountAll()
+	if err := r.mount(); err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+	os.WriteFile(filepath.Join(r.opts.Root, "boot", "marker"), nil, 0o644)
+	r.resolvCopy = filepath.Join(r.opts.Root, "etc", "resolv.conf")
+	os.MkdirAll(filepath.Join(r.resolvCopy, "occupied"), 0o755)
+	if err := r.finish(); err == nil || !strings.Contains(err.Error(), "remove") {
+		t.Errorf("finish with resolv.conf stuck: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(r.opts.Root, "boot", "marker")); err == nil {
+		t.Error("the target was left mounted after a failed finish")
+	}
+
 	if liveErr != nil {
 		return // nothing to copy, so the copy cannot be made to fail
 	}

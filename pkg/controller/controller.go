@@ -296,13 +296,16 @@ func (in *installer) finish() error {
 	// dhcpcd hands DNS to resolvconf, and resolvconf will not replace a
 	// resolv.conf it did not write ("signature mismatch"). Removed, it
 	// is written fresh at first boot.
-	if err := removeIfPresent(in.resolvCopy); err != nil {
-		return err
-	}
-	if in.resolvSaved != "" {
+	// Failing that, the target is still unmounted before the error is
+	// returned: left mounted, it held the disk and kept its data unsynced.
+	resolvErr := removeIfPresent(in.resolvCopy)
+	if resolvErr == nil && in.resolvSaved != "" {
 		if err := os.Rename(in.resolvSaved, in.resolvCopy); err != nil {
-			return fmt.Errorf("put back the target's resolv.conf: %w", err)
+			resolvErr = fmt.Errorf("put back the target's resolv.conf: %w", err)
 		}
+	}
+	if resolvErr != nil {
+		return errors.Join(resolvErr, in.mnt.UnmountAll())
 	}
 	if err := in.archiveLog(); err != nil && in.opts.Log != nil {
 		fmt.Fprintf(in.opts.Log, "warning: the install log was not saved on the target: %v\n", err)

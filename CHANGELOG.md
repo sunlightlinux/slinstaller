@@ -12,6 +12,9 @@ change.
 
 ### Fixed
 
+- When the install-time resolv.conf could not be taken back out, the end
+  of the install returned before unmounting, leaving the target mounted.
+  It is unmounted either way now.
 - `encrypted: true` on a plain partition, a RAID member or a logical
   volume was ignored and the volume installed unencrypted. It is read on
   an `lvm` partition (and a RAID array) only; elsewhere it is refused,
