@@ -1118,22 +1118,7 @@ func checkDiskFit(plan *storage.Plan, devs []blockdev.Device, rootMin uint64, ro
 // never asks for either. Checking "" as a name refused every such install
 // before it began.
 func checkLocale(tz, keymap, lang string) error {
-	if tz != "" {
-		if ok, checked := system.ValidTimezone(tz); checked && !ok {
-			return fmt.Errorf("timezone %q is not a known zoneinfo zone (e.g. UTC, Europe/Bucharest)", tz)
-		}
-	}
-	if keymap != "" {
-		if ok, checked := system.ValidKeymap(keymap); checked && !ok {
-			return fmt.Errorf("keymap %q is not among the system's console keymaps (e.g. us, de, ro)", keymap)
-		}
-	}
-	if lang != "" {
-		if ok, checked := system.ValidLocale(lang); checked && !ok {
-			return fmt.Errorf("language %q is not a locale the system's C library supports (e.g. en_US.UTF-8)", lang)
-		}
-	}
-	return nil
+	return system.CheckLocale(tz, keymap, lang)
 }
 
 // powerCommand reboots, powers off or halts the machine, for the config's

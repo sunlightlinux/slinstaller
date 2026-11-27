@@ -931,7 +931,26 @@ func Save(path string, c *Config) error {
 	if err != nil {
 		return fmt.Errorf("config: marshal: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Written to a new file and renamed into place: os.WriteFile's 0600
+	// applies only to a file it creates, so an existing 0644 file kept its
+	// mode — world-readable, with the accounts' password hashes in it — and
+	// a link at path was written through.
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".slinstaller-config-*")
+	if err != nil {
+		return fmt.Errorf("config: write %s: %w", path, err)
+	}
+	defer os.Remove(tmp.Name()) // gone once renamed; removed if not
+	_, err = tmp.Write(data)
+	if err == nil {
+		err = tmp.Chmod(0o600)
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+	}
+	if err != nil {
 		return fmt.Errorf("config: write %s: %w", path, err)
 	}
 	return nil
@@ -1349,6 +1368,21 @@ func (c *Config) Validate() error {
 	} else if strings.HasPrefix(c.ReportURL, "http://") && !c.AllowInsecureHTTP {
 		// A report carries the hostname and the install's errors.
 		add("report-url: %s is plain http; use https, or set allowInsecureHTTP (--allow-insecure-http)", c.ReportURL)
+	}
+	// The mirror is an http(s) URL or a local directory: anything else (no
+	// scheme, "HTTPS://") was taken for a relative path by xbps, replacing
+	// the repository — and found missing only at base-install, after the
+	// wipe. Plain http needs the allowance, as the --repo flag does.
+	if m := c.SwupdMirror; m != "" {
+		switch {
+		case strings.HasPrefix(m, "https://"), filepath.IsAbs(m):
+		case strings.HasPrefix(m, "http://"):
+			if !c.AllowInsecureHTTP {
+				add("swupdMirror: %s is plain http; use https, or set allowInsecureHTTP (--allow-insecure-http)", m)
+			}
+		default:
+			add("swupdMirror: %q is not an https:// URL or an absolute directory", m)
+		}
 	}
 	if err := c.checkRemote("image", c.Image); err != nil {
 		add("%v", err)

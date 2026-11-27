@@ -1239,6 +1239,17 @@ func (m model) installProblem() string {
 			return 0, false
 		}, rootMin, rootLabel)
 	}
+	// And what the installer checks against this machine before it starts:
+	// the kernel arguments (CPUs, memory) and the time zone, keymap and
+	// language. Refused after the wizard, they ended the program.
+	if err == nil && !cfg.SkipValidationAll && cfg.KernelArguments != nil {
+		if probs := system.CheckKernelArgs(cfg.KernelArguments.Add); len(probs) > 0 {
+			err = fmt.Errorf("kernel command line: %s", strings.Join(probs, "; "))
+		}
+	}
+	if err == nil {
+		err = system.CheckLocale(cfg.Timezone, cfg.Keyboard, cfg.Language)
+	}
 	if err != nil {
 		return err.Error()
 	}

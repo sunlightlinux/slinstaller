@@ -491,3 +491,52 @@ func TestOfflineRefusesRemoteImages(t *testing.T) {
 		t.Errorf("a local image offline: %v", err)
 	}
 }
+
+// The mirror is an https URL, plain http with the allowance, or a local
+// directory; anything else was a relative path to xbps.
+func TestMirrorForms(t *testing.T) {
+	for mirror, want := range map[string]string{
+		"https://repo.example/current": "",
+		"/run/media/repo":              "",
+		"http://repo.example/current":  "is plain http",
+		"repo.example/current":         "is not an https:// URL",
+		"HTTPS://repo.example":         "is not an https:// URL",
+	} {
+		c := btrfsConfig()
+		c.SwupdMirror = mirror
+		err := c.Validate()
+		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+			t.Errorf("%q: %v, want %q", mirror, err, want)
+		}
+	}
+	c := btrfsConfig()
+	c.SwupdMirror, c.AllowInsecureHTTP = "http://repo.example/current", true
+	if err := c.Validate(); err != nil {
+		t.Errorf("http with the allowance: %v", err)
+	}
+}
+
+// A saved config is private whatever was at its path before, and a link
+// there is replaced, not written through.
+func TestSaveIsPrivate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("old\n"), 0o644)
+	c := &Config{Users: []*User{{Login: "ion", Password: "$6$s$h"}}}
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v over an existing 0644 file", fi.Mode().Perm())
+	}
+	elsewhere := filepath.Join(t.TempDir(), "target")
+	os.WriteFile(elsewhere, []byte("keep\n"), 0o644)
+	link := filepath.Join(dir, "l.yaml")
+	os.Symlink(elsewhere, link)
+	if err := Save(link, c); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(elsewhere); string(got) != "keep\n" {
+		t.Error("written through a link")
+	}
+}

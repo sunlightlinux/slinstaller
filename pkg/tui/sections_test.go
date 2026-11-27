@@ -173,6 +173,12 @@ func TestHubInstallButton(t *testing.T) {
 	if nm, _ = m.Update(enter); nm.(model).confirmed || !strings.Contains(viewOf(nm.(model)), "layout needs") {
 		t.Errorf("a layout bigger than the disk went through:\n%s", viewOf(nm.(model)))
 	}
+	// Kernel arguments this machine cannot meet are refused here too.
+	m = onInstall(readyModel())
+	m.kernelProfile, m.kernelArgs = "Custom", "isolcpus=100000-100010"
+	if nm, _ = m.Update(enter); nm.(model).confirmed || !strings.Contains(viewOf(nm.(model)), "isolcpus") {
+		t.Errorf("impossible kernel arguments went through:\n%s", viewOf(nm.(model)))
+	}
 	m = onInstall(readyModel())
 	m.parts = append(m.parts, m.parts[len(m.parts)-1])
 	if nm, _ = m.Update(enter); nm.(model).confirmed {

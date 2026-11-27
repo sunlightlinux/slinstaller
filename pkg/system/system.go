@@ -733,3 +733,25 @@ func has(path, text string) bool {
 	data, err := os.ReadFile(path)
 	return err == nil && strings.Contains(string(data), text)
 }
+
+// CheckLocale refuses a time zone, keymap or language this system does not
+// know (each only where the system has the data to tell). Empty means
+// "leave the target's default" and is not checked.
+func CheckLocale(tz, keymap, lang string) error {
+	if tz != "" {
+		if ok, checked := ValidTimezone(tz); checked && !ok {
+			return fmt.Errorf("timezone %q is not a known zoneinfo zone (e.g. UTC, Europe/Bucharest)", tz)
+		}
+	}
+	if keymap != "" {
+		if ok, checked := ValidKeymap(keymap); checked && !ok {
+			return fmt.Errorf("keymap %q is not among the system's console keymaps (e.g. us, de, ro)", keymap)
+		}
+	}
+	if lang != "" {
+		if ok, checked := ValidLocale(lang); checked && !ok {
+			return fmt.Errorf("language %q is not a locale the system's C library supports (e.g. en_US.UTF-8)", lang)
+		}
+	}
+	return nil
+}
