@@ -3,6 +3,7 @@ package system
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -634,5 +635,36 @@ func TestNetLinksRunit(t *testing.T) {
 	}
 	if MemTotalBytes() == 0 {
 		t.Log("no /proc/meminfo here")
+	}
+}
+
+// What a keymap or language holds stays text in the files sh sources as
+// root: with the checks switched off, a value with $(...) was written in
+// Go's quoting, which sh expands.
+func TestKeymapLocaleShellSafe(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	for _, v := range []string{"us", "de-latin1-nodeadkeys", "sr_RS@latin", "us$(touch${IFS}pwned)", "a'b`id`\"c\\", "x;y"} {
+		root := t.TempDir()
+		if err := Keymap(root, v); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Locale(root, v); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(sh, "-c", `. ./etc/rc.conf && . ./etc/locale.conf && printf '%s\000%s' "$KEYMAP" "$LANG"`)
+		cmd.Dir, cmd.Env = root, []string{"PATH=/nonexistent"}
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("%q: sourcing: %v", v, err)
+		}
+		if got := string(out); got != v+"\x00"+v {
+			t.Errorf("%q read back as %q", v, got)
+		}
+		if _, err := os.Stat(filepath.Join(root, "pwned")); err == nil {
+			t.Errorf("%q ran a command", v)
+		}
 	}
 }

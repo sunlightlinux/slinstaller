@@ -350,7 +350,7 @@ func Keymap(root, code string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("system: %w", err)
 	}
-	line := fmt.Sprintf("\n# console keymap set by slinstaller\nKEYMAP=%q\n", code)
+	line := "\n# console keymap set by slinstaller\nKEYMAP=" + shellValue(code, true) + "\n"
 	if has(path, line) { // written by an earlier attempt at this stage
 		return nil
 	}
@@ -364,6 +364,26 @@ func Keymap(root, code string) error {
 		return fmt.Errorf("system: write rc.conf: %w", werr)
 	}
 	return cerr
+}
+
+// shellValue renders a value for a KEY=value line in a file sh sources
+// as root at every boot or login (/etc/rc.conf, /etc/locale.conf). A
+// keymap or locale name is written as it always was, double-quoted when
+// quoted is set; anything else (only reachable with the checks switched
+// off) is single-quoted, so $(...), ` and ; stay text. Go's %q quotes for
+// Go: "us$(reboot)" ran reboot.
+func shellValue(v string, quoted bool) string {
+	plain := v != ""
+	for _, r := range v {
+		plain = plain && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._-+@", r))
+	}
+	switch {
+	case plain && quoted:
+		return `"` + v + `"`
+	case plain:
+		return v
+	}
+	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
 }
 
 // Locale sets the system locale. It writes /etc/locale.conf and, on a
@@ -381,7 +401,7 @@ func Locale(root, lang string) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(conf), 0o755); err != nil {
 		return false, fmt.Errorf("system: %w", err)
 	}
-	if err := os.WriteFile(conf, []byte("LANG="+lang+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(conf, []byte("LANG="+shellValue(lang, false)+"\n"), 0o644); err != nil {
 		return false, fmt.Errorf("system: write locale.conf: %w", err)
 	}
 
