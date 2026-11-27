@@ -135,9 +135,14 @@ func TestInstallIgnoresKeysWhileRunning(t *testing.T) {
 	default:
 		t.Error("Ctrl+C did not ask the install to stop")
 	}
-	// Pressed again it leaves at once: the way out of a step that hangs.
-	if again, cmd := stepInstall(got, keyNamed("ctrl+c")); !again.cancelled || cmd == nil {
-		t.Error("a second Ctrl+C did not leave")
+	// Pressed again it leaves at once — the way out of a step that hangs —
+	// ending the commands the step was running.
+	saved := abandonChildren
+	defer func() { abandonChildren = saved }()
+	abandoned := false
+	abandonChildren = func() { abandoned = true }
+	if again, cmd := stepInstall(got, keyNamed("ctrl+c")); !again.cancelled || cmd == nil || !abandoned {
+		t.Errorf("a second Ctrl+C: left=%v, commands ended=%v", again.cancelled, abandoned)
 	}
 	if !strings.Contains(got.runningView(), "Stopping after the current step") {
 		t.Error("the screen does not say it is stopping")

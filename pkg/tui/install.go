@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"strings"
 	"sync"
@@ -98,6 +99,21 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 		return true, nil
 	}
 	return false, fm.err
+}
+
+// abandonChildren ends the commands the install is running when the
+// operator leaves mid-step. In the full-screen view Ctrl+C is a key, not
+// a signal, so nothing else would: xbps, mkfs or dd went on writing to a
+// disk still mounted after the program had exited. It signals the
+// installer's process group, which its commands share — only when the
+// installer leads that group, so nothing it did not start is touched —
+// with the installer itself ignoring the signal.
+var abandonChildren = func() {
+	if syscall.Getpgrp() != os.Getpid() {
+		return
+	}
+	signal.Ignore(syscall.SIGTERM)
+	_ = syscall.Kill(0, syscall.SIGTERM)
 }
 
 // Messages pushed from the install goroutine into the model.
@@ -554,6 +570,7 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// between steps would wait on for ever. The step running
 				// is abandoned.
 				if m.stopping {
+					abandonChildren()
 					m.cancelled = true
 					return m, tea.Quit
 				}
