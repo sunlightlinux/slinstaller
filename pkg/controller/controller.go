@@ -661,6 +661,24 @@ func (in *installer) unpackImage() error {
 // (It does not stop a package Void ships at a HIGHER version from winning;
 // keeping the Sunlight fork current is the separate half of that.)
 func (in *installer) writeTargetRepos() error {
+	// The mirror is recorded first: the upgrade below runs the target's own
+	// xbps-install, which reads only the target's xbps.d. Upgrading before
+	// the mirror was there resolved every package against Void alone — the
+	// very skew (dbus vs dbus-libs) this file exists to prevent.
+	if len(in.opts.ExtraRepos) > 0 {
+		dir := filepath.Join(in.opts.Root, "etc", "xbps.d")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", dir, err)
+		}
+		content := "# Written by slinstaller: the Sunlight mirror, searched ahead of Void.\n"
+		for _, r := range in.opts.ExtraRepos {
+			content += fmt.Sprintf("repository=%s\n", r)
+		}
+		path := filepath.Join(dir, "10-sunlight.conf")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+	}
 	// The base system is in place: the kernels the config asked to be rid
 	// of go now, before the bootloader lists what is there.
 	// Brought up to date first, as the installed system's own update does:
@@ -681,21 +699,6 @@ func (in *installer) writeTargetRepos() error {
 		if err := storage.RunCommands([][]string{remove}, in.opts.Runner); err != nil {
 			return err
 		}
-	}
-	if len(in.opts.ExtraRepos) == 0 {
-		return nil
-	}
-	dir := filepath.Join(in.opts.Root, "etc", "xbps.d")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
-	}
-	content := "# Written by slinstaller: the Sunlight mirror, searched ahead of Void.\n"
-	for _, r := range in.opts.ExtraRepos {
-		content += fmt.Sprintf("repository=%s\n", r)
-	}
-	path := filepath.Join(dir, "10-sunlight.conf")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }

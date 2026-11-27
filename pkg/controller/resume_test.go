@@ -190,6 +190,35 @@ func TestSystemUpgrade(t *testing.T) {
 	}
 }
 
+// The upgrade reads the target's own xbps.d, so the Sunlight mirror has to
+// be recorded there before it runs; upgrading first resolved everything
+// against Void alone.
+func TestSystemUpgradeSeesTheMirror(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.SystemUpgrade = true
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	in.opts.Repo, in.opts.Packages = "https://repo.example/current", []string{"sunlight-base"}
+	in.opts.ExtraRepos = []string{"https://mirror.example/sunlight"}
+	conf := filepath.Join(in.opts.Root, "etc", "xbps.d", "10-sunlight.conf")
+	upgraded := false
+	in.opts.Runner = func(args []string) error {
+		if strings.Contains(strings.Join(args, " "), "xbps-install -Syu") {
+			upgraded = true
+			if _, err := os.Stat(conf); err != nil {
+				t.Errorf("upgrade ran before the mirror was recorded: %v", err)
+			}
+		}
+		return r.run(args)
+	}
+	if err := in.baseInstall(); err != nil {
+		t.Fatal(err)
+	}
+	if !upgraded {
+		t.Fatalf("no upgrade ran:\n%s", r.flat())
+	}
+}
+
 // The first-boot stage leaves a random seed for the first boot.
 func TestFirstBootSeedsTheRNG(t *testing.T) {
 	var r recorder

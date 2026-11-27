@@ -10,6 +10,12 @@ change.
 
 ## [Unreleased]
 
+### Fixed
+
+- `system-upgrade` ran the target's `xbps-install -Syu` before the Sunlight
+  mirror was written to its `/etc/xbps.d`, so the upgrade resolved every
+  package against Void alone. The mirror is recorded first now.
+
 ## [2.1.1] - 2026-11-18
 
 Everything since 2.0.0. The code is that of 2.1.0, which was tagged before
