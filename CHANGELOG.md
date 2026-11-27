@@ -10,10 +10,20 @@ change.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-27
+
 Most of what follows moves a failure from the middle of an install —
 after the disk was wiped — to before anything is touched. A config that
 used to fail that way, or to install something that could not boot, may
 now be refused by the config check (see [STABILITY.md](STABILITY.md)).
+
+What is verified, and how far: the unit suite (with `-race`, 95.7%
+coverage), the `dry-run` and `loop` jobs and a fuzz job run on every
+push; a full install through every stage runs in a user namespace with
+stand-in tools, and the package dry run and `xbps-reconfigure -a` were
+checked against a real xbps 0.60.7. No install in a VM was made for this
+release: the bootloader, a first boot, `kexec` and Secure Boot are
+unit- and namespace-tested only.
 
 ### Changed
 
@@ -489,6 +499,15 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 **Full-screen and text front-ends**
 
+- **No 5 s wait at start on a terminal that does not answer.** bubbletea
+  v1's package `init()` asked the terminal for its background colour (OSC
+  11 + DSR) before `main`, in `--text` too: on a QEMU serial console the
+  first output came after 5.01 s, with the query left on the screen and a
+  late reply landing in the first answer typed. bubbletea v1.2.4 is
+  vendored in `third_party/bubbletea` without `tea_init.go` (MIT, LICENSE
+  kept, wired with a go.mod `replace`); the query is made only before a
+  full-screen program. First output now after 0.01 s. An update of
+  bubbletea means updating that copy by hand.
 - **The wizard keeps the disk the user chose.** Rescan Media kept the
   choice as an index, so a USB stick listed ahead of it moved the target
   (and the layout made for it) to another disk; it is found again by
