@@ -392,3 +392,31 @@ func TestSharedMembersReportsAMemberOnce(t *testing.T) {
 		t.Errorf("SharedMembers = %q", got)
 	}
 }
+
+// A volume group the install creates under a name a group already has —
+// on a disk it does not wipe — cannot be created: vgcreate failed after the
+// target was wiped ("A volume group called vg0 already exists"), and two
+// vg0s would have left rd.lvm.lv=vg0/root ambiguous anyway.
+func TestVGNameClashes(t *testing.T) {
+	devs := []Device{
+		{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []Device{
+			{Name: "sda2", Path: "/dev/sda2", Type: "part", Children: []Device{
+				{Name: "cryptold", Path: "/dev/mapper/cryptold", Type: "crypt"}}}}},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", Children: []Device{
+			{Name: "sdb1", Path: "/dev/sdb1", Type: "part"}}},
+	}
+	vgs := parseVolumeGroups("  /dev/mapper/cryptold:old\n  /dev/sdb1:vg0\n  /dev/sda2:both\n  /dev/sdb1:both\n  /dev/sdq9:ghost\n")
+	got := VGNameClashes(devs, vgs, []string{"old", "vg0", "both", "ghost", "fresh"}, []string{"/dev/sda"})
+	want := []string{
+		"volume group both already exists, on /dev/sdb1",
+		"volume group ghost already exists, on /dev/sdq9",
+		"volume group vg0 already exists, on /dev/sdb1",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("clashes:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	// Every disk it is on wiped: it goes with them, and the name is free.
+	if got := VGNameClashes(devs, vgs, []string{"vg0", "old"}, []string{"/dev/sda", "/dev/sdb"}); len(got) != 0 {
+		t.Errorf("all wiped: %q", got)
+	}
+}

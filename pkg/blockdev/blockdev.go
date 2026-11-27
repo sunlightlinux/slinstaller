@@ -462,3 +462,31 @@ func SharedMembers(devs []Device, targets []string) []string {
 	}
 	return out
 }
+
+// VGNameClashes lists the volume groups among names (the ones an install
+// creates) that the machine already has a group of, with a physical volume
+// that is not on a wiped disk — or not found on any disk: wiping does not
+// remove that group, so vgcreate fails ("already exists"), after the wipe.
+// vgs maps a group to its physical volumes (VolumeGroups).
+func VGNameClashes(devs []Device, vgs map[string][]string, names, wiped []string) []string {
+	var out []string
+	sorted := slices.Clone(names)
+	sort.Strings(sorted)
+	for _, vg := range slices.Compact(sorted) {
+		var kept []string
+		for _, pv := range vgs[vg] {
+			on := disksHolding(devs, pv)
+			gone := len(on) > 0
+			for _, dk := range on {
+				gone = gone && slices.Contains(wiped, dk)
+			}
+			if !gone {
+				kept = append(kept, pv)
+			}
+		}
+		if len(kept) > 0 {
+			out = append(out, fmt.Sprintf("volume group %s already exists, on %s", vg, strings.Join(kept, ", ")))
+		}
+	}
+	return out
+}
