@@ -20,6 +20,11 @@ change.
   back (it leaves).
 - The text flow and the retyped confirmation show each disk's size and
   model, not the path alone.
+- A text-flow answer that is neither of the choices is asked again: a typo
+  (`btfrs`, `ys` at "Encrypt?") used to be taken as the default, so an
+  unencrypted or ext4 system was installed. An ended input still gets the
+  default (no, at "Proceed?").
+- `--help` exits 0 instead of reporting "flag: help requested" as an error.
 
 ### Fixed
 

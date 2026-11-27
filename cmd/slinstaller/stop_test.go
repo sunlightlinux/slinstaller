@@ -34,3 +34,16 @@ func TestInstallStopsOnSIGINT(t *testing.T) {
 		t.Fatalf("err = %v\nran:\n%s", err, strings.Join(ran, "\n"))
 	}
 }
+
+// --help prints the usage and succeeds: a script asking for it is not told
+// it failed.
+func TestHelpIsNotAnError(t *testing.T) {
+	for _, a := range []string{"-h", "--help"} {
+		if err := run([]string{a}); err != nil {
+			t.Errorf("%s: %v", a, err)
+		}
+	}
+	if err := run([]string{"--no-such-flag"}); err == nil {
+		t.Error("an unknown flag was not an error")
+	}
+}

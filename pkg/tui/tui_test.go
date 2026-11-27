@@ -198,6 +198,10 @@ func TestPromptChoices(t *testing.T) {
 			t.Errorf("choice = %q, want the default", got)
 		}
 	}
+	// A typo is asked again, not replaced by the default.
+	if got := promptChoice(answers("btfrs", "btrfs"), &out, "Root filesystem", opts, "ext4"); got != "btrfs" {
+		t.Errorf("after a typo: %q", got)
+	}
 	if got := promptDefault(answers("  box  "), &out, "Hostname", "sunlight"); got != "box" {
 		t.Errorf("promptDefault = %q", got)
 	}
@@ -219,6 +223,10 @@ func TestPromptYesNoOnlyYesMeansYes(t *testing.T) {
 		if promptYesNo(in, &out, "Proceed?", false) {
 			t.Error("a non-yes answer proceeded")
 		}
+	}
+	// Neither yes nor no is asked again: "ys" at "Encrypt?" is not a no.
+	if !promptYesNo(answers("ys", "y"), &out, "Encrypt?", false) {
+		t.Error("a typo, then yes, was not yes")
 	}
 	// With a yes default, only an explicit other answer is no.
 	if !promptYesNo(answers(""), &out, "Encrypt?", true) || promptYesNo(answers("n"), &out, "Encrypt?", true) {

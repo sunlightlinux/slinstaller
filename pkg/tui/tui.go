@@ -276,19 +276,27 @@ func promptSecret(in *bufio.Reader, w io.Writer, label string) (string, error) {
 // promptChoice accepts one of opts, or the default on an empty line; an
 // unrecognised answer falls back to the default with a note.
 func promptChoice(in *bufio.Reader, w io.Writer, label string, opts []string, def string) string {
-	fmt.Fprintf(w, "%s (%s) [%s]: ", label, strings.Join(opts, "/"), def)
-	line, _ := in.ReadString('\n')
-	s := strings.TrimSpace(line)
-	if s == "" {
-		return def
-	}
-	for _, o := range opts {
-		if s == o {
-			return o
+	for {
+		fmt.Fprintf(w, "%s (%s) [%s]: ", label, strings.Join(opts, "/"), def)
+		line, err := in.ReadString('\n')
+		s := strings.TrimSpace(line)
+		if s == "" {
+			return def
 		}
+		for _, o := range opts {
+			if s == o {
+				return o
+			}
+		}
+		// Asked again: a typo ("btfrs") taken as the default installed
+		// what was not asked for, with one line of notice in the scroll.
+		// An input that has ended gets the default.
+		if err != nil {
+			fmt.Fprintf(w, "  not one of %s - using %s\n", strings.Join(opts, "/"), def)
+			return def
+		}
+		fmt.Fprintf(w, "  not one of %s - try again\n", strings.Join(opts, "/"))
 	}
-	fmt.Fprintf(w, "  not one of %s - using %s\n", strings.Join(opts, "/"), def)
-	return def
 }
 
 func promptYesNo(in *bufio.Reader, w io.Writer, label string, def bool) bool {
@@ -296,15 +304,24 @@ func promptYesNo(in *bufio.Reader, w io.Writer, label string, def bool) bool {
 	if def {
 		hint = "Y/n"
 	}
-	fmt.Fprintf(w, "%s [%s]: ", label, hint)
-	line, _ := in.ReadString('\n')
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "":
-		return def
-	case "y", "yes":
-		return true
-	default:
-		return false
+	for {
+		fmt.Fprintf(w, "%s [%s]: ", label, hint)
+		line, err := in.ReadString('\n')
+		switch strings.ToLower(strings.TrimSpace(line)) {
+		case "":
+			return def
+		case "y", "yes":
+			return true
+		case "n", "no":
+			return false
+		}
+		// Neither: asked again. Taken as no, a typo ("ys") at "Encrypt?"
+		// installed an unencrypted root. An input that has ended gets the
+		// default — no, at "Proceed?".
+		if err != nil {
+			return def
+		}
+		fmt.Fprintln(w, "  answer y or n")
 	}
 }
 

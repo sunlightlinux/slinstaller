@@ -10,6 +10,7 @@ package main
 import (
 	"bufio"
 	"embed"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -202,6 +203,10 @@ func run(args []string) error {
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
+		// -h/--help printed the usage, as asked: that is not a failure.
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 
