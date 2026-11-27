@@ -301,9 +301,12 @@ func (in *installer) cleanup() {
 			fmt.Fprintf(in.opts.Log, "warning: "+format+"\n", a...)
 		}
 	}
+	// Only when there is a copy to take the place of: an image unpack takes
+	// it out while the target's own is still aside (a failed unpack leaves
+	// it there for the next attempt, which finds and keeps it).
 	if err := removeIfPresent(in.resolvCopy); err != nil {
 		warn("%v", err)
-	} else if in.resolvSaved != "" {
+	} else if in.resolvSaved != "" && in.resolvCopy != "" {
 		if err := os.Rename(in.resolvSaved, in.resolvCopy); err != nil {
 			warn("put back the target's resolv.conf: %v", err)
 		}
@@ -496,7 +499,21 @@ func (in *installer) reassemble() error {
 	var cmds [][]string
 	for _, p := range in.plan.Parts {
 		if p.Raid && gone(storage.RaidDevice(p.RaidName)) {
-			cmds = append(cmds, append([]string{"mdadm", "--assemble", storage.RaidDevice(p.RaidName)}, append(append([]string{}, p.RaidMembers...), p.RaidSpares...)...))
+			members := append(append([]string{}, p.RaidMembers...), p.RaidSpares...)
+			// The live system may have assembled the array by itself at
+			// boot, under a name of its own (md127, <host>:<name>): its
+			// members are then held, and assembling them again fails. That
+			// array is stopped first, to be assembled as the install's.
+			stopped := map[string]bool{}
+			for _, m := range members {
+				for _, h := range mdHolders(m) {
+					if !stopped[h] {
+						stopped[h] = true
+						cmds = append(cmds, []string{"mdadm", "--stop", "/dev/" + h})
+					}
+				}
+			}
+			cmds = append(cmds, append([]string{"mdadm", "--assemble", storage.RaidDevice(p.RaidName)}, members...))
 		}
 	}
 	if err := storage.RunCommands(cmds, in.opts.Runner); err != nil {
@@ -523,6 +540,29 @@ func (in *installer) reassemble() error {
 		in.settle()
 	}
 	return nil
+}
+
+// sysBlock is sysfs's block-device directory (a variable for tests).
+var sysBlock = "/sys/class/block"
+
+// mdHolders returns the md arrays holding the device at path (sda2 →
+// md127), from sysfs.
+func mdHolders(path string) []string {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		real = path
+	}
+	ents, err := os.ReadDir(filepath.Join(sysBlock, filepath.Base(real), "holders"))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), "md") {
+			out = append(out, e.Name())
+		}
+	}
+	return out
 }
 
 // output is where sub-command output that cannot go through Runner (the

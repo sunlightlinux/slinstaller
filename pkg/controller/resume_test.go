@@ -421,4 +421,20 @@ func TestResumeReassemblesTheStack(t *testing.T) {
 	if !strings.Contains(r.flat(), "mdadm --assemble /dev/md0 ") {
 		t.Errorf("the array was not assembled:\n%s", r.flat())
 	}
+
+	// Assembled by the live system under its own name: stopped first, then
+	// assembled as the install's.
+	saved := sysBlock
+	defer func() { sysBlock = saved }()
+	sysBlock = t.TempDir()
+	os.MkdirAll(filepath.Join(sysBlock, "sda2", "holders", "md127"), 0o755)
+	r = recorder{}
+	if err := raid.reassemble(); err != nil {
+		t.Fatal(err)
+	}
+	flat := r.flat()
+	stop, asm := strings.Index(flat, "mdadm --stop /dev/md127"), strings.Index(flat, "mdadm --assemble /dev/md0")
+	if stop < 0 || asm < stop || strings.Count(flat, "--stop") != 1 {
+		t.Errorf("an array held under another name:\n%s", flat)
+	}
 }
