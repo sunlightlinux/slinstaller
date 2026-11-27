@@ -94,6 +94,15 @@ func TestValidAddr(t *testing.T) {
 	if err := ValidAddr("not-an-ip", "255.255.255.0", false); err == nil {
 		t.Error("bad IP accepted")
 	}
+	if err := ValidAddr("192.168.1.10", "64", true); err == nil {
+		t.Error("an IPv4 address marked IPv6 should be rejected")
+	}
+	if err := ValidAddr("fe80::1", "24", false); err == nil {
+		t.Error("an IPv6 address marked IPv4 should be rejected")
+	}
+	if err := ValidAddr("192.168.1.10", "33", false); err == nil {
+		t.Error("an IPv4 prefix over 32 should be rejected")
+	}
 	if err := ValidAddr("192.168.1.10", "not-a-mask", false); err == nil {
 		t.Error("bad netmask accepted")
 	}
@@ -124,6 +133,17 @@ func TestMaskToCIDR(t *testing.T) {
 	}
 	if _, err := maskToCIDR("not-a-mask", false); err == nil {
 		t.Error("maskToCIDR should reject garbage")
+	}
+	for _, c := range []struct {
+		mask string
+		v6   bool
+	}{{"33", false}, {"-1", false}, {"200", false}, {"129", true}, {"-1", true}} {
+		if n, err := maskToCIDR(c.mask, c.v6); err == nil {
+			t.Errorf("maskToCIDR(%q, v6=%v) = %d, want an out-of-range error", c.mask, c.v6, n)
+		}
+	}
+	if n, err := maskToCIDR("128", true); err != nil || n != 128 {
+		t.Errorf("maskToCIDR(128, v6) = %d, %v", n, err)
 	}
 }
 

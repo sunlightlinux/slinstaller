@@ -93,8 +93,17 @@ type Interface struct {
 // config can be rejected before any disk is touched rather than failing
 // partway through an install.
 func ValidAddr(ip, netmask string, v6 bool) error {
-	if net.ParseIP(ip) == nil {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
 		return fmt.Errorf("invalid IP %q", ip)
+	}
+	// An IPv4-mapped IPv6 address ("::ffff:1.2.3.4") is written as IPv6.
+	is4 := parsed.To4() != nil && !strings.Contains(ip, ":")
+	if v6 && is4 {
+		return fmt.Errorf("IP %q is IPv4 but the address is marked IPv6", ip)
+	}
+	if !v6 && !is4 {
+		return fmt.Errorf("IP %q is IPv6 but the address is marked IPv4", ip)
 	}
 	if _, err := maskToCIDR(netmask, v6); err != nil {
 		return err
@@ -165,6 +174,13 @@ func maskToCIDR(mask string, v6 bool) (int, error) {
 		return 24, nil
 	}
 	if n, err := strconv.Atoi(mask); err == nil {
+		limit := 32
+		if v6 {
+			limit = 128
+		}
+		if n < 0 || n > limit {
+			return 0, fmt.Errorf("prefix length %d out of range 0..%d", n, limit)
+		}
 		return n, nil
 	}
 

@@ -12,6 +12,11 @@ change.
 
 ### Fixed
 
+- **A static address's prefix and family are checked.** A numeric netmask
+  such as `33`, `-1` or `200` was accepted and written to dhcpcd.conf as
+  is, and an IPv4 address marked `version: 1` (or an IPv6 one marked 0)
+  passed validation. A prefix must now be 0..32 for IPv4 and 0..128 for
+  IPv6, and the IP must match its declared family.
 - **A very long output line no longer hangs the TUI install.** The TUI
   runner read command output with a 1 MiB line limit and stopped reading
   at the first longer line; the command then blocked writing to the pipe
