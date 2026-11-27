@@ -275,3 +275,28 @@ func WithMounted(device, fstype string, f func(dir string) error) (err error) {
 	}()
 	return f(top)
 }
+
+// ReadRootFile mounts the plan's root filesystem read-only at the mount
+// root, reads rel from it, and unmounts it again: a look at a target before
+// anything of it is mounted writable (a resume's check that the disk holds
+// the install it resumes — mounting another system's filesystems
+// read-write replays their journals).
+func (m *Mounter) ReadRootFile(pl *Plan, rel string) ([]byte, error) {
+	for _, p := range pl.MountOrder() {
+		if p.Mountpoint != "/" {
+			continue
+		}
+		if err := os.MkdirAll(m.root, 0o755); err != nil {
+			return nil, err
+		}
+		if err := syscall.Mount(p.EffectiveDevice(), m.root, p.Filesystem, syscall.MS_RDONLY|syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV, p.mountData()); err != nil {
+			return nil, fmt.Errorf("storage: mount %s read-only on %s: %w", p.EffectiveDevice(), m.root, err)
+		}
+		data, err := os.ReadFile(filepath.Join(m.root, rel))
+		if uerr := syscall.Unmount(m.root, 0); uerr != nil && err == nil {
+			err = fmt.Errorf("storage: unmount %s: %w", m.root, uerr)
+		}
+		return data, err
+	}
+	return nil, fmt.Errorf("storage: the plan has no root filesystem")
+}

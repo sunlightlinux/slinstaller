@@ -164,6 +164,7 @@ func Install(cfg *config.Config, opts Options) error {
 	}
 
 	in := &installer{cfg: cfg, plan: plan, opts: opts, mnt: storage.NewMounter(opts.Root)}
+	in.readRoot = func(rel string) ([]byte, error) { return in.mnt.ReadRootFile(plan, rel) }
 	return in.run()
 }
 
@@ -172,6 +173,9 @@ type installer struct {
 	plan *storage.Plan
 	opts Options
 	mnt  *storage.Mounter
+	// readRoot reads a file from the root filesystem mounted read-only
+	// (mnt.ReadRootFile); nil in tests that mount nothing.
+	readRoot func(rel string) ([]byte, error)
 
 	// resolvCopy is the live system's resolv.conf copied into the target
 	// for install-time DNS, removed again when the install completes.
@@ -671,6 +675,16 @@ func (in *installer) mount() error {
 	} else if err := in.reassemble(); err != nil {
 		return err
 	}
+	// Resuming, the mark is looked for on the root mounted read-only first:
+	// mounted read-write, the wrong disk's filesystems (another system's)
+	// had their journals replayed before the refusal below.
+	want := "slinstaller install in progress; layout " + in.layoutPrint() + "\n"
+	if in.opts.ResumeFrom != "" && in.readRoot != nil {
+		got, err := in.readRoot(resumeMark)
+		if err != nil || string(got) != want {
+			return fmt.Errorf("resume: the target holds no install this installer left unfinished for this config's disk layout (/%s) - nothing to resume; run the install without --resume", resumeMark)
+		}
+	}
 	if err := in.mnt.MountAll(in.plan); err != nil {
 		return err
 	}
@@ -683,7 +697,6 @@ func (in *installer) mount() error {
 	// attempt with another layout (on a preserved partition, say) is not
 	// this install's.
 	mark := filepath.Join(in.opts.Root, resumeMark)
-	want := "slinstaller install in progress; layout " + in.layoutPrint() + "\n"
 	if in.opts.ResumeFrom == "" {
 		os.Remove(mark) // a link there is replaced, not followed
 		if err := os.WriteFile(mark, []byte(want), 0o600); err != nil {

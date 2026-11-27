@@ -101,6 +101,19 @@ func mountChild(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// ReadRootFile: the root mounted read-only, read, and unmounted again.
+	look := filepath.Join(filepath.Dir(root), "look")
+	lm := NewMounter(look)
+	if _, err := lm.ReadRootFile(pl, "marker"); !os.IsNotExist(err) {
+		t.Errorf("a fresh tmpfs holds the marker? %v", err)
+	}
+	if dev(look) != dev(filepath.Dir(look)) {
+		t.Error("ReadRootFile left the root mounted")
+	}
+	if _, err := lm.ReadRootFile(&Plan{}, "x"); err == nil {
+		t.Error("a plan with no root read")
+	}
+
 	// Subvolumes: the filesystem is mounted on its own, `btrfs subvolume
 	// create` runs once per subvolume inside it, and it is unmounted again.
 	// (tmpfs stands in for btrfs; the command is recorded, not run.)

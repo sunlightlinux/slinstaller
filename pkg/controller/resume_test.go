@@ -507,3 +507,22 @@ func TestResumedFirstBootGeneratesLocale(t *testing.T) {
 		t.Errorf("not regenerated on resume:\n%s", r.flat())
 	}
 }
+
+// A resume looks for the mark on the root mounted read-only before any of
+// the target is mounted writable.
+func TestResumeLooksReadOnlyFirst(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.ResumeFrom = "bootloader"
+	looked := false
+	in.readRoot = func(rel string) ([]byte, error) {
+		looked = true
+		return []byte("something else\n"), nil
+	}
+	// The plan's partitions stay: had MountAll run, it would fail on the
+	// devices — the refusal comes first.
+	wantErr(t, in.mount(), "nothing to resume")
+	if !looked {
+		t.Error("the root was not looked at read-only")
+	}
+}
