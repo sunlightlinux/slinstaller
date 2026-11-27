@@ -132,6 +132,13 @@ work:
   the config sees to sudo itself: a `write-files` entry under
   `/etc/sudoers*`, or post-install or stage hooks. (Root is locked once
   there is an administrator, and sudo asks for a password.)
+- **Other disks.** Wiping a disk (or formatting a partition, in a reuse
+  install) that is one member of a RAID array, ZFS pool or multi-device
+  btrfs with a member on another disk is refused — assembled or not — as
+  is a disk sharing an active array or volume group; `--force-destructive`
+  overrides it. The teardown checks its own listing again, so a disk
+  plugged in after the confirmation cannot slip an array in. RAID array
+  names are one path component (`md0`, `root`).
 - **Packages.** With `xbps-install` on the live system, the package set
   is dry-run against the repositories (`-n`, into a scratch root); a
   package xbps cannot find or resolve is refused. The Sunlight mirror

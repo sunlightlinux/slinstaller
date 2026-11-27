@@ -164,6 +164,14 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
 
 **Disks and partitions**
 
+- **What the confirmation did not name is not touched.** A RAID name like
+  `../sdz` pointed mdadm, parted and mkfs at /dev/sdz; names are one path
+  component now. A member of an array, pool or multi-device btrfs that
+  spans another disk is refused even when not assembled (lsblk's UUIDs),
+  for wiped disks, disk images and a reuse install's formatted
+  partitions. The teardown re-checks its own listing. A resume looks for
+  its mark on the root mounted read-only, with no journal replayed,
+  before mounting anything writable.
 - **Intel RST/DDF containers, multipath and dmraid** are released before
   the wipe: lsblk names them "container", "mpath" and "dmraid", which
   were not taken for holders, and wipefs then failed with EBUSY after
