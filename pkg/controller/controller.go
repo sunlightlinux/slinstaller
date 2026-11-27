@@ -500,6 +500,34 @@ func (in *installer) partition() error {
 // volume groups activated, in that order. Without it a resume after a
 // reboot failed at the mount with "no such file or directory".
 func (in *installer) reassemble() error {
+	// What the first attempt put on each partition is checked before
+	// anything is done to it: reassembling stops and assembles arrays and
+	// activates groups, and a resume asks no confirmation — with the disks
+	// renamed since, that was done to another system's array before the
+	// mark was looked at.
+	list := in.opts.Devices
+	if list == nil {
+		list = blockdev.List
+	}
+	if devs, err := list(); err == nil {
+		for _, p := range in.plan.Parts {
+			if p.LV || p.Raid {
+				continue
+			}
+			want := ""
+			switch {
+			case p.Encrypted:
+				want = "crypto_LUKS"
+			case p.IsRaidMember:
+				want = "linux_raid_member"
+			case p.IsPV:
+				want = "LVM2_member"
+			}
+			if d := blockdev.FindByPath(devs, p.Device); want != "" && d != nil && d.FsType != want {
+				return fmt.Errorf("resume: %s holds %s, not the %s this config made there - nothing to resume on this disk", p.Device, orNone(d.FsType), want)
+			}
+		}
+	}
 	gone := func(dev string) bool {
 		_, err := os.Stat(dev)
 		return err != nil
@@ -2451,4 +2479,11 @@ func removeIfPresent(path string) error {
 		return fmt.Errorf("remove %s: %w", path, err)
 	}
 	return nil
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "nothing"
+	}
+	return s
 }

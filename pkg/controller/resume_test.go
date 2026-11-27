@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 )
 
@@ -609,5 +610,22 @@ func TestPutBackResolvKeepsWhatTheConfigMade(t *testing.T) {
 	in.cleanup()
 	if got, _ := os.ReadFile(in.resolvCopy); string(got) != "nameserver 192.0.2.53\n" {
 		t.Errorf("cleanup lost a written resolv.conf: %q", got)
+	}
+}
+
+// A resume onto a partition holding something else than this config made
+// there (disks renamed since) touches no array or volume before refusing.
+func TestReassembleChecksWhatIsThere(t *testing.T) {
+	args := fakeCryptsetup(t)
+	var r recorder
+	in, _ := cryptInstaller(t, lvmConfig("/boot", true), &r)
+	in.opts.ResumeFrom, in.opts.Passphrase = "bootloader", "a long passphrase"
+	in.opts.Devices = func() ([]blockdev.Device, error) {
+		return []blockdev.Device{{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []blockdev.Device{
+			{Name: "sda2", Path: "/dev/sda2", Type: "part", FsType: "ext4"}}}}, nil
+	}
+	wantErr(t, in.reassemble(), "holds ext4, not the crypto_LUKS")
+	if got, _ := os.ReadFile(filepath.Join(args, "args")); len(got) != 0 || len(r.cmds) != 0 {
+		t.Errorf("ran before refusing: %s %s", got, r.flat())
 	}
 }

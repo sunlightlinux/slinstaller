@@ -27,7 +27,8 @@ func stagedInstaller(t *testing.T, cfg *config.Config, r *recorder) *installer {
 	return &installer{
 		cfg:  cfg,
 		plan: plan,
-		opts: Options{Root: root, Runner: r.run},
+		// The host's own disks are never this test's.
+		opts: Options{Root: root, Runner: r.run, Devices: noDevices},
 		mnt:  storage.NewMounter(root),
 	}
 }
