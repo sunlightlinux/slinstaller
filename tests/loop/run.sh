@@ -161,6 +161,40 @@ mount -o ro "${disk}p2" "$WORK/data"
 umount "$WORK/data"
 pass "shrink: a size below the data is refused, partition and data untouched"
 
+# --- 3a. A new partition named for one that exists is refused --------------
+# parted numbers a new partition itself (the lowest free number); a config
+# that names an existing one would have had mkfs format it. Read from the
+# real table, before anything is touched.
+disk="$(new_disk 2048)"; name="$(basename "$disk")"
+parted -s "$disk" mklabel gpt
+parted -s "$disk" mkpart EFI fat32 1MiB 257MiB
+parted -s "$disk" set 1 esp on
+parted -s "$disk" mkpart data ext4 257MiB 800MiB
+partprobe "$disk"; udevadm settle 2>/dev/null || true
+mkfs.vfat -F32 "${disk}p1" >/dev/null
+mkfs.ext4 -q -F "${disk}p2"
+uuid_before="$(blkid -p -s UUID -o value "${disk}p2")"
+for n in 2 3; do
+	cat > "$WORK/create$n.yaml" <<YAML
+reusePartitions: true
+targetMedia:
+- name: $name
+  type: disk
+  children:
+  - { name: ${name}p1, type: part, fstype: vfat, mountpoint: /boot/efi, preserve: true }
+  - { name: ${name}p$n, type: part, fstype: ext4, mountpoint: /, create: true, start: 900M, size: 1000M }
+YAML
+done
+if echo "$disk" | "$BIN" --apply --through partition --root "$WORK/target" --log "$WORK/install.log" "$WORK/create2.yaml" >"$WORK/create2.out" 2>&1; then
+	fail "create: a new partition named for the existing p2 was accepted"
+fi
+grep -q "parted will number it 3" "$WORK/create2.out" || { cat "$WORK/create2.out" >&2; fail "create: the refusal does not say what parted will number it"; }
+[ "$(blkid -p -s UUID -o value "${disk}p2")" = "$uuid_before" ] || fail "create: the existing p2 was formatted"
+[ ! -e "${disk}p3" ] || fail "create: a partition was cut although the install was refused"
+install partition "$WORK/create3.yaml" "$disk"
+[ "$(fstype "${disk}p3")" = ext4 ] && [ "$(blkid -p -s UUID -o value "${disk}p2")" = "$uuid_before" ] || fail "create: p3 not made, or p2 touched"
+pass "create: a partition named for an existing one is refused untouched; named as parted numbers it, it is made"
+
 # --- 3b. The same beside an ntfs partition, as next to another system -------
 if command -v mkfs.ntfs >/dev/null && command -v ntfscp >/dev/null; then
 	disk="$(new_disk 2048)"; name="$(basename "$disk")"
