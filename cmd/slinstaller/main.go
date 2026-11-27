@@ -231,9 +231,16 @@ func run(args []string) error {
 	root = filepath.Clean(root)
 	// Nor a directory of the live system: --unmount --root /dev detached
 	// the live /dev's mounts, and an install would mount over them.
-	for _, sys := range []string{"/dev", "/proc", "/sys", "/run", "/boot", "/etc", "/usr", "/var", "/home", "/root", "/bin", "/sbin", "/lib", "/lib64"} {
+	for _, sys := range []string{"/dev", "/proc", "/sys", "/run", "/boot", "/etc", "/usr", "/var", "/home", "/root", "/bin", "/sbin", "/lib", "/lib64", "/.snapshots"} {
 		if root == sys || strings.HasPrefix(root, sys+"/") {
 			return fmt.Errorf("--root %s is in the live system's %s; use a directory of its own, e.g. /mnt", root, sys)
+		}
+	}
+	// These themselves are the live system's (--unmount --root /tmp took
+	// down the live /tmp); a directory made under one is the operator's.
+	for _, sys := range []string{"/tmp", "/opt", "/srv", "/media"} {
+		if root == sys {
+			return fmt.Errorf("--root %s is the live system's own %s; use a directory of its own, e.g. /mnt", root, sys)
 		}
 	}
 	// A foreign architecture installs packages whose configure scripts
@@ -468,6 +475,15 @@ restart:
 		cfg.SwapFileSize = swapFileSize
 	}
 	if image != "" {
+		// A flag's relative path is the shell's, from the current directory
+		// (the config's own image: is read beside the config, below): it was
+		// looked up beside the config, and a file of that name there was
+		// installed instead without a word.
+		if !config.IsRemote(image) && !filepath.IsAbs(image) {
+			if abs, err := filepath.Abs(image); err == nil {
+				image = abs
+			}
+		}
 		cfg.Image = image
 	}
 	if reportURL != "" {

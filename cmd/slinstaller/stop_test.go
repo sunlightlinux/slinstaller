@@ -158,3 +158,29 @@ func TestLogLevelRange(t *testing.T) {
 		}
 	}
 }
+
+// --root is never the live system's own directories; one made under /tmp is fine.
+func TestRootDenyList(t *testing.T) {
+	for _, r := range []string{"/dev/x", "/run/target", "/tmp", "/opt", "/srv", "/media", "/.snapshots/1"} {
+		if err := run([]string{"--root", r, "--unmount"}); err == nil || !strings.Contains(err.Error(), "live system") {
+			t.Errorf("--root %s: %v", r, err)
+		}
+	}
+	if err := run([]string{"--root", "/tmp/sl-target-x", "--version"}); err != nil {
+		t.Errorf("a directory under /tmp: %v", err)
+	}
+}
+
+// A relative --image is the current directory's, not the config's.
+func TestImageFlagRelativeToCwd(t *testing.T) {
+	cwd, dir := t.TempDir(), t.TempDir()
+	cfgDir := filepath.Join(dir, "cfgs")
+	os.MkdirAll(cfgDir, 0o755)
+	path := writeConfig(t, cfgDir, plainConfig())
+	os.WriteFile(filepath.Join(cfgDir, "base.tar"), []byte("wrong"), 0o644) // beside the config: not this one
+	t.Chdir(cwd)
+	err := run([]string{"--system-check", "--image", "base.tar", path})
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(cwd, "base.tar")) {
+		t.Errorf("--image base.tar looked up elsewhere: %v", err)
+	}
+}
