@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -206,7 +208,9 @@ func (pl *Plan) DiskList() []string {
 // what is left) and the logical volumes and RAID arrays that are not cut by
 // parted. It lets the caller check a layout fits its disks before anything
 // is wiped. A partition's disk is its Disk field, defaulting to the plan's
-// primary disk.
+// primary disk. A size too big to count, or a sum that overflows, saturates
+// at the largest value, so the fit check fails rather than wrapping to a
+// small number that fits.
 func (pl *Plan) FixedBytesByDisk() map[string]uint64 {
 	out := map[string]uint64{}
 	for _, p := range pl.Parts {
@@ -217,14 +221,20 @@ func (pl *Plan) FixedBytesByDisk() map[string]uint64 {
 			continue
 		}
 		n, err := ParseSize(p.Size)
-		if err != nil {
+		if errors.Is(err, errSizeOverflow) {
+			n = math.MaxUint64
+		} else if err != nil {
 			continue
 		}
 		disk := p.Disk
 		if disk == "" {
 			disk = pl.Disk
 		}
-		out[disk] += n
+		if out[disk] > math.MaxUint64-n {
+			out[disk] = math.MaxUint64
+		} else {
+			out[disk] += n
+		}
 	}
 	return out
 }

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
@@ -44,7 +45,7 @@ func TestParseSize(t *testing.T) {
 		}
 	}
 
-	for _, bad := range []string{"", "rest", "12X", "M"} {
+	for _, bad := range []string{"", "rest", "12X", "M", "-1G", "inf", "nan", "1e30", "16777216T", "18446744073709551616"} {
 		if _, err := ParseSize(bad); err == nil {
 			t.Errorf("ParseSize(%q) = nil error, want failure", bad)
 		}
@@ -318,5 +319,16 @@ func TestFixedBytesByDisk(t *testing.T) {
 	}
 	if got["/dev/sdb"] != 1073741824 {
 		t.Errorf("sdb fixed = %d, want 1073741824", got["/dev/sdb"])
+	}
+
+	// An absurd size must not wrap to something small that fits a disk.
+	pl = &Plan{Disk: "/dev/sda", Parts: []Partition{
+		{Device: "/dev/sda1", Size: "16777216T"},                   // 2^64: overflows alone
+		{Device: "/dev/sdb1", Disk: "/dev/sdb", Size: "16777215T"}, // fits alone...
+		{Device: "/dev/sdb2", Disk: "/dev/sdb", Size: "16777215T"}, // ...not summed
+	}}
+	got = pl.FixedBytesByDisk()
+	if got["/dev/sda"] != math.MaxUint64 || got["/dev/sdb"] != math.MaxUint64 {
+		t.Errorf("overflowing sizes should saturate, got %v", got)
 	}
 }

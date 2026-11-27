@@ -2419,10 +2419,14 @@ func parseSize(s string) (uint64, error) {
 	}
 
 	f, err := strconv.ParseFloat(num, 64)
-	if err != nil || f < 0 {
+	if err != nil || f < 0 || math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0, fmt.Errorf("size %q is not a byte count or a number with a K/M/G/T unit", s)
 	}
-	return uint64(math.Round(f * mult)), nil
+	b := math.Round(f * mult)
+	if b >= float64(1<<64) {
+		return 0, fmt.Errorf("size %q is too large", s)
+	}
+	return uint64(b), nil
 }
 
 // partNumber extracts the trailing partition number from a device name

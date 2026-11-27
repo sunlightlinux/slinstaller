@@ -12,6 +12,12 @@ change.
 
 ### Fixed
 
+- **Absurd sizes are rejected instead of wrapping.** A config size of
+  `inf`, `nan`, `1e30` or a byte count past 64 bits was accepted and
+  converted to an arbitrary number, and a plan size like `16777216T`
+  wrapped to 0. Both parsers now refuse them, and the disk-fit check
+  saturates its sum, so an oversized layout fails before the disk is
+  wiped rather than passing as a tiny one.
 - **A static address's prefix and family are checked.** A numeric netmask
   such as `33`, `-1` or `200` was accepted and written to dhcpcd.conf as
   is, and an IPv4 address marked `version: 1` (or an IPv6 one marked 0)

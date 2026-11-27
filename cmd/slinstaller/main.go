@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -1011,6 +1012,9 @@ func checkDiskFit(plan *storage.Plan, devs []blockdev.Device, rootMin uint64, ro
 			continue // refused by checkTargetDisks
 		}
 		need := fixed[disk] + storage.GPTReserveBytes
+		if need < fixed[disk] { // saturated: an absurd size
+			need = math.MaxUint64
+		}
 		if need > d.Size {
 			return fmt.Errorf("layout needs %s on %s but the disk is only %s - reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
 				humanSize(need), disk, humanSize(d.Size))

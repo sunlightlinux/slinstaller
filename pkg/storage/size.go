@@ -1,9 +1,14 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 )
+
+// errSizeOverflow is a size that does not fit in 64 bits of bytes.
+var errSizeOverflow = errors.New("size overflows 64 bits")
 
 // ParseSize converts a Plan partition size such as "512M" or "8G" to
 // bytes.
@@ -36,6 +41,9 @@ func ParseSize(s string) (uint64, error) {
 	n, err := strconv.ParseUint(digits, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("size %q: not a number optionally followed by K, M, G or T", s)
+	}
+	if n > math.MaxUint64/mult {
+		return 0, fmt.Errorf("size %q: %w", s, errSizeOverflow)
 	}
 	return n * mult, nil
 }
