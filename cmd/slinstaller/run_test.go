@@ -250,6 +250,14 @@ func TestDryRun(t *testing.T) {
 	if err != nil || !strings.Contains(errOut, "Dry run (reusePartitions)") || !strings.Contains(errOut, "the table is kept") {
 		t.Errorf("reuse dry run: %v\n%s", err, errOut)
 	}
+	// On a disk in use it says --apply would refuse, not "Re-run with --apply".
+	setListing(t, bin, `{"name":"slitest0","path":"`+testDisk+`","size":64000000000,"type":"disk","children":[
+		{"name":"slitest0p1","path":"`+testDisk+`p1","size":1000,"type":"part","mountpoint":"/boot/efi"}]}`)
+	_, errOut, _ = runWith(t, "", writeConfig(t, dir, reuse))
+	if !strings.Contains(errOut, "it will refuse: "+testDisk+" is in use") || strings.Contains(errOut, "Re-run with --apply") {
+		t.Errorf("reuse dry run on a disk in use:\n%s", errOut)
+	}
+	os.Remove(filepath.Join(bin, "lsblk.json"))
 
 	// The flags that stand for config fields are accepted together.
 	if _, _, err = runWith(t, "", "--offline", "--skip-validation-size", "--skip-validation-all", "--reboot",

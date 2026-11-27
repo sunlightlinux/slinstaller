@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -282,6 +283,21 @@ func run(args []string) error {
 		return nil
 	}
 
+	// The modes that do one thing and exit: two given, all but one were
+	// dropped without a word (--discover with --json-yaml converted
+	// nothing).
+	var modes []string
+	for name, on := range map[string]bool{"--list-disks": listDisks, "--genpass": genpass != "", "--template": template != "",
+		"--json-yaml": jsonYAML != "", "--discover": discover != ""} {
+		if on {
+			modes = append(modes, name)
+		}
+	}
+	if len(modes) > 1 {
+		sort.Strings(modes)
+		return fmt.Errorf("%s are mutually exclusive: each does one thing and exits", strings.Join(modes, " and "))
+	}
+
 	if listDisks {
 		return printDisks()
 	}
@@ -313,9 +329,6 @@ func run(args []string) error {
 		return nil
 	}
 
-	if template != "" && jsonYAML != "" {
-		return fmt.Errorf("--json-yaml and --template are mutually exclusive")
-	}
 	if template != "" {
 		return writeTemplate(template)
 	}
@@ -1366,12 +1379,23 @@ func powerCommand(action string) error {
 // now. It is read from the live system, so it is shown apart from the
 // plan's own commands.
 func printRelease(plan *storage.Plan) (refuses bool) {
-	if !plan.Wipe {
-		return false
-	}
 	devs, err := blockdev.List()
 	if err != nil {
 		return false
+	}
+	// A reuse install releases nothing, but a disk in use is refused all
+	// the same (checkTargetDisks): said here too, rather than "Re-run with
+	// --apply" over a config --apply refuses.
+	if !plan.Wipe {
+		for _, disk := range plan.DiskList() {
+			if d := blockdev.FindByPath(devs, disk); d != nil {
+				if why := d.InUse(); why != "" {
+					fmt.Fprintf(os.Stderr, "\n(it will refuse: %s is in use: %s)\n", disk, why)
+					refuses = true
+				}
+			}
+		}
+		return refuses
 	}
 	var disks []blockdev.Device
 	var names []string
@@ -1412,6 +1436,8 @@ func printDisks() error {
 		fmt.Printf("%-14s %9s  %s\n", d.Path, humanSize(d.Size), d.Model)
 		if why := d.InUse(); why != "" {
 			fmt.Printf("  (not installable: %s)\n", why)
+		} else if !blockdev.Installable(d) {
+			fmt.Printf("  (not installable: no room for a system - zram, an eMMC boot area or an empty reader)\n")
 		}
 		for _, p := range d.Children {
 			fmt.Printf("  %-12s %9s  %s\n", p.Path, humanSize(p.Size), p.Type)

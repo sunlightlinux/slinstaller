@@ -184,3 +184,9 @@ func TestImageFlagRelativeToCwd(t *testing.T) {
 		t.Errorf("--image base.tar looked up elsewhere: %v", err)
 	}
 }
+
+func TestOneShotModesExclusive(t *testing.T) {
+	if err := run([]string{"--discover", "/dev/sda", "--json-yaml", "old.json"}); err == nil || !strings.Contains(err.Error(), "--discover and --json-yaml are mutually exclusive") {
+		t.Errorf("discover+json-yaml: %v", err)
+	}
+}
