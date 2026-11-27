@@ -406,3 +406,18 @@ func BenchmarkDetailsView10k(b *testing.B) {
 		_ = m.detailsView()
 	}
 }
+
+// BenchmarkLogLinePastTheBound is one more log line once the log is full —
+// every line of a long xbps run.
+func BenchmarkLogLinePastTheBound(b *testing.B) {
+	m := installModel{width: 120, height: 40, phase: phaseRunning}
+	for i := 0; i < maxLogLines; i++ {
+		nm, _ := m.Update(logMsg(fmt.Sprintf("%d: some xbps output line", i)))
+		m = nm.(installModel)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		nm, _ := m.Update(logMsg("one more line"))
+		m = nm.(installModel)
+	}
+}

@@ -101,7 +101,11 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 	fm, ok := final.(installModel)
 	if !ok {
 		abandonChildren()
-		return "", fmt.Errorf("the installer's screen failed; the install was abandoned")
+		err := awaitAbandoned(ch, result)
+		if err == nil {
+			err = errors.New("the installer's screen failed")
+		}
+		return "", fmt.Errorf("the installer's screen failed; the install was abandoned: %w", err)
 	}
 	if fm.cancelled && fm.stopping {
 		return "", awaitAbandoned(ch, result)
@@ -724,9 +728,17 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.logs) > maxLogLines {
 			m.logs = m.logs[len(m.logs)-maxLogLines:]
 			m.lineRows = m.lineRows[len(m.lineRows)-maxLogLines:]
-			// The oldest rows are gone: no further up than the top.
-			if top := len(m.logView()) - m.logRows(); m.scroll > top {
-				m.scroll = max(top, 0)
+			// The oldest rows are gone: no further up than the top. Counted
+			// from lineRows, and only for a view scrolled up — flattening
+			// the whole log here cost every line past the bound 0.8 ms.
+			if m.scroll > 0 {
+				total := 0
+				for _, lr := range m.lineRows {
+					total += len(lr)
+				}
+				if top := total - m.logRows(); m.scroll > top {
+					m.scroll = max(top, 0)
+				}
 			}
 		}
 		return m, m.wait()
