@@ -388,13 +388,40 @@ func wrapLog(l string, n int) []string {
 func (m installModel) logView() []logRow {
 	n := m.logWidth()
 	var rows []logRow
-	for i, l := range m.logs {
-		k := logKind(l)
-		for _, piece := range wrapLog(l, n) {
-			rows = append(rows, logRow{piece, k, i})
+	if len(m.lineRows) == len(m.logs) && m.lineWidth == n {
+		for i, lr := range m.lineRows {
+			for _, r := range lr {
+				r.line = i
+				rows = append(rows, r)
+			}
 		}
+		return rows
+	}
+	for i, l := range m.logs {
+		rows = append(rows, lineToRows(l, i, n)...)
 	}
 	return rows
+}
+
+// lineToRows is one log line as the view shows it: wrapped to width n,
+// each piece carrying the line's kind.
+func lineToRows(l string, i, n int) []logRow {
+	k := logKind(l)
+	var rows []logRow
+	for _, piece := range wrapLog(l, n) {
+		rows = append(rows, logRow{piece, k, i})
+	}
+	return rows
+}
+
+// rewrapLog makes lineRows anew for the current width.
+func (m *installModel) rewrapLog() {
+	n := m.logWidth()
+	m.lineRows = make([][]logRow, len(m.logs))
+	for i, l := range m.logs {
+		m.lineRows[i] = lineToRows(l, i, n)
+	}
+	m.lineWidth = n
 }
 
 // scrollLog handles the log view's keys; it reports whether it used one.
@@ -435,6 +462,13 @@ type installModel struct {
 	done, total int
 	stage       string
 	logs        []string
+	// lineRows holds each line of logs wrapped and classified, made once
+	// when the line arrives (at the width lineWidth), so the log view does
+	// not run two regexps and a rune wrap over 10000 lines on every frame:
+	// with the Details view open that cost 86 ms a frame, and the screen
+	// could no longer take lines as fast as the install made them.
+	lineRows  [][]logRow
+	lineWidth int
 	err         error
 	cancelled   bool
 
@@ -473,6 +507,7 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Leave room for the two-space indent and the percentage the bar
 		// prints, so it does not wrap past the panel.
 		m.bar.Width = contentWidth(m.width) - 6
+		m.rewrapLog()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -569,12 +604,18 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if xbpsProgressRe.MatchString(l) {
 			return m, m.wait()
 		}
+		if len(m.lineRows) != len(m.logs) || m.lineWidth != m.logWidth() {
+			m.rewrapLog()
+		}
+		rows := lineToRows(l, len(m.logs), m.lineWidth)
 		m.logs = append(m.logs, l)
+		m.lineRows = append(m.lineRows, rows)
 		if len(m.logs) > maxLogLines {
 			m.logs = m.logs[len(m.logs)-maxLogLines:]
+			m.lineRows = m.lineRows[len(m.lineRows)-maxLogLines:]
 		} else if m.scroll > 0 {
 			// keep a scrolled-up view on the rows being read
-			m.scroll += len(wrapLog(l, m.logWidth()))
+			m.scroll += len(rows)
 		}
 		return m, m.wait()
 

@@ -12,6 +12,10 @@ change.
 
 ### Changed
 
+- The install log view (Details) wraps and classifies each line once, as
+  it arrives, instead of all 10000 on every frame: 1.3 ms a frame instead
+  of 37 ms (benchmark), so an open log view no longer holds back the
+  commands whose output it shows.
 - The network check before an install makes one request per attempt, each
   bounded by what is left of its minute: an unreachable mirror took two
   10 s timeouts per attempt and 66 s in all.

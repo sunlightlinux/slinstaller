@@ -392,3 +392,17 @@ func TestOpenInstallLogPlanted(t *testing.T) {
 	os.WriteFile(own, []byte("last run\n"), 0o644)
 	check("own file", own)
 }
+
+// BenchmarkDetailsView10k is the Details view over a full log, drawn on
+// every message while it is open.
+func BenchmarkDetailsView10k(b *testing.B) {
+	m := installModel{width: 120, height: 40, phase: phaseRunning, details: true}
+	for i := 0; i < maxLogLines; i++ {
+		nm, _ := m.Update(logMsg(fmt.Sprintf("%d: some xbps output line, warning: nothing really %s", i, strings.Repeat("x", i%150))))
+		m = nm.(installModel)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = m.detailsView()
+	}
+}
