@@ -127,37 +127,47 @@ func writeDiagnostics(path string, cfg *config.Config, logPath string, failure e
 // redactedConfig is the config as YAML with every account's password hash
 // taken out: the file is meant to be handed to someone else.
 func redactedConfig(cfg *config.Config) []byte {
-	data, err := yaml.Marshal(cfg)
+	// Redacted on the config itself, before it is YAML: on the YAML, an
+	// env name YAML writes as !!binary (not UTF-8) made env a map of
+	// other keys than strings, and every value in it was left in.
+	c := *cfg
+	c.Users = nil
+	for _, u := range cfg.Users {
+		if u != nil {
+			cp := *u
+			if cp.Password != "" {
+				cp.Password = "(removed)"
+			}
+			u = &cp
+		}
+		c.Users = append(c.Users, u)
+	}
+	if cfg.Environment != nil {
+		c.Environment = map[string]string{}
+		for k, v := range cfg.Environment {
+			// Secrets by name: the archive is handed to others.
+			if config.SecretName(k) {
+				v = "(removed)"
+			}
+			c.Environment[k] = v
+		}
+	}
+	c.WriteFiles = nil
+	for _, f := range cfg.WriteFiles {
+		// write-files' contents: Wi-Fi keys, private keys, sudoers rules.
+		if f != nil {
+			cp := *f
+			cp.Content = fmt.Sprintf("(%d bytes removed)", len(f.Content))
+			f = &cp
+		}
+		c.WriteFiles = append(c.WriteFiles, f)
+	}
+	data, err := yaml.Marshal(&c)
 	if err != nil {
 		return []byte(fmt.Sprintf("(config could not be written: %v)\n", err))
 	}
 	var doc map[string]any
 	if yaml.Unmarshal(data, &doc) == nil {
-		if users, ok := doc["users"].([]any); ok {
-			for _, u := range users {
-				if m, ok := u.(map[string]any); ok && m["password"] != nil {
-					m["password"] = "(removed)"
-				}
-			}
-		}
-		// Secrets by name in env:, and write-files' contents (Wi-Fi keys,
-		// private keys, sudoers rules) — the archive is handed to others.
-		if env, ok := doc["env"].(map[string]any); ok {
-			for k := range env {
-				if config.SecretName(k) {
-					env[k] = "(removed)"
-				}
-			}
-		}
-		if files, ok := doc["write-files"].([]any); ok {
-			for _, f := range files {
-				if m, ok := f.(map[string]any); ok {
-					if c, ok := m["content"].(string); ok {
-						m["content"] = fmt.Sprintf("(%d bytes removed)", len(c))
-					}
-				}
-			}
-		}
 		maskURLPasswords(doc)
 		var out bytes.Buffer
 		out.WriteString("# password hashes, URL passwords, secret env values and write-files contents removed; hook commands are as written\n")
@@ -186,6 +196,17 @@ func maskURLPasswords(v any) {
 			} else {
 				maskURLPasswords(e)
 			}
+		}
+	case map[any]any:
+		// A map with a key YAML does not read back as a string (an env
+		// name written as !!binary): its values are masked all the same.
+		m := map[string]any{}
+		for k, e := range t {
+			m[fmt.Sprint(k)] = e
+		}
+		maskURLPasswords(m)
+		for k := range t {
+			t[k] = m[fmt.Sprint(k)]
 		}
 	case []any:
 		for i, e := range t {
