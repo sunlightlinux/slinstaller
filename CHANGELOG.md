@@ -10,6 +10,15 @@ change.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The dry run shows the whole partition stage.** It printed the disk's
+  own commands only: for an LVM, RAID or encrypted layout, `pvcreate`,
+  `vgcreate`, `lvcreate`, `mdadm --create` and `cryptsetup luksFormat`
+  ran under `--apply` without having been shown. They are printed now in
+  the order the stage runs them, and a test checks the stage runs that
+  list and nothing else.
+
 ## [2.2.0] - 2026-11-27
 
 Most of what follows moves a failure from the middle of an install —

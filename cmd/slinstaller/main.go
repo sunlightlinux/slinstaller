@@ -552,7 +552,10 @@ restart:
 	if err != nil {
 		return err
 	}
-	cmds, err := plan.Commands()
+	// What the partition stage runs, LUKS, RAID and LVM included: the
+	// disk's own commands alone left pvcreate, mdadm --create and
+	// luksFormat out of what the operator read before --apply.
+	cmds, err := controller.PartitionCommands(plan)
 	if err != nil {
 		return err
 	}

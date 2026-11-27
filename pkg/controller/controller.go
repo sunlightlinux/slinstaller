@@ -493,6 +493,42 @@ func (in *installer) partition() error {
 	return storage.RunCommands(mkfs, in.opts.Runner)
 }
 
+// PartitionCommands is what the partition stage runs, in its order, for a
+// dry run to show: the disk's own commands (storage.Plan.Commands) with
+// the layers the stage puts between the tables and the filesystems —
+// cryptsetup on the encrypted partitions, the arrays, cryptsetup on the
+// encrypted arrays, the arrays' own tables, the volume groups. cryptsetup's
+// trailing "-" is the passphrase, read from stdin. Releasing what the
+// live system holds on the disks is left out: it depends on what is
+// running when --apply is.
+func PartitionCommands(pl *storage.Plan) ([][]string, error) {
+	disk, err := pl.Commands()
+	if err != nil {
+		return nil, err
+	}
+	n := len(pl.WipeCommands()) + len(pl.ResizeCommands()) + len(pl.TableCommands())
+	arrayTables := len(pl.ArrayTableCommands())
+	cmds := slices.Clone(disk[:n])
+	grubBoot := (&installer{plan: pl}).bootCryptDevices()
+	encrypt := func(onArrays bool) {
+		for _, p := range pl.Parts {
+			if p.Encrypted && p.Raid == onArrays {
+				cmds = append(cmds, luks.FormatArgs(p.Device, slices.Contains(grubBoot, p.Device)), luks.OpenArgs(p.Device, p.MapName))
+			}
+		}
+	}
+	encrypt(false)
+	if mdadm.Used(pl) {
+		cmds = append(cmds, mdadm.Commands(pl)...)
+	}
+	encrypt(true)
+	cmds = append(cmds, disk[n:n+arrayTables]...)
+	if lvm.Used(pl) {
+		cmds = append(cmds, lvm.Commands(pl)...)
+	}
+	return append(cmds, disk[n+arrayTables:]...), nil
+}
+
 // reassemble brings back, for a resumed install, the stack the first
 // attempt built under its filesystems, where it is not there any more —
 // after a reboot of the live system, nothing is: encrypted partitions
