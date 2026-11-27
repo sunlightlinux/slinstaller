@@ -60,7 +60,9 @@ install() {
 mkdir -p "$WORK/target"
 
 # --- 1. A plain install: the table and the filesystems ---------------------
-disk="$(new_disk 2048)"; name="$(basename "$disk")"
+# 3 GiB: the root that fills the disk has to be left its 2 GB minimum, which
+# the disk-fit check holds staged runs to as well.
+disk="$(new_disk 3072)"; name="$(basename "$disk")"
 cat > "$WORK/plain.yaml" <<YAML
 targetMedia:
 - name: $name
@@ -225,7 +227,7 @@ umount "$WORK/data"
 pass "shrink btrfs: 1543 -> 900 MiB with its data intact, new root beside it"
 
 # --- 4. btrfs subvolumes, mount options, a discarded disk -------------------
-disk="$(new_disk 2048)"; name="$(basename "$disk")"
+disk="$(new_disk 3072)"; name="$(basename "$disk")"
 cat > "$WORK/btrfs.yaml" <<YAML
 targetMedia:
 - name: $name

@@ -751,13 +751,12 @@ restart:
 		}
 	}
 
-	// The disk checks run whenever the partition stage will: a staged
-	// --through run cuts and formats the disk like a full one, and skipping
-	// these with the tool checks above let it take a partition, a missing
-	// path, a mounted disk or a disk sharing an array with another for its
-	// target. Only a resume, which partitions nothing (and finds the target
-	// still mounted from the staged run), goes without them.
-	if through == "" || !resume {
+	// The disk checks run on every install, staged or not: a --through run
+	// cuts and formats the disk like a full one, and skipping these with the
+	// tool checks above let it take a partition, a missing path, a mounted
+	// disk or a disk sharing an array with another for its target. (A
+	// resume runs them too, as it always has; it cannot be staged.)
+	{
 		// Confirm each target disk exists and is a whole disk before we
 		// wipe it — a config written for another machine must not
 		// silently repartition the wrong thing (or a partition).
