@@ -2301,6 +2301,10 @@ func (c *Config) Plan() (*storage.Plan, error) {
 	// is the kernel's (sda, nvme0n1, dm-0): a resize gives it to sh -c
 	// unquoted, where "sda;reboot" ran reboot.
 	for _, d := range disks {
+		// An alias reference left after expandAliases names no alias.
+		if m := undefinedAliasRe.FindStringSubmatch(d.Name); m != nil {
+			return nil, fmt.Errorf("config: disk %s: alias %s is not defined; define it in block-devices or with --block-device %s:/dev/<disk>", d.Name, m[1], m[1])
+		}
 		if d.Name == "" || d.Name == "." || d.Name == ".." || !diskNameRe.MatchString(d.Name) {
 			return nil, fmt.Errorf("config: disk %q is not a kernel device name (e.g. sda, nvme0n1): letters, digits and . _ : + -, not a path", d.Name)
 		}
@@ -3083,6 +3087,9 @@ func partNumber(name string, fallback int) int {
 	}
 	return n
 }
+
+// undefinedAliasRe finds a clr-installer alias reference, ${name}.
+var undefinedAliasRe = regexp.MustCompile(`\$\{([^}]*)\}`)
 
 // diskNameRe is what a disk's name may be: a kernel block device name,
 // one path component under /dev with nothing a shell reads.

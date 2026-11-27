@@ -751,6 +751,20 @@ func TestPlanDiskNameIsAKernelName(t *testing.T) {
 	}
 }
 
+// A disk named through an alias nothing defines (clr-installer's tests
+// write ${baseimg}, given with --block-device) is refused for what it is:
+// the kernel-name message told the operator the name was wrong, not that
+// the alias was missing.
+func TestPlanDiskUndefinedAlias(t *testing.T) {
+	c := &Config{TargetMedia: []*Media{{Name: "${baseimg}", Type: "disk", Children: []*Media{
+		{Name: "${baseimg}1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
+		{Name: "${baseimg}2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+	}}}}
+	if _, err := c.Plan(); err == nil || !strings.Contains(err.Error(), "alias baseimg") || !strings.Contains(err.Error(), "--block-device") {
+		t.Errorf("got %v", err)
+	}
+}
+
 // Two things of a layout at one device path cannot both be made: a disk
 // named md0 beside an array md0 passed Validate, and the install
 // partitioned the disk, then ran mdadm --create /dev/md0 on a member of
