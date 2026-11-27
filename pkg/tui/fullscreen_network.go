@@ -202,6 +202,7 @@ func (m model) updateNetList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) startNetForm(idx int) (tea.Model, tea.Cmd) {
 	m.view = viewNetForm
 	m.netEdit = idx
+	m.netWas = m.netIfaces[idx]
 	m.formStep = 0
 	if m.netIfaces[idx].Static {
 		m.edCursor = 1
@@ -216,6 +217,10 @@ func (m model) startNetForm(idx int) (tea.Model, tea.Cmd) {
 func (m model) updateNetForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	ni := &m.netIfaces[m.netEdit]
 	if key.String() == "esc" {
+		// The form's cancel: the address and gateway entered before it
+		// were kept, shown on the hub and installed, while the live
+		// system, set only at the form's end, kept the old ones.
+		*ni = m.netWas
 		m.view = viewNetList
 		return m, nil
 	}

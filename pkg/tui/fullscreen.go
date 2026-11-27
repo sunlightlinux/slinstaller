@@ -341,6 +341,9 @@ type model struct {
 	netIfaces []netIfaceEntry
 	netCursor int // cursor in the interface list
 	netEdit   int // interface being configured in the form
+	// netWas is that interface as the form opened on it, put back by Esc:
+	// each step writes its field as it is entered.
+	netWas netIfaceEntry
 
 	// Tri-state clr toggles: 0 = no choice, 1 = enabled, 2 = disabled.
 	// autoUpdate sets the config's autoUpdate, and defaults to enabled as
