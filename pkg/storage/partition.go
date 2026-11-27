@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -347,9 +348,63 @@ func StreamRunner(w io.Writer) Runner {
 		fmt.Fprintf(w, "    + %s\n", ShowCommand(args))
 		c := exec.Command(args[0], args[1:]...)
 		c.WaitDelay = outputWait // see SinkRunner
-		c.Stdout = w
-		c.Stderr = w
-		return outputWaited(c.Run())
+		out := w
+		var mw *maskWriter
+		if hasSecrets() {
+			// A hook that echoes its token (or runs under set -x) would
+			// put it in the log: its output is masked line by line.
+			mw = &maskWriter{w: w}
+			out = mw
+		}
+		c.Stdout = out
+		c.Stderr = out
+		err := outputWaited(c.Run())
+		if mw != nil {
+			mw.flush()
+		}
+		return err
+	}
+}
+
+// maskWriter writes what it is given with the registered secrets masked, a
+// line at a time (a secret split across two writes is still found); a line
+// longer than 64 KiB is masked and written as it stands.
+type maskWriter struct {
+	mu  sync.Mutex
+	w   io.Writer
+	buf []byte
+}
+
+func (m *maskWriter) Write(p []byte) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.buf = append(m.buf, p...)
+	for {
+		i := bytes.IndexByte(m.buf, '\n')
+		if i < 0 {
+			break
+		}
+		if _, err := io.WriteString(m.w, maskRegistered(string(m.buf[:i+1]))); err != nil {
+			return len(p), err
+		}
+		m.buf = m.buf[i+1:]
+	}
+	if len(m.buf) > 64<<10 {
+		m.flushLocked()
+	}
+	return len(p), nil
+}
+
+func (m *maskWriter) flush() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.flushLocked()
+}
+
+func (m *maskWriter) flushLocked() {
+	if len(m.buf) > 0 {
+		io.WriteString(m.w, maskRegistered(string(m.buf)))
+		m.buf = nil
 	}
 }
 
@@ -384,7 +439,14 @@ func MaskSecret(a string) string {
 	a = urlPasswordRe.ReplaceAllString(a, "$1:***@")
 	// user:password@host with no scheme, as a proxy is often written
 	// (https_proxy=user:pw@proxy:3128): curl and Go take it that way too.
+	// Only in a proxy setting: elsewhere a:b@c is an image digest
+	// (alpine:3.19@sha256:…), a GPT name (1:EFI@1), a schedule.
 	a = barePasswordRe.ReplaceAllString(a, "$1$2:***@")
+	return maskRegistered(a)
+}
+
+// maskRegistered masks the values AddSecret registered, and only those.
+func maskRegistered(a string) string {
 	secretsMu.Lock()
 	defer secretsMu.Unlock()
 	for _, v := range secrets {
@@ -393,9 +455,15 @@ func MaskSecret(a string) string {
 	return a
 }
 
-// barePasswordRe matches user:password@ at the start of a value or after
-// "=", a space or a quote, where no scheme precedes it.
-var barePasswordRe = regexp.MustCompile(`(^|[\s="'])([^\s:/@="']+):[^\s@/]+@`)
+func hasSecrets() bool {
+	secretsMu.Lock()
+	defer secretsMu.Unlock()
+	return len(secrets) > 0
+}
+
+// barePasswordRe matches user:password@ with no scheme in a proxy
+// setting: …_proxy=user:password@host (any case).
+var barePasswordRe = regexp.MustCompile(`(?i)((?:^|[\s"'])[a-z]*_?proxy=)([^\s:/@="']+):[^\s@/]+@`)
 
 var (
 	secretsMu sync.Mutex

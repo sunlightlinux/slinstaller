@@ -10,11 +10,14 @@ import (
 // fitMachine stubs a machine with the given online CPUs and memory.
 func fitMachine(t *testing.T, online string, memKiB string) {
 	t.Helper()
-	savedC, savedM := cpuSysDir, meminfoFile
-	t.Cleanup(func() { cpuSysDir, meminfoFile = savedC, savedM })
+	savedC, savedM, savedI := cpuSysDir, meminfoFile, cpuinfoFile
+	t.Cleanup(func() { cpuSysDir, meminfoFile, cpuinfoFile = savedC, savedM, savedI })
 	dir := t.TempDir()
 	cpuSysDir = dir
 	meminfoFile = filepath.Join(dir, "meminfo")
+	// A CPU with 1 GiB pages, whatever the host's (a VM's often has none).
+	cpuinfoFile = filepath.Join(dir, "cpuinfo")
+	os.WriteFile(cpuinfoFile, []byte("flags\t\t: fpu pse pdpe1gb lm\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "online"), []byte(online+"\n"), 0o644)
 	os.WriteFile(meminfoFile, []byte("MemTotal:       "+memKiB+" kB\n"), 0o644)
 }

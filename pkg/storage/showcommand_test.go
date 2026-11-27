@@ -141,4 +141,27 @@ func TestMaskSecretBareAndRegistered(t *testing.T) {
 	if MaskSecret("x marks") != "x marks" {
 		t.Error("a one-character value was masked")
 	}
+	// Not credentials: an image digest, a GPT name, a schedule.
+	for _, a := range []string{"alpine:3.19@sha256:abcd", "--change-name=1:EFI@1", "10:30@daily", "mailto:a@b.c"} {
+		if got := MaskSecret(a); got != a {
+			t.Errorf("%q masked as %q", a, got)
+		}
+	}
+	if got := MaskSecret("HTTPS_PROXY=u:p@proxy:3128"); got != "HTTPS_PROXY=u:***@proxy:3128" {
+		t.Errorf("upper-case proxy: %s", got)
+	}
+	// A registered secret a command prints is masked in its output too.
+	var b strings.Builder
+	if err := StreamRunner(&b)([]string{"sh", "-c", "printf 'tok=s3cr3t-'; printf 'token\\n'; echo done"}); err != nil {
+		t.Fatal(err)
+	}
+	_, out, _ := strings.Cut(b.String(), "\n") // after the command line, which holds it in two halves
+	if strings.Contains(out, "s3cr3t") || !strings.Contains(out, "tok=***") || !strings.Contains(out, "done") {
+		t.Errorf("stream output: %q", b.String())
+	}
+	var lines []string
+	SinkRunner(func(l string) { lines = append(lines, l) })([]string{"echo", "s3cr3t-token"})
+	if strings.Contains(strings.Join(lines, "\n"), "s3cr3t") {
+		t.Errorf("sink output: %q", lines)
+	}
 }

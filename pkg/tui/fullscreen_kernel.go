@@ -403,7 +403,7 @@ func (m model) profileNoteBase(p kernelProfile) string {
 	n := fmt.Sprintf("Auto-pinned for %d CPUs: isolated %s, housekeeping %s.",
 		m.cpuIso.Total, m.cpuIso.Isolated, m.cpuIso.Housekeeping)
 	if p.huge && m.hugeGiB > 0 {
-		n += fmt.Sprintf(" %d x 1GiB hugepages.", m.hugeGiB)
+		n += fmt.Sprintf(" %d GiB of hugepages.", m.hugeGiB) // 1 GiB pages, or 2 MiB where the CPU has none
 	}
 	if p.note != "" {
 		n = p.note + " " + n

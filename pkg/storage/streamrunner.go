@@ -87,7 +87,7 @@ func SinkRunner(sink func(line string)) Runner {
 			sc := bufio.NewScanner(pr)
 			sc.Buffer(make([]byte, 64*1024), 1<<20)
 			for sc.Scan() {
-				push(sc.Text())
+				push(maskRegistered(sc.Text())) // a hook's echoed token
 			}
 			// A line past the buffer stops the scanner. The child still
 			// writes to the pipe, so keep reading until EOF or it blocks

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -175,6 +176,12 @@ func maskURLPasswords(v any) {
 	case map[string]any:
 		for k, e := range t {
 			if s, ok := e.(string); ok {
+				// A proxy (httpsProxy: user:pw@proxy:3128) is masked as
+				// the …_proxy= setting it becomes.
+				if strings.Contains(strings.ToLower(k), "proxy") {
+					t[k] = strings.TrimPrefix(storage.MaskSecret("x_proxy="+s), "x_proxy=")
+					continue
+				}
 				t[k] = storage.MaskSecret(s)
 			} else {
 				maskURLPasswords(e)

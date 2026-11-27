@@ -2741,9 +2741,30 @@ func partNumber(name string, fallback int) int {
 // a secret (API_TOKEN, DB_PASSWORD, WIFI_PSK, …): its value is masked
 // wherever commands are shown or reported, and left out of diagnostics.
 func SecretName(name string) bool {
-	n := strings.ToUpper(name)
-	for _, w := range []string{"TOKEN", "SECRET", "PASS", "KEY", "PSK", "AUTH", "CRED", "PRIVATE"} {
-		if strings.Contains(n, w) {
+	// A name ending in PATH, FILE, DIR, URL or NAME holds where a secret is,
+	// or what it is called, not the secret.
+	parts := strings.FieldsFunc(strings.ToUpper(name), func(r rune) bool { return r == '_' || r == '-' || r == '.' })
+	if len(parts) > 1 {
+		switch parts[len(parts)-1] {
+		case "PATH", "FILE", "DIR", "URL", "NAME":
+			return false
+		}
+	}
+	// One word (authToken, dbPassword): by how it ends.
+	if len(parts) == 1 {
+		for _, w := range []string{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "PASSPHRASE", "APIKEY", "PSK"} {
+			if strings.HasSuffix(parts[0], w) {
+				return true
+			}
+		}
+	}
+	// By the parts of the name, not substrings: KEYMAP, KEYBOARD, AUTHOR,
+	// BYPASS_… are not secrets, and their values (de-latin1, /root, true)
+	// masked everywhere garbled every log line that held them.
+	for _, part := range parts {
+		switch part {
+		case "TOKEN", "SECRET", "PASS", "PASSWD", "PASSWORD", "PASSPHRASE", "KEY", "APIKEY",
+			"PSK", "AUTH", "CRED", "CREDS", "CREDENTIAL", "CREDENTIALS", "PRIVATE":
 			return true
 		}
 	}
