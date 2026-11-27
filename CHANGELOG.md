@@ -43,6 +43,10 @@ change.
   `post-image`, and what clr-installer writes into a config it saves
   (`preCheckDone`, `hypervisor`, an alias's `devicefile`) are known and
   ignored like `bundles`. `legacyBios` is still named.
+- **An alias targetMedia does not use is not refused.** A `block-devices`
+  alias naming an image file was refused as an image install even when no
+  disk or partition referred to it; clr-installer keeps only the aliases
+  in use and ignores the rest.
 - **The dry run shows the whole partition stage.** It printed the disk's
   own commands only: for an LVM, RAID or encrypted layout, `pvcreate`,
   `vgcreate`, `lvcreate`, `mdadm --create` and `cryptsetup luksFormat`

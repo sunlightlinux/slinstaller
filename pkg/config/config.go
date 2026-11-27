@@ -1061,14 +1061,9 @@ func (c *Config) expandAliases() {
 		if a == nil || a.Name == "" || a.File == "" {
 			continue
 		}
-		// A /dev/disk/by-id or by-path link names the disk it points at.
-		file := a.File
-		if real, err := filepath.EvalSymlinks(file); err == nil {
-			file = real
-		}
-		base := filepath.Base(file)
+		base := aliasBase(a.File)
 		diskVars[a.Name] = base
-		partVars[a.Name] = base + aliasPartSuffix(file)
+		partVars[a.Name] = base + aliasPartSuffix(base)
 	}
 	if len(diskVars) == 0 {
 		return
@@ -1085,6 +1080,37 @@ func (c *Config) expandAliases() {
 			ch.Name = expandVars(partVars, ch.Name)
 		}
 	}
+}
+
+// aliasBase is the device name an alias's file stands for in targetMedia:
+// the file's base name, after a /dev/disk/by-id or by-path link is followed
+// to the disk it points at.
+func aliasBase(file string) string {
+	if real, err := filepath.EvalSymlinks(file); err == nil {
+		file = real
+	}
+	return filepath.Base(file)
+}
+
+// aliasInUse reports whether targetMedia names a disk or partition through
+// the alias: clr-installer keeps only the aliases it uses, and ignores the
+// rest.
+func (c *Config) aliasInUse(a *StorageAlias) bool {
+	base := aliasBase(a.File)
+	for _, m := range c.TargetMedia {
+		if m == nil {
+			continue
+		}
+		if m.Name == base {
+			return true
+		}
+		for _, ch := range m.Children {
+			if ch != nil && (ch.Name == base || partitionOf(base, ch.Name)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // hostnameRe is the conservative intersection of what Linux and DNS
@@ -1279,9 +1305,10 @@ func (c *Config) Validate() error {
 	// A clr-installer alias whose file is not a device asks for an install
 	// into an image file (made, loop-mounted, kept with keepImage), which
 	// slinstaller does not do. Said here, rather than reading the file name
-	// as a device path (/dev/release.img) and failing later.
+	// as a device path (/dev/release.img) and failing later. An alias
+	// targetMedia does not use asks for nothing (clr-installer drops it).
 	for _, al := range c.BlockDevices {
-		if al != nil && al.File != "" && !strings.HasPrefix(al.File, "/dev/") {
+		if al != nil && al.File != "" && !strings.HasPrefix(al.File, "/dev/") && c.aliasInUse(al) {
 			add("block-devices: %s points at %s, an image file; installing into an image is not supported (name a device such as /dev/sda)", al.Name, al.File)
 		}
 	}

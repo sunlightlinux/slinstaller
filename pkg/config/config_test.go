@@ -878,6 +878,37 @@ targetMedia:
 	}
 }
 
+// clr-installer keeps only the aliases targetMedia uses: one naming an
+// image file that nothing refers to (a template's other target) does not
+// make the config an image install, and was refused here as one.
+func TestUnusedImageAliasIsNotRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(path, []byte(`
+block-devices: [{name: img, file: release.img}, {name: disk, file: /dev/sda}]
+targetMedia:
+- name: ${disk}
+  type: disk
+  children:
+  - {name: "${disk}1", type: part, fstype: vfat, mountpoint: /boot, size: 512M}
+  - {name: "${disk}2", type: part, fstype: ext4, mountpoint: /, size: 0}
+users: [{login: ion, admin: true, password: $6$s$h}]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate = %v", err)
+	}
+	// Used by a partition of another disk, it is refused.
+	cfg.TargetMedia[0].Children[1].Name = "release.img1"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "installing into an image is not supported") {
+		t.Errorf("used by a partition: Validate = %v", err)
+	}
+}
+
 // autoUpdate is on unless a config turns it off, as in clr-installer.
 func TestAutoUpdatesDefaultsOn(t *testing.T) {
 	off, on := false, true
