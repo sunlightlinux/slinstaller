@@ -102,6 +102,10 @@ type Options struct {
 	// files kept beside its config. Empty for an interactive install.
 	ConfigDir string
 
+	// ForceDestructive is --force-destructive: wiping a disk that shares an
+	// array or group with one not wiped was confirmed regardless.
+	ForceDestructive bool
+
 	// Devices lists the machine's block devices, for releasing what the
 	// live system runs on a disk before it is repartitioned. nil uses
 	// blockdev.List; tests substitute their own.
@@ -620,6 +624,25 @@ func (in *installer) releaseDisks() error {
 			continue // a loop device or image the listing does not show
 		}
 		disks, names = append(disks, *d), append(names, disk)
+	}
+	// What was checked before the confirmation is checked again on this
+	// listing, the one the teardown acts on: between the two, a disk
+	// plugged in while a prompt waited can have let udev assemble an array
+	// spanning a target and it, or mount something on a target.
+	var changed []string
+	for _, d := range disks {
+		if why := d.InUse(); why != "" {
+			changed = append(changed, d.Path+" is in use: "+why)
+		}
+		if !in.opts.ForceDestructive {
+			changed = append(changed, blockdev.Shared(devs, d.Path, names, nil)...)
+		}
+	}
+	if !in.opts.ForceDestructive {
+		changed = append(changed, blockdev.SharedMembers(devs, names)...)
+	}
+	if len(changed) > 0 {
+		return fmt.Errorf("the disks changed since they were checked; nothing was touched:\n  %s", strings.Join(changed, "\n  "))
 	}
 	// All at once: an array or volume spanning the disks is released once.
 	if err := storage.RunCommands(blockdev.TeardownAll(disks), in.opts.Runner); err != nil {

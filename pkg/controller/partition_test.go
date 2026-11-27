@@ -469,3 +469,32 @@ func TestHooksAfterAStage(t *testing.T) {
 		t.Errorf("failing hook: %v", err)
 	}
 }
+
+// The teardown's own listing is checked again: a disk changed since the
+// confirmation (a member of an array spanning another disk, a mount) stops
+// it before anything is touched.
+func TestReleaseRechecksTheListing(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.Devices = func() ([]blockdev.Device, error) {
+		return []blockdev.Device{
+			{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 64 << 30, Children: []blockdev.Device{
+				{Name: "sda1", Path: "/dev/sda1", Type: "part", FsType: "linux_raid_member", UUID: "u"}}},
+			{Name: "sdz", Path: "/dev/sdz", Type: "disk", Size: 64 << 30, Children: []blockdev.Device{
+				{Name: "sdz1", Path: "/dev/sdz1", Type: "part", FsType: "linux_raid_member", UUID: "u"}}},
+		}, nil
+	}
+	wantErr(t, in.releaseDisks(), "the disks changed since they were checked")
+	if len(r.cmds) != 0 {
+		t.Errorf("ran before refusing: %s", r.flat())
+	}
+	in.opts.ForceDestructive = true
+	if err := in.releaseDisks(); err != nil {
+		t.Errorf("forced: %v", err)
+	}
+	in.opts.Devices = func() ([]blockdev.Device, error) {
+		return []blockdev.Device{{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 64 << 30, Children: []blockdev.Device{
+			{Name: "sda1", Path: "/dev/sda1", Type: "part", Mountpoint: "/media/x"}}}}, nil
+	}
+	wantErr(t, in.releaseDisks(), "is in use")
+}

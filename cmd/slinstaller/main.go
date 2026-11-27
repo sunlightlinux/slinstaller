@@ -761,15 +761,16 @@ restart:
 	}
 
 	opts := controller.Options{
-		Root:        root,
-		Through:     through,
-		LocalRepos:  localRepos,
-		ExtraRepos:  extraRepos,
-		TargetRepos: targetRepos,
-		Repo:        repo,
-		KeysDir:     keys,
-		Arch:        arch,
-		Packages:    packages,
+		Root:             root,
+		Through:          through,
+		LocalRepos:       localRepos,
+		ExtraRepos:       extraRepos,
+		TargetRepos:      targetRepos,
+		Repo:             repo,
+		KeysDir:          keys,
+		Arch:             arch,
+		Packages:         packages,
+		ForceDestructive: forceDestructive,
 		// Stream progress and command output so the operator sees the
 		// install work rather than a silent pause.
 		Runner:     runner,
