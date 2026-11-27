@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -455,6 +456,7 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		// Manage User: the clr-style table of accounts.
 		m.view = viewUserList
 		m.userCursor = 0
+		m.usersWas = slices.Clone(m.users)
 		return m, nil
 	case secKernel:
 		m.view = viewSectionChoice

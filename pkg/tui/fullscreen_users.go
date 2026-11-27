@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -30,6 +31,7 @@ func (m model) updateUserList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	last := len(m.users) + len(userButtons) - 1
 	switch key.String() {
 	case "esc":
+		m.users = slices.Clone(m.usersWas)
 		m.view = viewHub
 	// Move backward over rows + buttons; Tab/arrows wrap so every control is
 	// reachable (the four buttons sit on one line).
@@ -62,10 +64,13 @@ func (m model) updateUserList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch m.userCursor - len(m.users) {
 		case 0: // Add New User
 			return m.startUserForm()
-		case 1: // Revert
-			m.users = nil
+		case 1: // Revert: the accounts as the table was opened with them
+			m.users = slices.Clone(m.usersWas)
 			m.userCursor = 0
-		default: // Confirm / Cancel both return to the hub
+		case 2: // Confirm
+			m.view = viewHub
+		default: // Cancel: as Revert, and back to the hub
+			m.users = slices.Clone(m.usersWas)
 			m.view = viewHub
 		}
 	}

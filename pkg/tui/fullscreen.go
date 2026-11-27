@@ -305,6 +305,10 @@ type model struct {
 	// Accounts, shown in the clr-style Manage User table. Password is the
 	// plaintext typed in the form; it is hashed when the config is built.
 	users []userEntry
+	// usersWas is the accounts as the table was opened with them, what
+	// Revert, Cancel and Esc go back to (a copy: deleting and editing in
+	// place write into users' array).
+	usersWas []userEntry
 
 	// Advanced-tab values.
 	proxy            string // httpsProxy

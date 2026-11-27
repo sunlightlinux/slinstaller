@@ -77,11 +77,12 @@ func TestManageUsers(t *testing.T) {
 	if got := send(m, up); got.userCursor != last {
 		t.Errorf("Up from the top = %d, want %d", got.userCursor, last)
 	}
-	// Confirm and Cancel both return to the menu, keeping the accounts.
-	for _, btn := range []int{2, 3} {
+	// Confirm returns to the menu, keeping the accounts; Cancel returns
+	// to it with the accounts the table was opened with (none, here).
+	for btn, want := range map[int]int{2: 1, 3: 0} {
 		m.userCursor = len(m.users) + btn
-		if got := send(m, enter); got.view != viewHub || len(got.users) != 1 {
-			t.Errorf("button %d: view %d users %d", btn, got.view, len(got.users))
+		if got := send(m, enter); got.view != viewHub || len(got.users) != want {
+			t.Errorf("button %d: view %d users %d, want %d", btn, got.view, len(got.users), want)
 		}
 	}
 	if send(m, escKey).view != viewHub {
@@ -385,5 +386,59 @@ func TestCustomArgsSummary(t *testing.T) {
 	m.kernelProfile, m.kernelArgs, m.kernelArgsRemove = "Custom", "quiet", "splash rhgb"
 	if got := m.sectionValue(secKernelArgs); got != "Custom: quiet -splash -rhgb" {
 		t.Errorf("summary %q", got)
+	}
+}
+
+// Revert and Cancel on Manage User go back to the accounts the table was
+// opened with, as clr-installer's do: Revert cleared every account, those
+// confirmed earlier too, and Cancel (and Esc) kept whatever was changed.
+func TestManageUsersRevertAndCancelRestore(t *testing.T) {
+	base := withSize(newModel(twoTestDisks()))
+	ion := userEntry{Login: "ion", Password: "correct horse", Admin: true}
+	open := func() model {
+		base.users = []userEntry{ion} // each time its own array
+		m := openSectionInTab(base, 0, secUser)
+		m.userCursor = 0
+		m = send(m, runes("d")) // ion deleted
+		m = send(m, runes("a")) // and guest added
+		m = send(typeText(m, "guest"), enter)
+		m = send(m, enter)
+		m = send(typeText(m, "battery staple"), enter)
+		m = send(typeText(m, "battery staple"), enter)
+		m = send(m, enter)
+		if len(m.users) != 1 || m.users[0].Login != "guest" {
+			t.Fatalf("users = %+v", m.users)
+		}
+		return m
+	}
+	same := func(what string, got []userEntry) {
+		t.Helper()
+		if len(got) != 1 || got[0] != ion {
+			t.Errorf("%s: users = %+v, want %+v", what, got, ion)
+		}
+	}
+
+	m := open()
+	m.userCursor = len(m.users) + 1 // Revert
+	m = send(m, enter)
+	if m.view != viewUserList {
+		t.Errorf("Revert left the table: view %d", m.view)
+	}
+	same("Revert", m.users)
+
+	m = open()
+	m.userCursor = len(m.users) + 3 // Cancel
+	m = send(m, enter)
+	if m.view != viewHub {
+		t.Errorf("Cancel did not leave the table: view %d", m.view)
+	}
+	same("Cancel", m.users)
+
+	same("Esc", send(open(), escKey).users)
+
+	m = open()
+	m.userCursor = len(m.users) + 2 // Confirm keeps the change
+	if got := send(m, enter); len(got.users) != 1 || got.users[0].Login != "guest" {
+		t.Errorf("Confirm: users = %+v", got.users)
 	}
 }
