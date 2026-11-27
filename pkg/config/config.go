@@ -2463,6 +2463,27 @@ func (c *Config) Plan() (*storage.Plan, error) {
 			}
 		}
 	}
+	// What goes into fstab, crypttab and the kernel command line as one
+	// field, checked here, where skipValidationAll cannot skip it: a space
+	// or a line break there starts another field or entry (crypt-options
+	// "a, discard" was two kernel arguments and a crypttab line out of
+	// shape).
+	field := func(v string) bool {
+		return strings.IndexFunc(v, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0
+	}
+	for _, p := range pl.Parts {
+		for what, v := range map[string]string{"mountpoint": p.Mountpoint, "mount-options": p.MountOptions,
+			"crypt-options": p.CryptOptions, "subvolume": p.Subvol} {
+			if !field(v) {
+				return nil, fmt.Errorf("config: %s: %s %q holds a space or a control character", p.Device, what, v)
+			}
+		}
+		for _, sv := range p.Subvolumes {
+			if !field(sv.Name) || !field(sv.Mountpoint) {
+				return nil, fmt.Errorf("config: %s: subvolume %q at %q holds a space or a control character", p.Device, sv.Name, sv.Mountpoint)
+			}
+		}
+	}
 	return pl, nil
 }
 

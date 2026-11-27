@@ -752,3 +752,29 @@ func TestSkipValidationAllKeepsWrittenChecks(t *testing.T) {
 		t.Errorf("an unusual layout refused with skipValidationAll: %v", err)
 	}
 }
+
+// What goes into fstab, crypttab or the kernel command line as one field
+// is checked by Plan, which skipValidationAll does not skip: crypt-options
+// "a, discard" was two kernel arguments and a crypttab line with a field
+// too many; a space in mount-options or a mountpoint the same in fstab.
+func TestPlanRefusesFieldsWithSpacesUnderSkipValidationAll(t *testing.T) {
+	for name, set := range map[string]func(*Media){
+		"crypt-options": func(m *Media) { m.Type, m.CryptOptions = "crypt", "discard, no-read-workqueue" },
+		"mount-options": func(m *Media) { m.MountOptions = "noatime, nodev" },
+		"mountpoint":    func(m *Media) { m.Mountpoint = "/srv/my data" },
+		"line break":    func(m *Media) { m.MountOptions = "noatime\n/dev/sdz / ext4" },
+	} {
+		c := &Config{SkipValidationAll: true, TargetMedia: []*Media{{Name: "sda", Type: "disk", Children: []*Media{
+			{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
+			{Name: "sda2", Type: "part", FsType: "ext4", Mountpoint: "/srv", Size: "1G"},
+			{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: "/"},
+		}}}}
+		set(c.TargetMedia[0].Children[1])
+		if c.Validate() != nil {
+			t.Fatalf("%s: refused by Validate under skipValidationAll, not what is tested", name)
+		}
+		if _, err := c.Plan(); err == nil || !strings.Contains(err.Error(), "space or a control character") {
+			t.Errorf("%s: Plan: %v", name, err)
+		}
+	}
+}
