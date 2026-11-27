@@ -203,3 +203,26 @@ func TestRunnersRunAndRefuseEmptyCommands(t *testing.T) {
 		t.Error("StreamRunner ran an empty command")
 	}
 }
+
+// Alongside another system, only the partitions this install cuts have
+// their GPT entry set: an existing one's type, GUID and name are another
+// system's, and stay.
+func TestEntryCommandsOnlyCreatedAlongside(t *testing.T) {
+	pl := &Plan{Disk: "/dev/sda", Parts: []Partition{
+		{Number: 1, Device: "/dev/sda1", Preserve: true, PartName: "Windows", PartUUID: "11111111-1111-1111-1111-111111111111"},
+		{Number: 3, Device: "/dev/sda3", Create: true, StartMiB: 100, EndMiB: 200, Filesystem: "ext4", Mountpoint: "/",
+			PartName: "root", PartUUID: "33333333-3333-3333-3333-333333333333"},
+	}}
+	got := flatCmds(pl.TableCommands())
+	for _, want := range []string{
+		"sfdisk --part-uuid /dev/sda 3 33333333-3333-3333-3333-333333333333\n",
+		"sfdisk --part-label /dev/sda 3 root\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Windows") || strings.Contains(got, "11111111") || strings.Contains(got, " 1 ") {
+		t.Errorf("the existing partition 1 touched:\n%s", got)
+	}
+}

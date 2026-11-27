@@ -460,6 +460,18 @@ func applyChild(t *testing.T) {
 		{"name":"sdz1","path":"/dev/sdz1","size":1000,"type":"part","fstype":"linux_raid_member","uuid":"a1b2"}]}`)
 	_, err = e.run(confirmed, plainConfig())
 	e.refused("unassembled shared array", err, "has a fellow member on /dev/sdz1")
+	wantRunErr(t, "unassembled shared array", err, "would break other disks") // before the confirmation, not only at the re-check
+	// A volume group not activated, with a PV on the target and one on sdz:
+	// lsblk shows no holder and no shared UUID (a PV's is its own); only
+	// pvs knows, and only the check before the confirmation asks it.
+	e = newApplyEnv(t)
+	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":64000000000,"type":"disk","children":[
+		{"name":"slitest0p2","path":"`+testDisk+`p2","size":1000,"type":"part","fstype":"LVM2_member","uuid":"pv1"}]},
+		{"name":"sdz","path":"/dev/sdz","size":1000,"type":"disk","children":[
+		{"name":"sdz1","path":"/dev/sdz1","size":1000,"type":"part","fstype":"LVM2_member","uuid":"pv2"}]}`)
+	os.WriteFile(filepath.Join(e.bin, "pvs.out"), []byte("  "+testDisk+"p2:data\n  /dev/sdz1:data\n"), 0o644)
+	_, err = e.run(confirmed, plainConfig())
+	e.refused("a volume group spanning another disk", err, "volume group data also has physical volumes on /dev/sdz")
 
 	// A reuse install shrinking a member of a btrfs spanning another disk
 	// (its resize would act on devid 1, there), or formatting a PV of a
@@ -502,6 +514,14 @@ func applyChild(t *testing.T) {
 	_, err = e.run(confirmed, bothPVs, "--through", "partition")
 	if err != nil && strings.Contains(err.Error(), "physical volume") {
 		t.Errorf("a group wholly formatted refused: %v", err)
+	}
+	// A group on other disks altogether is none of this install's business.
+	e = newApplyEnv(t)
+	setListing(t, e.bin, strings.ReplaceAll(reuseListing, `"btrfs","uuid":"b7f5"}]},`, `"ext4"}]},`))
+	os.WriteFile(filepath.Join(e.bin, "pvs.out"), []byte("  /dev/sdz1:other\n  /dev/sdy1:other\n"), 0o644)
+	_, err = e.run(confirmed, formatPV, "--through", "partition")
+	if err != nil && strings.Contains(err.Error(), "physical volume") {
+		t.Errorf("an unrelated group refused: %v", err)
 	}
 	e = newApplyEnv(t)
 	setListing(t, e.bin, shared)

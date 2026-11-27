@@ -609,3 +609,100 @@ func TestOwnFileCycleAndDefaultMode(t *testing.T) {
 		t.Errorf("rc.local %v", fi.Mode())
 	}
 }
+
+// ownFile: a relative link climbing out of the target brings nothing of the
+// live system in; a relative link is resolved from the directory of the
+// link that holds it; a long chain (not a cycle) keeps its content; and a
+// dangling link becomes an ordinary 0644 file.
+func TestOwnFileRelativeLinksAndChains(t *testing.T) {
+	top := t.TempDir()
+	root, live := filepath.Join(top, "mnt"), filepath.Join(top, "live")
+	etc := filepath.Join(root, "etc")
+	os.MkdirAll(etc, 0o755)
+	os.MkdirAll(live, 0o755)
+	os.WriteFile(filepath.Join(live, "secret"), []byte("HOSTSECRET\n"), 0o600)
+	os.Symlink("../../live/secret", filepath.Join(etc, "conf"))
+	if err := ownFile(root, filepath.Join(etc, "conf")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(etc, "conf")); strings.Contains(string(got), "HOSTSECRET") {
+		t.Error("a live file was copied in through a relative link out")
+	}
+
+	// etc/a -> sub/b, and sub/b -> c is etc/sub/c, not etc/c.
+	os.MkdirAll(filepath.Join(etc, "sub"), 0o755)
+	os.WriteFile(filepath.Join(etc, "sub", "c"), []byte("right\n"), 0o644)
+	os.WriteFile(filepath.Join(etc, "c"), []byte("wrong\n"), 0o644)
+	os.Symlink("sub/b", filepath.Join(etc, "a"))
+	os.Symlink("c", filepath.Join(etc, "sub", "b"))
+	if err := ownFile(root, filepath.Join(etc, "a")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(etc, "a")); string(got) != "right\n" {
+		t.Errorf("a chain of relative links read %q", got)
+	}
+
+	// l0 -> l1 -> ... -> l9 -> data: ten links are a chain, not a cycle.
+	os.WriteFile(filepath.Join(etc, "data"), []byte("kept\n"), 0o644)
+	for i := 0; i < 10; i++ {
+		next := "data"
+		if i < 9 {
+			next = "l" + string(rune('1'+i))
+		}
+		os.Symlink(next, filepath.Join(etc, "l"+string(rune('0'+i))))
+	}
+	if err := ownFile(root, filepath.Join(etc, "l0")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(etc, "l0")); string(got) != "kept\n" {
+		t.Errorf("a chain of ten links read %q", got)
+	}
+
+	os.Symlink("/nowhere", filepath.Join(etc, "dangling"))
+	if err := ownFile(root, filepath.Join(etc, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(filepath.Join(etc, "dangling")); err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o644 {
+		t.Errorf("a dangling link became %v, %v", fi, err)
+	}
+}
+
+// writeInTarget refuses a directory that leads out of the target (a sibling
+// whose name starts like the root's too), and the file has the mode asked
+// for. insideTarget and existingInside judge a path not there, or a dangling
+// link on the way, as not inside.
+func TestWriteInTargetAndInsideChecks(t *testing.T) {
+	top := t.TempDir()
+	root, sibling, outside := filepath.Join(top, "mnt"), filepath.Join(top, "mntx"), filepath.Join(top, "out")
+	for _, d := range []string{root, sibling, outside} {
+		os.MkdirAll(d, 0o755)
+	}
+	os.Symlink(outside, filepath.Join(root, "out"))
+	os.Symlink(sibling, filepath.Join(root, "sib"))
+	if err := writeInTarget(root, filepath.Join(root, "out", "f"), []byte("x"), 0o644); err == nil {
+		t.Error("written through a link out of the target")
+	}
+	if err := writeInTarget(root, filepath.Join(root, "sib", "f"), []byte("x"), 0o644); err == nil {
+		t.Error("written into a sibling of the root")
+	}
+	if ents, _ := os.ReadDir(outside); len(ents) != 0 {
+		t.Errorf("made outside: %v", ents)
+	}
+	if ents, _ := os.ReadDir(sibling); len(ents) != 0 {
+		t.Errorf("made in the sibling: %v", ents)
+	}
+	f := filepath.Join(root, "secret")
+	if err := writeInTarget(root, f, []byte("x"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(f); fi.Mode().Perm() != 0o640 {
+		t.Errorf("mode %v, want 0640", fi.Mode().Perm())
+	}
+	if insideTarget(root, filepath.Join(root, "missing")) {
+		t.Error("a path not there judged inside")
+	}
+	os.Symlink(filepath.Join(outside, "gone"), filepath.Join(root, "dangling"))
+	if existingInside(root, filepath.Join(root, "dangling", "sub")) {
+		t.Error("a dangling link out judged inside")
+	}
+}

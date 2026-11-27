@@ -24,6 +24,7 @@ func TestReachesBaseInstall(t *testing.T) {
 		{"bootloader", "", true},
 		{"", "base-install", true},
 		{"", "bootloader", false},
+		{"no-such-stage", "", true}, // not known to stop before it: checked
 	} {
 		if got := reachesBaseInstall(c.through, c.resume); got != c.want {
 			t.Errorf("through %q resume %q: %v", c.through, c.resume, got)
@@ -60,6 +61,17 @@ func TestResolvePackages(t *testing.T) {
 	cfg.Kernel, cfg.KernelFallback = "linux", "linux-lts"
 	if err := resolvePackages(opts, cfg); err != nil {
 		t.Errorf("the fallback resolves: %v", err)
+	}
+	// A fallback whose dry run failed for another reason is not known to
+	// resolve: the kernel that does not is still refused.
+	resolveRun = func(cmds [][]string) (string, error) {
+		if slices.Contains(cmds[len(cmds)-1], "linux") {
+			return "Package 'linux' not found in repository pool.\n", errors.New("exit status 2")
+		}
+		return "ERROR: [reposync] failed to fetch file\n", errors.New("exit status 1")
+	}
+	if err := resolvePackages(opts, cfg); err == nil || !strings.Contains(err.Error(), "'linux' not found") {
+		t.Errorf("a fallback not checked taken as resolving: %v", err)
 	}
 
 	resolveRun = func([][]string) (string, error) {

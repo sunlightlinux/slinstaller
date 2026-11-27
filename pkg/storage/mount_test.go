@@ -127,3 +127,62 @@ func TestMountpointInsideLinkedRoot(t *testing.T) {
 		t.Errorf("made outside: %v", ents)
 	}
 }
+
+// A sibling whose name starts with the root's (/mnt and /mntx) is outside
+// it, and a mountpoint that is not there cannot be judged inside.
+func TestMountpointInsideSiblingPrefix(t *testing.T) {
+	top := t.TempDir()
+	root, sibling := filepath.Join(top, "mnt"), filepath.Join(top, "mntx")
+	os.MkdirAll(root, 0o755)
+	os.MkdirAll(sibling, 0o755)
+	os.Symlink(sibling, filepath.Join(root, "boot"))
+	if err := NewMounter(root).inside(filepath.Join(root, "boot")); err == nil || !strings.Contains(err.Error(), "leads outside the target") {
+		t.Errorf("boot -> /mntx: %v", err)
+	}
+	if err := NewMounter(root).inside(filepath.Join(root, "nothing")); err == nil {
+		t.Error("a missing mountpoint judged inside")
+	}
+}
+
+// A dangling link on the way to a mountpoint is not walked past: MkdirAll
+// would make what it points to, outside the target.
+func TestMountAllDanglingLinkOut(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	os.Symlink(filepath.Join(outside, "made"), filepath.Join(root, "boot"))
+	err := NewMounter(root).MountAll(&Plan{Parts: []Partition{{Device: "tmpfs", Filesystem: "tmpfs", Mountpoint: "/boot/efi"}}})
+	if err == nil {
+		t.Error("mounted through a dangling link")
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "made")); err == nil {
+		t.Error("made a directory outside the target")
+	}
+}
+
+// MountMeta checks /proc, /sys and /dev lead into the target before binding
+// onto them, as MountAll does.
+func TestMountMetaDanglingLinkOut(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("as root a mistaken bind would reach the host's /proc")
+	}
+	root, outside := t.TempDir(), t.TempDir()
+	os.Symlink(outside, filepath.Join(root, "proc"))
+	if err := NewMounter(root).MountMeta(); err == nil || !strings.Contains(err.Error(), "leads outside") {
+		t.Errorf("MountMeta through a link out: %v", err)
+	}
+	// The deepest thing there on the way is the link itself, dangling or not.
+	os.Symlink(filepath.Join(outside, "gone"), filepath.Join(root, "dangling"))
+	if got := existingParent(filepath.Join(root, "dangling", "a", "b")); got != filepath.Join(root, "dangling") {
+		t.Errorf("existingParent past a dangling link = %s", got)
+	}
+}
+
+// A plan with no root filesystem is not looked into through another one.
+func TestReadRootFileWantsTheRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("as root the other filesystem would be mounted")
+	}
+	pl := &Plan{Parts: []Partition{{Device: "tmpfs", Filesystem: "tmpfs", Mountpoint: "/boot"}}}
+	if _, err := NewMounter(t.TempDir()).ReadRootFile(pl, "x"); err == nil || !strings.Contains(err.Error(), "no root filesystem") {
+		t.Errorf("ReadRootFile with only /boot: %v", err)
+	}
+}

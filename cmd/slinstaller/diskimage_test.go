@@ -237,9 +237,14 @@ func TestSameDisk(t *testing.T) {
 	if err := sameDisk(d("A", 1<<30), d("A", 1<<30), "/dev/sda"); err != nil {
 		t.Error(err)
 	}
-	for _, after := range [][]blockdev.Device{d("B", 1<<30), d("A", 2<<30), nil} {
+	wwn := d("A", 1<<30)
+	wwn[0].WWN = "0x5000c500deadbeef"
+	for _, after := range [][]blockdev.Device{d("B", 1<<30), d("A", 2<<30), nil, wwn} {
 		if err := sameDisk(d("A", 1<<30), after, "/dev/sda"); err == nil || !strings.Contains(err.Error(), "not the disk that was confirmed") {
 			t.Errorf("%v: %v", after, err)
 		}
+	}
+	if err := sameDisk(nil, d("A", 1<<30), "/dev/sda"); err == nil {
+		t.Error("a disk not in the first listing taken as the same")
 	}
 }

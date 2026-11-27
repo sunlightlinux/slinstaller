@@ -498,3 +498,36 @@ func TestReleaseRechecksTheListing(t *testing.T) {
 	}
 	wantErr(t, in.releaseDisks(), "is in use")
 }
+
+// The re-check sees an assembled volume (lsblk lists it under each disk
+// it draws on, with no member signature for SharedMembers to see) spanning
+// a target and another disk; across the install's own disks only, it is
+// released, not refused; and --force-destructive goes ahead either way.
+func TestReleaseRechecksSharedHolders(t *testing.T) {
+	vol := blockdev.Device{Name: "vg-data", Path: "/dev/mapper/vg-data", Type: "lvm"}
+	disk := func(n string) blockdev.Device {
+		return blockdev.Device{Name: n, Path: "/dev/" + n, Type: "disk", Size: 64 << 30, Children: []blockdev.Device{
+			{Name: n + "2", Path: "/dev/" + n + "2", Type: "part", Children: []blockdev.Device{vol}}}}
+	}
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.Devices = func() ([]blockdev.Device, error) { return []blockdev.Device{disk("sda"), disk("sdz")}, nil }
+	wantErr(t, in.releaseDisks(), "/dev/mapper/vg-data (lvm) also uses /dev/sdz")
+	if len(r.cmds) != 0 {
+		t.Errorf("ran before refusing: %s", r.flat())
+	}
+	in.opts.ForceDestructive = true
+	if err := in.releaseDisks(); err != nil {
+		t.Errorf("forced: %v", err)
+	}
+
+	var r2 recorder
+	both := stagedInstaller(t, raidConfig(), &r2)
+	both.opts.Devices = func() ([]blockdev.Device, error) { return []blockdev.Device{disk("sda"), disk("sdb")}, nil }
+	if err := both.releaseDisks(); err != nil {
+		t.Errorf("a volume across the install's own two disks: %v", err)
+	}
+	if !strings.Contains(r2.flat(), "dmsetup remove vg-data") {
+		t.Errorf("the volume was not released:\n%s", r2.flat())
+	}
+}

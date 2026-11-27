@@ -78,3 +78,11 @@ func TestAlongsideTableCommands(t *testing.T) {
 		t.Errorf("mkfs wrong for alongside:\n%s", mf)
 	}
 }
+
+// A row too short to say what it is (a truncated line) is skipped.
+func TestParsePartedFreeShortRow(t *testing.T) {
+	parts, free := parsePartedFree("BYT;\n1:1MiB:513MiB:512MiB;\n2:513MiB\n")
+	if len(parts) != 0 || len(free) != 0 {
+		t.Errorf("parts %v, free %v", parts, free)
+	}
+}

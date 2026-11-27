@@ -277,3 +277,67 @@ func TestSharedMembersMultipath(t *testing.T) {
 		t.Errorf("one LUN shared with itself: %q", got)
 	}
 }
+
+// A member signature with no UUID read yet is nobody's fellow, a UUID
+// shared across different signature types is not one array, and a ZFS
+// pool's members are members like any other.
+func TestSharedMembersUUIDAndTypes(t *testing.T) {
+	disk := func(n string, kids ...Device) Device {
+		return Device{Name: n, Path: "/dev/" + n, Type: "disk", Size: 1 << 40, Children: kids}
+	}
+	part := func(n, fs, uuid string) Device {
+		return Device{Name: n, Path: "/dev/" + n, Type: "part", FsType: fs, UUID: uuid}
+	}
+	devs := []Device{
+		disk("sda", part("sda1", "btrfs", ""), part("sda2", "linux_raid_member", "u"), part("sda3", "zfs_member", "z")),
+		disk("sdz", part("sdz1", "btrfs", ""), part("sdz2", "ext4", "u"), part("sdz3", "zfs_member", "z")),
+	}
+	got := SharedMembers(devs, []string{"/dev/sda"})
+	if len(got) != 1 || !strings.Contains(got[0], "/dev/sda3 (zfs_member z) has a fellow member on /dev/sdz3") {
+		t.Errorf("SharedMembers = %q, want only the ZFS pool", got)
+	}
+}
+
+// One LUN through two paths, with a volume group on its partition: the
+// group draws on the LUN alone, not on a second disk.
+func TestSharedMultipathHolder(t *testing.T) {
+	mp := Device{Name: "mpatha", Path: "/dev/mapper/mpatha", Type: "mpath", Children: []Device{
+		{Name: "mpatha1", Path: "/dev/mapper/mpatha1", Type: "part", Children: []Device{
+			{Name: "vg-root", Path: "/dev/mapper/vg-root", Type: "lvm"}}}}}
+	sda := Device{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 1 << 40, Children: []Device{mp}}
+	sdb := Device{Name: "sdb", Path: "/dev/sdb", Type: "disk", Size: 1 << 40, Children: []Device{mp}}
+	if got := Shared([]Device{sda, sdb}, "/dev/sda", []string{"/dev/sda"}, nil); len(got) != 0 {
+		t.Errorf("a volume on one LUN refused as shared with itself: %q", got)
+	}
+	// Both paths torn down together: each map is removed once.
+	got := fmt.Sprint(TeardownAll([]Device{sda, sdb}))
+	if got != "[[dmsetup remove vg-root] [dmsetup remove mpatha1] [dmsetup remove mpatha] [wipefs -a /dev/sda] [wipefs -a /dev/sdb]]" {
+		t.Errorf("TeardownAll over two paths: %s", got)
+	}
+}
+
+// Each kind of holder is released with its own tool: an md array (linear
+// too) is stopped, a device-mapper volume (dmraid's partitions as well)
+// removed; lsblk's plain "raid" is not an array type and is left alone.
+func TestTeardownHolderKinds(t *testing.T) {
+	disk := Device{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 1 << 40, Children: []Device{
+		{Name: "sda1", Path: "/dev/sda1", Type: "part", Children: []Device{
+			{Name: "md0", Path: "/dev/md0", Type: "linear"},
+			{Name: "md1", Path: "/dev/md1", Type: "raid"},
+			{Name: "thing", Path: "/dev/mapper/thing", Type: "dm"}}},
+		{Name: "isw_x", Path: "/dev/mapper/isw_x", Type: "dmraid", Children: []Device{
+			{Name: "isw_x1", Path: "/dev/mapper/isw_x1", Type: "part"}}},
+	}}
+	got := fmt.Sprint(Teardown(disk))
+	want := "[[mdadm --stop /dev/md0] [dmsetup remove thing] [dmsetup remove isw_x1] [dmsetup remove isw_x] [wipefs -a /dev/sda1] [wipefs -a /dev/sda]]"
+	if got != want {
+		t.Errorf("Teardown =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// A pvs line with no physical volume names nothing.
+func TestParseVolumeGroupsNoPV(t *testing.T) {
+	if vgs := parseVolumeGroups("  :vg0\n  /dev/sda2:vg1\n"); len(vgs) != 1 || len(vgs["vg1"]) != 1 {
+		t.Errorf("parseVolumeGroups = %v", vgs)
+	}
+}

@@ -611,6 +611,16 @@ func TestPutBackResolvKeepsWhatTheConfigMade(t *testing.T) {
 	if got, _ := os.ReadFile(in.resolvCopy); string(got) != "nameserver 192.0.2.53\n" {
 		t.Errorf("cleanup lost a written resolv.conf: %q", got)
 	}
+	// A link the config put there is the system's even when what it points
+	// to starts like the install-time copy (a hook copied it before linking).
+	in.resolvSaved = ""
+	os.WriteFile(filepath.Join(etc, "resolv.conf.hook"), []byte(resolvMark+"nameserver 192.0.2.1\n"), 0o644)
+	os.Remove(in.resolvCopy)
+	os.Symlink("resolv.conf.hook", in.resolvCopy)
+	in.cleanup()
+	if l, err := os.Readlink(in.resolvCopy); err != nil || l != "resolv.conf.hook" {
+		t.Errorf("a link to a marked file was taken for the copy: %q, %v", l, err)
+	}
 }
 
 // A resume onto a partition holding something else than this config made

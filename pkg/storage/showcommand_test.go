@@ -187,3 +187,16 @@ func TestMaskWriterLongLine(t *testing.T) {
 		t.Errorf("long line: %d bytes, secret shown %v", len(b.String()), strings.Contains(b.String(), "long-secret-value"))
 	}
 }
+
+// A secret that holds a shorter one is masked whole, whichever was
+// registered first; a yescrypt-GOST hash is a hash like the others.
+func TestMaskSecretLongestFirstAndGOST(t *testing.T) {
+	AddSecret("q7zk")
+	AddSecret("q7zk-and-the-rest")
+	if got := MaskSecret("T=q7zk-and-the-rest"); got != "T=***" {
+		t.Errorf("a secret holding another: %q", got)
+	}
+	if got := MaskSecret("$gy$j9T$salt$hash"); got != "<password hash>" {
+		t.Errorf("gost-yescrypt hash: %q", got)
+	}
+}

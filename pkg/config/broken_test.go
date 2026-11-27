@@ -547,7 +547,8 @@ func TestSecretName(t *testing.T) {
 		"KEYMAP": false, "KEYBOARD": false, "AUTHOR": false, "BYPASS_CACHE": false, "SSH_KEY_PATH": false, "MY_SECRET": true, "authToken": true, "dbPassword": true,
 		"API_TOKENS": true, "CLIENT_SECRETS": true, "SSH_KEYS": true, "DB_PASSWORDS": true, "sshPrivateKey": true, "privateKey": true,
 		"deployKey": true, "SECRETKEY": true, "dbPass": true, "DBPASS": true, "passwordHash": true, "tokenValue": true, "GPG_PRIVKEY": true,
-		"KEYRING": false, "KEYMAPS": false, "LANGUAGE": false, "DEBUG": false, "ADDRESS": false} {
+		"KEYRING": false, "KEYMAPS": false, "LANGUAGE": false, "DEBUG": false, "ADDRESS": false,
+		"token.value": true, "AWS_CRED": true, "DB_PWD": true, "SECRET_DIR": false, "WIFIPSK": true} {
 		if SecretName(n) != want {
 			t.Errorf("%s: %v", n, !want)
 		}
@@ -626,7 +627,8 @@ func TestLVsFitTheirVG(t *testing.T) {
 
 // An array's name is one component under /dev/md: "../sdz" is refused.
 func TestRaidNamePath(t *testing.T) {
-	for name, ok := range map[string]bool{"root": true, "md0": true, "data.1": true, "../sdz": false, "a/b": false, "..": false, ".x": false} {
+	for name, ok := range map[string]bool{"root": true, "md0": true, "data.1": true, "../sdz": false, "a/b": false, "..": false, ".x": false,
+		strings.Repeat("a", 32): true, strings.Repeat("a", 33): false} {
 		c := raidConfig()
 		c.Raid[0].Name = name
 		for _, d := range c.TargetMedia {

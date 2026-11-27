@@ -2,6 +2,7 @@ package storage
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 )
@@ -152,5 +153,82 @@ func TestCheckVGFitDecimalAndFill(t *testing.T) {
 	}
 	if _, err := parseLVSize("1.5"); err == nil {
 		t.Error("a unitless decimal taken")
+	}
+}
+
+// The edges of the volume group check: exactly full fits, the LUKS header
+// and the GPT's own space count against the group, a sum too big to count
+// saturates rather than wraps, and a group with something not judged (a PV
+// on an array, a size not read, no PV the plan knows) is not judged at all.
+func TestCheckVGFitEdges(t *testing.T) {
+	size := func(n uint64) func(string) (uint64, bool) { return func(string) (uint64, bool) { return n, true } }
+	pv := func(sz string, enc bool) Partition {
+		return Partition{Device: "/dev/sda2", Disk: "/dev/sda", IsPV: true, VGName: "vg0", Size: sz, Encrypted: enc}
+	}
+	lv := func(sz string) Partition {
+		return Partition{LV: true, VGName: "vg0", Mountpoint: "/srv", Filesystem: "ext4", Size: sz}
+	}
+	fits := func(parts ...Partition) error {
+		return (&Plan{Disk: "/dev/sda", Parts: parts}).CheckFit(size(1<<40), MinRootSize, "2 GB")
+	}
+	// 1G less LVM's 4M is 1020M: that much fits, a MiB more does not.
+	if err := fits(pv("1G", false), lv("1020M")); err != nil {
+		t.Errorf("exactly full: %v", err)
+	}
+	if err := fits(pv("1G", false), lv("1021M")); err == nil {
+		t.Error("a MiB over passed")
+	}
+	// Encrypted, the LUKS2 header takes 16M more.
+	if err := fits(pv("1G", true), lv("1010M")); err == nil {
+		t.Error("an encrypted PV counted without its LUKS header")
+	}
+	if err := fits(pv("1G", true), lv("1004M")); err != nil {
+		t.Errorf("encrypted, exactly full: %v", err)
+	}
+	// Two halves of 2^64 saturate, never wrap to 0 and fit.
+	if err := fits(pv("1G", false), lv("8388608T"), lv("8388608T")); err == nil {
+		t.Error("an overflowing sum of volumes fit")
+	}
+	// A PV too small for LVM's own space adds nothing, and takes nothing.
+	if err := fits(pv("1M", false), pv("1G", false), lv("1020M")); err != nil {
+		t.Errorf("a 1M PV took from the group: %v", err)
+	}
+	// Not judged: one PV on an array, an LV size not read, no PV at all.
+	arr := pv("1G", false)
+	arr.Raid = true
+	if err := fits(arr, pv("1G", false), lv("5G")); err != nil {
+		t.Errorf("a group with a PV on an array: %v", err)
+	}
+	if err := fits(pv("1G", false), lv("lots"), lv("5G")); err != nil {
+		t.Errorf("a group with an unread LV size: %v", err)
+	}
+	if err := fits(lv("5G")); err != nil {
+		t.Errorf("a group with no PV in the plan: %v", err)
+	}
+	// A PV that fills its disk gets what the disk leaves less the GPT's 2M:
+	// on a disk of 1G+2M, 1020M of volumes.
+	fill := func(disk uint64, lvSize string) error {
+		pl := &Plan{Disk: "/dev/sda", Parts: []Partition{pv(SizeRest, false), lv(lvSize)}}
+		return pl.CheckFit(size(disk), MinRootSize, "2 GB")
+	}
+	if err := fill(1<<30+GPTReserveBytes, "1020M"); err != nil {
+		t.Errorf("a fill PV, exactly full: %v", err)
+	}
+	if err := fill(1<<30+GPTReserveBytes, "1021M"); err == nil {
+		t.Error("a fill PV counted the GPT's space as its own")
+	}
+}
+
+// parseLVSize: a negative size is refused, a decimal one is in its own
+// unit, and one too big to count saturates.
+func TestParseLVSizeEdges(t *testing.T) {
+	if _, err := parseLVSize("-1.5G"); err == nil {
+		t.Error("a negative size taken")
+	}
+	if n, err := parseLVSize("1.5M"); err != nil || n != 3<<19 {
+		t.Errorf("1.5M = %d, %v", n, err)
+	}
+	if n, err := parseLVSize("16777216.0T"); err != nil || n != math.MaxUint64 {
+		t.Errorf("2^64 bytes = %d, %v; want it saturated", n, err)
 	}
 }
