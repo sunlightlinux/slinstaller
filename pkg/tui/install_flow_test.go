@@ -14,8 +14,10 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
+	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
 func newInstallModel() installModel {
@@ -81,8 +83,19 @@ func TestInstallConfirmation(t *testing.T) {
 	if got, cmd := stepInstall(m, keyNamed("y")); got.phase != phaseConfirm || got.cancelled || cmd != nil {
 		t.Error("a stray key acted on the confirmation")
 	}
+	// Cancel is selected to begin with: Enter alone leaves, erasing nothing.
+	if got, cmd := stepInstall(m, keyNamed("enter")); !got.cancelled || cmd == nil || got.phase != phaseConfirm {
+		t.Errorf("Enter on the default button: cancelled=%v phase=%d", got.cancelled, got.phase)
+	}
+	// Tab moves to Install and back.
+	if got, _ := stepInstall(m, keyNamed("tab")); !got.onInstall {
+		t.Error("Tab did not select Install")
+	} else if back, _ := stepInstall(got, keyNamed("tab")); back.onInstall {
+		t.Error("Tab did not go back to Cancel")
+	}
+	m, _ = stepInstall(m, keyNamed("tab"))
 
-	// Enter starts it. The config here has no layout, so the install fails
+	// Enter on Install starts it. The config here has no layout, so the install fails
 	// before any command: what is checked is that it was started, timed and
 	// reported.
 	defer func(p string) { installLogPath = p }(installLogPath)
@@ -427,5 +440,35 @@ func installReports(t *testing.T, logPath string, noFile bool) {
 	m.phase, m.done, m.total, m.stage = phaseRunning, 5, 2, "x"
 	if view := stripANSIForTest(m.View()); !strings.Contains(view, "step 2 of 2") {
 		t.Errorf("running view with done past total:\n%s", view)
+	}
+}
+
+// The confirmation names each disk with its size and model, and for an
+// install that keeps the table, what happens to each partition.
+func TestConfirmLines(t *testing.T) {
+	devs := []blockdev.Device{
+		{Path: "/dev/sda", Size: 500 << 30, Model: "Samsung SSD"},
+		{Path: "/dev/sdb", Size: 500 << 30, Model: "Samsung SSD"},
+	}
+	wipe := &storage.Plan{Wipe: true, Disk: "/dev/sda", Disks: []string{"/dev/sda", "/dev/sdb"}}
+	got := strings.Join(confirmLines(wipe, devs), "\n")
+	for _, want := range []string{"PARTITION and ERASE", "/dev/sda       500GiB   Samsung SSD", "/dev/sdb"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	keep := &storage.Plan{Disk: "/dev/sda", Parts: []storage.Partition{
+		{Device: "/dev/sda1", Preserve: true, Mountpoint: "/boot/efi"},
+		{Device: "/dev/sda2", Filesystem: "ntfs", Preserve: true, ResizeMiB: 40960},
+		{Device: "/dev/sda3", Filesystem: "ext4", Mountpoint: "/", Create: true},
+	}}
+	got = strings.Join(confirmLines(keep, devs), "\n")
+	for _, want := range []string{"keeps the partition table", "KEEP   /dev/sda1", "SHRINK /dev/sda2 to 40GiB", "CREATE /dev/sda3 as ext4 -> /", "have a backup"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "ERASE:") {
+		t.Errorf("an install keeping the table says the disk is erased:\n%s", got)
 	}
 }

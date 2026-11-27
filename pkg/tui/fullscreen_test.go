@@ -722,7 +722,7 @@ func TestButtonsSitAtTheBottom(t *testing.T) {
 	}{
 		{"hub", sized(newModel(oneDisk())).View(), 2, "Install"},
 		{"manage user", sized(openSectionInTab(newModel(oneDisk()), 0, secUser)).View(), 1, "Add New User"},
-		{"install confirm", installModel{width: 100, height: 40, disk: "/dev/sda", phase: phaseConfirm}.confirmView(), 1, "[Enter] Install"},
+		{"install confirm", installModel{width: 100, height: 40, disk: "/dev/sda", phase: phaseConfirm}.confirmView(), 1, "Install"},
 		{"install done", installModel{width: 100, height: 40, disk: "/dev/sda", phase: phaseDone}.doneView(), 1, "Reboot"},
 	}
 	for _, c := range cases {

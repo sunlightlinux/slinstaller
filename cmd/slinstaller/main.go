@@ -1286,6 +1286,22 @@ func holdsNow(devs []blockdev.Device, path string) string {
 // prompt is too easy to answer on the wrong machine; retyping the path
 // makes the operator look at which disk they are about to erase. With
 // several disks (a RAID layout) all are listed and the first is retyped.
+// describeDisk is a disk as the confirmation names it: its path, with its
+// size and model when the listing has them, so that the operator retyping
+// the path sees which disk it is (two alike differ by size, a virtio disk
+// has no model).
+func describeDisk(path string) string {
+	devs, _ := blockdev.List()
+	d := blockdev.FindByPath(devs, path)
+	if d == nil || d.Size == 0 {
+		return path
+	}
+	if d.Model != "" {
+		return fmt.Sprintf("%s (%s, %s)", path, humanSize(d.Size), d.Model)
+	}
+	return fmt.Sprintf("%s (%s)", path, humanSize(d.Size))
+}
+
 func confirm(in *bufio.Reader, plan *storage.Plan) bool {
 	disks := plan.DiskList()
 	if !plan.Wipe {
@@ -1318,11 +1334,11 @@ func confirm(in *bufio.Reader, plan *storage.Plan) bool {
 		}
 		fmt.Fprintf(os.Stderr, "This ERASES the partitions marked FORMAT. Type the disk path (%s) to confirm: ", disks[0])
 	} else if len(disks) == 1 {
-		fmt.Fprintf(os.Stderr, "\nAbout to PARTITION and ERASE %s.\nType the disk path to confirm: ", disks[0])
+		fmt.Fprintf(os.Stderr, "\nAbout to PARTITION and ERASE %s.\nType the disk path to confirm: ", describeDisk(disks[0]))
 	} else {
 		fmt.Fprintln(os.Stderr, "\nAbout to PARTITION and ERASE these disks:")
 		for _, d := range disks {
-			fmt.Fprintf(os.Stderr, "  %s\n", d)
+			fmt.Fprintf(os.Stderr, "  %s\n", describeDisk(d))
 		}
 		fmt.Fprintf(os.Stderr, "Type the first disk path (%s) to confirm: ", disks[0])
 	}

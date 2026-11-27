@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
+	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/controller"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
@@ -63,8 +64,10 @@ func RunInstall(cfg *config.Config, opts controller.Options, plan *storage.Plan)
 	ch := make(chan tea.Msg, 1024)
 	stop := make(chan struct{})
 	opts.Stop = stop
+	devs, _ := blockdev.List() // best effort: sizes and models for the confirmation
 	m := installModel{
-		cfg: cfg, opts: opts, disk: plan.Disk, ch: ch, stop: stop,
+		confirm: confirmLines(plan, devs),
+		cfg:     cfg, opts: opts, disk: plan.Disk, ch: ch, stop: stop,
 		total: 12, // the controller's stage count; the first update corrects it
 		bar:   progress.New(progress.WithSolidFill(barFill(termenv.ColorProfile()))),
 		// ASCII frames: the console font has no braille or box spinner glyphs.
@@ -440,6 +443,12 @@ type installModel struct {
 	stop     chan struct{}
 	stopping bool
 
+	// What the confirmation lists (confirmLines), and whether its Install
+	// button is the one selected. Cancel is, to begin with: one stray
+	// Enter must not be what erases a disk.
+	confirm   []string
+	onInstall bool
+
 	steps   []installStep // every stage, with how far it has got
 	spin    spinner.Model // turns beside the running stage
 	details bool          // the full command log is on screen
@@ -474,7 +483,13 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.phase {
 		case phaseConfirm:
 			switch msg.String() {
+			case "left", "right", "tab", "shift+tab", "h", "l":
+				m.onInstall = !m.onInstall
 			case "enter":
+				if !m.onInstall {
+					m.cancelled = true
+					return m, tea.Quit
+				}
 				m.phase = phaseRunning
 				m.steps = newSteps()
 				m.started = m.now()
@@ -682,15 +697,69 @@ func (m installModel) View() string {
 
 func (m installModel) confirmView() string {
 	w := contentWidth(m.width)
-	body := []string{
-		lineBG.Width(w).Render(""),
-		warnText.Width(w).Render("  This will PARTITION and ERASE:"),
-		itemLabel.Width(w).Render("    " + m.disk),
-		lineBG.Width(w).Render(""),
-		lineBG.Width(w).Render("  All data on it will be lost."),
+	lines := m.confirm
+	if len(lines) == 0 {
+		lines = []string{"!This will PARTITION and ERASE:", "    " + m.disk, "", "All data on it will be lost."}
 	}
-	btns := []string{buttonLine(w, button{"[Enter] Install", btnSel}, button{"[Esc] Cancel", btnIdle})}
-	return frameScreenButtons(m.width, m.height, body, btns, "[Enter] begin the install · [Esc] go back")
+	body := []string{lineBG.Width(w).Render("")}
+	for _, l := range lines {
+		if t, ok := strings.CutPrefix(l, "!"); ok {
+			body = append(body, warnText.Width(w).Render("  "+t))
+		} else {
+			body = append(body, lineBG.Width(w).Render("  "+l))
+		}
+	}
+	btns := []string{buttonLine(w, button{"Install", pick(m.onInstall)}, button{"Cancel", pick(!m.onInstall)})}
+	return frameScreenButtons(m.width, m.height, body, btns, "[Tab] choose · [Enter] press the button · [Esc] cancel and leave")
+}
+
+// confirmLines is what the confirmation says will happen to the disks, as
+// the text flow's retyped confirmation says it: each disk erased, with its
+// size and model so two alike can be told apart, or — keeping the table —
+// each partition shrunk, created, kept or formatted. A line starting "!"
+// is a warning.
+func confirmLines(plan *storage.Plan, devs []blockdev.Device) []string {
+	describe := func(path string) string {
+		if d := blockdev.FindByPath(devs, path); d != nil && d.Size > 0 {
+			return strings.TrimSpace(fmt.Sprintf("%-14s %-8s %s", path, gib(d.Size), d.Model))
+		}
+		return path
+	}
+	if plan.Wipe {
+		lines := []string{"!This will PARTITION and ERASE:"}
+		for _, d := range plan.DiskList() {
+			lines = append(lines, "    "+describe(d))
+		}
+		return append(lines, "", "All data on them will be lost.")
+	}
+	lines := []string{"!This keeps the partition table of " + describe(plan.Disk) + ", and:"}
+	shrink := false
+	for _, p := range plan.Parts {
+		if p.LV || p.Raid {
+			continue
+		}
+		mnt := p.Mountpoint
+		if mnt == "" {
+			mnt = "-"
+		}
+		if p.ResizeMiB > 0 {
+			shrink = true
+			lines = append(lines, fmt.Sprintf("    SHRINK %s to %s (its data is kept)", p.Device, gib(p.ResizeMiB<<20)))
+		}
+		switch {
+		case p.Create:
+			lines = append(lines, fmt.Sprintf("    CREATE %s as %s -> %s", p.Device, p.Filesystem, mnt))
+		case p.Preserve:
+			lines = append(lines, fmt.Sprintf("    KEEP   %s -> %s", p.Device, mnt))
+		default:
+			lines = append(lines, fmt.Sprintf("    FORMAT %s as %s -> %s", p.Device, p.Filesystem, mnt))
+		}
+	}
+	lines = append(lines, "", "What is on the partitions marked FORMAT is lost.")
+	if shrink {
+		lines = append(lines, "!A shrink that is interrupted can lose the partition - have a backup.")
+	}
+	return lines
 }
 
 func (m installModel) runningView() string {

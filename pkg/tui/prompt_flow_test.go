@@ -62,8 +62,8 @@ func TestPromptInstall(t *testing.T) {
 		t.Errorf("disks offered:\n%s", shown)
 	}
 	for _, want := range []string{
-		"Selected /dev/nvme0n1 - it will be ERASED.", "try again",
-		"Disk:        /dev/nvme0n1 (ERASED)", "Root:        btrfs, fills the disk",
+		"Selected /dev/nvme0n1 (60GiB Second SSD) - it will be ERASED.", "try again",
+		"Disk:        /dev/nvme0n1, 60GiB Second SSD (ERASED)", "2) /dev/nvme0n1   60GiB    Second SSD", "Root:        btrfs, fills the disk",
 		"Encryption:  yes (LUKS)", "Swap:        4G file", "Hostname:    box", "Admin user:  ion",
 		"Kernel:      Server profile",
 	} {

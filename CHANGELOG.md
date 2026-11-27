@@ -10,6 +10,17 @@ change.
 
 ## [Unreleased]
 
+### Changed
+
+- The full-screen confirmation selects **Cancel** to begin with: one Enter
+  no longer starts erasing a disk (Tab to Install, then Enter). It names
+  every disk with its size and model, and an install that keeps the
+  partition table lists what it shrinks, creates, keeps and formats
+  instead of saying the disk is erased. Its hint no longer says Esc goes
+  back (it leaves).
+- The text flow and the retyped confirmation show each disk's size and
+  model, not the path alone.
+
 ### Fixed
 
 - A swap file on a btrfs root was made copy-on-write (and compressed

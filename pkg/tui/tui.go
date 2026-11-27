@@ -35,7 +35,7 @@ func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
 		return nil, "", err
 	}
 	disk := disks[promptIndex(in, w, "Install to which disk", len(disks))-1]
-	fmt.Fprintf(w, "\nSelected %s - it will be ERASED.\n\n", disk.Path)
+	fmt.Fprintf(w, "\nSelected %s (%s %s) - it will be ERASED.\n\n", disk.Path, gib(disk.Size), disk.Model)
 
 	fs := promptChoice(in, w, "Root filesystem", rootFilesystems, "ext4")
 
@@ -106,7 +106,9 @@ func listDisks(w io.Writer) ([]blockdev.Device, error) {
 	}
 	fmt.Fprintln(w, "Disks:")
 	for i, d := range disks {
-		fmt.Fprintf(w, "  %d) %-14s %s\n", i+1, d.Path, d.Model)
+		// The size too: a virtio disk has no model, and two alike are
+		// told apart by it.
+		fmt.Fprintf(w, "  %d) %-14s %-8s %s\n", i+1, d.Path, gib(d.Size), d.Model)
 	}
 	return disks, nil
 }
@@ -196,7 +198,7 @@ func summarise(w io.Writer, disk blockdev.Device, fs string, encrypt bool, swap,
 	case "file":
 		sw = swapSize + " file"
 	}
-	fmt.Fprintf(w, "\n  Disk:        %s (ERASED)\n", disk.Path)
+	fmt.Fprintf(w, "\n  Disk:        %s, %s %s (ERASED)\n", disk.Path, gib(disk.Size), disk.Model)
 	fmt.Fprintf(w, "  Root:        %s, fills the disk\n", fs)
 	fmt.Fprintf(w, "  Encryption:  %s\n", enc)
 	fmt.Fprintf(w, "  Swap:        %s\n", sw)
