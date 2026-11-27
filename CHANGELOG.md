@@ -89,8 +89,9 @@ change.
   a spare ESP) was probed for fstab and, with no signature, failed the
   install at the fstab stage, after the base system was in.
 - An xfs filesystem under 300 MiB (mkfs.xfs's minimum since xfsprogs
-  5.19), fixed-size or filling the rest, is refused before the wipe, not
-  by mkfs after it.
+  5.19), fixed-size or filling the rest - on the LUKS mapper, for an
+  encrypted one - is refused before the wipe, not by mkfs after it. So is
+  a swap file under 1 MiB, which mkswap refused.
 - A volume group name the machine already has on a disk the install does
   not wipe is refused before the wipe; `vgcreate` failed after it.
 - **clr-installer configs read as clr reads them:** sizes in its
