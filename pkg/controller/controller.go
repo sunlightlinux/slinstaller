@@ -2057,7 +2057,9 @@ func bootsSlinit(root string, remove map[string]bool) bool {
 	// up to a failed boot, while every other stage set the system up for
 	// runit. The service set's or the distribution's boot service has to
 	// be there.
-	for _, dir := range []string{"usr/lib/slinit.d", "etc/slinit.d"} {
+	// Where slinit itself looks (its /lib is /usr/lib on a merged-/usr
+	// Void, but not on every image).
+	for _, dir := range []string{"usr/lib/slinit.d", "etc/slinit.d", "lib/slinit.d", "usr/local/lib/slinit.d"} {
 		if _, err := os.Stat(filepath.Join(root, dir, "boot")); err == nil {
 			return true
 		}

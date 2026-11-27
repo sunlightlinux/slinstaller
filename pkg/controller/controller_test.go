@@ -169,6 +169,12 @@ func TestBootsSlinit(t *testing.T) {
 	os.MkdirAll(filepath.Join(etcBoot, "etc", "slinit.d"), 0o755)
 	os.WriteFile(filepath.Join(etcBoot, "etc", "slinit.d", "boot"), nil, 0o644)
 
+	libBoot := t.TempDir()
+	os.MkdirAll(filepath.Join(libBoot, "usr", "bin"), 0o755)
+	os.WriteFile(filepath.Join(libBoot, "usr", "bin", "slinit"), []byte("x"), 0o755)
+	os.MkdirAll(filepath.Join(libBoot, "lib", "slinit.d"), 0o755)
+	os.WriteFile(filepath.Join(libBoot, "lib", "slinit.d", "boot"), nil, 0o644)
+
 	cases := []struct {
 		name   string
 		root   string
@@ -181,6 +187,7 @@ func TestBootsSlinit(t *testing.T) {
 		{"unrelated removal", withSlinit, map[string]bool{"quiet": true}, true},
 		{"the binary without a boot service", binaryOnly, nil, false},
 		{"the boot service in /etc/slinit.d", etcBoot, nil, true},
+		{"the boot service in /lib/slinit.d (unmerged /usr)", libBoot, nil, true},
 	}
 	for _, c := range cases {
 		if got := bootsSlinit(c.root, c.remove); got != c.want {

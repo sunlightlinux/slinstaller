@@ -693,9 +693,6 @@ restart:
 		// UEFI-only: a legacy/BIOS boot of the installer has no
 		// /sys/firmware/efi, so grub-install/efibootmgr would fail at the
 		// bootloader stage — after the disk is wiped. Fail here instead.
-		if system.SecureBoot() {
-			fmt.Fprintln(os.Stderr, "warning: Secure Boot is on: the firmware will not start the unsigned GRUB this installs; turn it off in the firmware setup before rebooting")
-		}
 		if !system.IsUEFI() {
 			return fmt.Errorf("the installer medium is not booted in UEFI mode (%s is absent); Sunlight Linux is UEFI-only - reboot it in UEFI mode",
 				"/sys/firmware/efi")
@@ -767,6 +764,11 @@ restart:
 				return fmt.Errorf("%w - check the network/proxy, or pass --repo", err)
 			}
 		}
+	}
+
+	// Every install, staged or not, puts an unsigned GRUB on the disk.
+	if system.SecureBoot() {
+		fmt.Fprintln(os.Stderr, "warning: Secure Boot is on: the firmware will not start the unsigned GRUB this installs; turn it off in the firmware setup before rebooting")
 	}
 
 	// The disk checks run on every install, staged or not: a --through run
