@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -257,6 +258,20 @@ func DefaultRunner(args []string) error {
 		return err
 	}
 	return nil
+}
+
+// WithStderr adds what a command printed on stderr to its error, for a
+// command run with Output: the exit status alone tells an operator
+// nothing, the tool's own message usually does. Other errors are returned
+// as they are.
+func WithStderr(err error) error {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+	}
+	return err
 }
 
 // VerboseRunner echoes each command and streams its output to stderr, so

@@ -72,7 +72,7 @@ func parseMiB(s string) uint64 {
 var partedPrintFree = func(disk string) (string, error) {
 	out, err := exec.Command("parted", "-m", "-s", disk, "unit", "MiB", "print", "free").Output()
 	if err != nil {
-		return "", fmt.Errorf("parted print free %s: %w", disk, err)
+		return "", fmt.Errorf("parted print free %s: %w", disk, WithStderr(err))
 	}
 	return string(out), nil
 }

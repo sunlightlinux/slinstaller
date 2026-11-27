@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
 // Device is one block device: a disk or one of its partitions.
@@ -43,7 +45,7 @@ type Device struct {
 func List() ([]Device, error) {
 	out, err := exec.Command("lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,TYPE,MODEL,SERIAL,WWN,MOUNTPOINT,FSTYPE,LABEL,PARTLABEL").Output()
 	if err != nil {
-		return nil, fmt.Errorf("blockdev: lsblk: %w", err)
+		return nil, fmt.Errorf("blockdev: lsblk: %w", storage.WithStderr(err))
 	}
 	return parse(out)
 }

@@ -123,3 +123,13 @@ func TestOutputDefaultsToStderrAndUUIDFailureNamesTheDevice(t *testing.T) {
 		t.Errorf("UUID on failure = %q, %v", got, err)
 	}
 }
+
+// The tool's own message reaches the error, not just "exit status 1".
+func TestUUIDFailureCarriesStderr(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "cryptsetup"), []byte("#!/bin/sh\necho 'Device /dev/sda9 is not a valid LUKS device.' >&2\nexit 1\n"), 0o755)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := UUID("/dev/sda9"); err == nil || !strings.Contains(err.Error(), "not a valid LUKS device") {
+		t.Errorf("UUID error should carry cryptsetup's stderr, got %v", err)
+	}
+}

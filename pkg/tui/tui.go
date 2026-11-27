@@ -215,7 +215,7 @@ func cryptHash(pass string) (string, error) {
 	cmd.Stdin = strings.NewReader(pass + "\n")
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("tui: hashing password with openssl: %w", err)
+		return "", fmt.Errorf("tui: hashing password with openssl: %w", storage.WithStderr(err))
 	}
 	return strings.TrimSpace(string(out)), nil
 }

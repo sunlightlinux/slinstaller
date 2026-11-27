@@ -1290,7 +1290,7 @@ func (in *installer) bootCryptDevice() string {
 func (in *installer) writeMdadmConf() error {
 	out, err := exec.Command("mdadm", "--detail", "--scan").Output()
 	if err != nil {
-		return fmt.Errorf("mdadm --detail --scan: %w", err)
+		return fmt.Errorf("mdadm --detail --scan: %w", storage.WithStderr(err))
 	}
 	dir := filepath.Join(in.opts.Root, "etc")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

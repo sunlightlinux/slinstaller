@@ -23,7 +23,7 @@ import (
 func UUID(device string) (string, error) {
 	out, err := exec.Command("mdadm", "--detail", "--export", device).Output()
 	if err != nil {
-		return "", fmt.Errorf("mdadm: --detail --export %s: %w", device, err)
+		return "", fmt.Errorf("mdadm: --detail --export %s: %w", device, storage.WithStderr(err))
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		if v, ok := strings.CutPrefix(line, "MD_UUID="); ok {

@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -330,5 +332,25 @@ func TestFixedBytesByDisk(t *testing.T) {
 	got = pl.FixedBytesByDisk()
 	if got["/dev/sda"] != math.MaxUint64 || got["/dev/sdb"] != math.MaxUint64 {
 		t.Errorf("overflowing sizes should saturate, got %v", got)
+	}
+}
+
+func TestWithStderr(t *testing.T) {
+	_, err := exec.Command("sh", "-c", "echo '  no such disk  ' >&2; exit 3").Output()
+	if got := WithStderr(err); got == nil || !strings.HasSuffix(got.Error(), "exit status 3: no such disk") {
+		t.Errorf("WithStderr = %v", got)
+	}
+	var ee *exec.ExitError
+	if !errors.As(WithStderr(err), &ee) {
+		t.Error("WithStderr should keep the *exec.ExitError reachable")
+	}
+	// Nothing on stderr, or not an exit error: unchanged.
+	_, err = exec.Command("sh", "-c", "exit 3").Output()
+	if got := WithStderr(err); got != err {
+		t.Errorf("WithStderr with empty stderr = %v", got)
+	}
+	plain := errors.New("plain")
+	if WithStderr(plain) != plain || WithStderr(nil) != nil {
+		t.Error("WithStderr should pass other errors through")
 	}
 }

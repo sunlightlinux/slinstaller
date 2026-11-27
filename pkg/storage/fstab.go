@@ -18,7 +18,7 @@ import (
 func ProbeUUID(device string) (string, error) {
 	out, err := exec.Command("blkid", "-p", "-s", "UUID", "-o", "value", device).Output()
 	if err != nil {
-		return "", fmt.Errorf("storage: blkid %s: %w", device, err)
+		return "", fmt.Errorf("storage: blkid %s: %w", device, WithStderr(err))
 	}
 	return strings.TrimSpace(string(out)), nil
 }

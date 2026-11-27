@@ -18,6 +18,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
 // FormatArgs and OpenArgs build the cryptsetup commands. The trailing
@@ -95,7 +97,7 @@ func subcommand(args []string) string {
 func UUID(device string) (string, error) {
 	out, err := exec.Command("cryptsetup", "luksUUID", device).Output()
 	if err != nil {
-		return "", fmt.Errorf("luks: luksUUID %s: %w", device, err)
+		return "", fmt.Errorf("luks: luksUUID %s: %w", device, storage.WithStderr(err))
 	}
 	return strings.TrimSpace(string(out)), nil
 }

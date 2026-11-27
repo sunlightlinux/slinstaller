@@ -12,6 +12,10 @@ change.
 
 ### Fixed
 
+- **Probe failures say why.** blkid, parted, lsblk, mdadm, cryptsetup and
+  openssl run for their output reported only `exit status N` when they
+  failed, dropping the tool's own message. That message is now part of
+  the error.
 - **A Safe install's shrink no longer stops when e2fsck fixes something.**
   `e2fsck -f -p` exits 1 or 2 after correcting errors, which counted as a
   failure and aborted the resize of a filesystem that was now clean. Exit
