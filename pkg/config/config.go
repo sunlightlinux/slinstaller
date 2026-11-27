@@ -2633,13 +2633,15 @@ func (c *Config) checkRemote(key, image string) error {
 // checkRemote holds the URL itself: curl would otherwise follow an https
 // server on to plain http.
 func CurlFetch(url string, allowInsecureHTTP bool) string {
-	// A server that stalls is given up on (under 1 KB/s for two minutes),
+	// A server that stalls is given up on (under 1 KB/s for ten minutes:
+	// a slow disk at the end of the pipe, a USB stick whose writeback
+	// stalls, slows curl too, and must not be taken for a dead server),
 	// rather than holding the install — possibly in the middle of a dd —
 	// for ever; a slow but moving download of any size still completes.
 	if strings.HasPrefix(url, "https://") && !allowInsecureHTTP {
-		return `curl -fsSL --speed-limit 1024 --speed-time 120 --proto-redir =https "$1"`
+		return `curl -fsSL --speed-limit 1024 --speed-time 600 --proto-redir =https "$1"`
 	}
-	return `curl -fsSL --speed-limit 1024 --speed-time 120 "$1"`
+	return `curl -fsSL --speed-limit 1024 --speed-time 600 "$1"`
 }
 
 // DiskImageTarget is the one disk a disk-image is written to. A config that

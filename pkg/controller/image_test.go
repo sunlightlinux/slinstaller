@@ -21,11 +21,11 @@ func TestImageCommand(t *testing.T) {
 		"/run/img/ROOT.SQFS":       "unsquashfs -f -d /mnt /run/img/ROOT.SQFS",
 		"/run/img/live-rootfs.sfs": "unsquashfs -f -d /mnt /run/img/live-rootfs.sfs",
 		// From a URL: unpacked as it downloads, tar told the compression.
-		"https://img.example/base.tar.zst": `sh -c curl -fsSL --speed-limit 1024 --speed-time 120 --proto-redir =https "$1" | tar -xpf - --zstd -C "$2" --numeric-owner sh https://img.example/base.tar.zst /mnt`,
-		"https://img.example/base.tgz":     `sh -c curl -fsSL --speed-limit 1024 --speed-time 120 --proto-redir =https "$1" | tar -xpf - -z -C "$2" --numeric-owner sh https://img.example/base.tgz /mnt`,
-		"https://img.example/base.txz":     `sh -c curl -fsSL --speed-limit 1024 --speed-time 120 --proto-redir =https "$1" | tar -xpf - -J -C "$2" --numeric-owner sh https://img.example/base.txz /mnt`,
-		"https://img.example/base.tar.bz2": `sh -c curl -fsSL --speed-limit 1024 --speed-time 120 --proto-redir =https "$1" | tar -xpf - -j -C "$2" --numeric-owner sh https://img.example/base.tar.bz2 /mnt`,
-		"https://img.example/base.tar":     `sh -c curl -fsSL --speed-limit 1024 --speed-time 120 --proto-redir =https "$1" | tar -xpf - -C "$2" --numeric-owner sh https://img.example/base.tar /mnt`,
+		"https://img.example/base.tar.zst": `sh -c curl -fsSL --speed-limit 1024 --speed-time 600 --proto-redir =https "$1" | tar -xpf - --zstd -C "$2" --numeric-owner sh https://img.example/base.tar.zst /mnt`,
+		"https://img.example/base.tgz":     `sh -c curl -fsSL --speed-limit 1024 --speed-time 600 --proto-redir =https "$1" | tar -xpf - -z -C "$2" --numeric-owner sh https://img.example/base.tgz /mnt`,
+		"https://img.example/base.txz":     `sh -c curl -fsSL --speed-limit 1024 --speed-time 600 --proto-redir =https "$1" | tar -xpf - -J -C "$2" --numeric-owner sh https://img.example/base.txz /mnt`,
+		"https://img.example/base.tar.bz2": `sh -c curl -fsSL --speed-limit 1024 --speed-time 600 --proto-redir =https "$1" | tar -xpf - -j -C "$2" --numeric-owner sh https://img.example/base.tar.bz2 /mnt`,
+		"https://img.example/base.tar":     `sh -c curl -fsSL --speed-limit 1024 --speed-time 600 --proto-redir =https "$1" | tar -xpf - -C "$2" --numeric-owner sh https://img.example/base.tar /mnt`,
 	} {
 		if got := strings.Join(ImageCommand(image, "/mnt", false), " "); got != want {
 			t.Errorf("ImageCommand(%s) = %s, want %s", image, got, want)
@@ -34,8 +34,8 @@ func TestImageCommand(t *testing.T) {
 	// With plain http allowed, curl may follow a redirect to it; a plain
 	// http URL is only reached when it is allowed.
 	for image, want := range map[string]string{
-		"https://img.example/base.tar": `sh -c curl -fsSL --speed-limit 1024 --speed-time 120 "$1" | tar -xpf - -C "$2" --numeric-owner sh https://img.example/base.tar /mnt`,
-		"http://img.example/base.tar":  `sh -c curl -fsSL --speed-limit 1024 --speed-time 120 "$1" | tar -xpf - -C "$2" --numeric-owner sh http://img.example/base.tar /mnt`,
+		"https://img.example/base.tar": `sh -c curl -fsSL --speed-limit 1024 --speed-time 600 "$1" | tar -xpf - -C "$2" --numeric-owner sh https://img.example/base.tar /mnt`,
+		"http://img.example/base.tar":  `sh -c curl -fsSL --speed-limit 1024 --speed-time 600 "$1" | tar -xpf - -C "$2" --numeric-owner sh http://img.example/base.tar /mnt`,
 	} {
 		if got := strings.Join(ImageCommand(image, "/mnt", true), " "); got != want {
 			t.Errorf("ImageCommand(%s, insecure) = %s, want %s", image, got, want)
