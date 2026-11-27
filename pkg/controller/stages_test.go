@@ -568,3 +568,38 @@ func TestDhcpcdGlobalGoesBeforeTheBlocks(t *testing.T) {
 		t.Errorf("the stanzas are not at the end:\n%s", text)
 	}
 }
+
+// Whatever the file looked like — absent, empty, starting with a block,
+// ending without a newline — writing twice gives what writing once does,
+// and no line is glued to another.
+func TestDhcpcdConfIsWrittenOnce(t *testing.T) {
+	global := "\n# members of a bond or bridge, configured by slinstaller\ndenyinterfaces eth0 eth1\n"
+	conf := global + "\n# static interfaces configured by slinstaller\ninterface bond0\nstatic ip_address=10.0.0.2/24\n"
+	for name, start := range map[string]*string{
+		"absent": nil, "empty": new(string),
+		"a block first":   ptr("interface wlan0\nenv ifwireless=1\n"),
+		"no last newline": ptr("hostname\nslaac private"),
+	} {
+		path := filepath.Join(t.TempDir(), "dhcpcd.conf")
+		if start != nil {
+			os.WriteFile(path, []byte(*start), 0o644)
+		}
+		if err := writeDhcpcdConf(path, global, conf); err != nil {
+			t.Fatal(err)
+		}
+		once, _ := os.ReadFile(path)
+		if err := writeDhcpcdConf(path, global, conf); err != nil {
+			t.Fatal(err)
+		}
+		twice, _ := os.ReadFile(path)
+		if string(once) != string(twice) {
+			t.Errorf("%s: the second write changed it:\n%s\n---\n%s", name, once, twice)
+		}
+		text := string(once)
+		if strings.Count(text, "denyinterfaces") != 1 || strings.Count(text, "interface bond0") != 1 || strings.Contains(text, "private#") {
+			t.Errorf("%s:\n%s", name, text)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }

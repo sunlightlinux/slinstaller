@@ -1502,22 +1502,30 @@ func writeDhcpcdConf(path, global, conf string) error {
 		}
 	}
 	text := string(data)
-	if global != "" && !strings.Contains(text, global) {
+	// Compared and written without the parts' leading blank line, so a
+	// second run (a resume) finds what the first one wrote.
+	g := strings.TrimPrefix(global, "\n")
+	if g != "" && !strings.Contains(text, g) {
 		at := len(text)
-		lines := strings.SplitAfter(text, "\n")
 		off := 0
-		for _, l := range lines {
-			f := strings.Fields(l)
-			if len(f) > 0 && (f[0] == "interface" || f[0] == "ssid" || f[0] == "profile") {
+		for _, l := range strings.SplitAfter(text, "\n") {
+			if f := strings.Fields(l); len(f) > 0 && (f[0] == "interface" || f[0] == "ssid" || f[0] == "profile") {
 				at = off
 				break
 			}
 			off += len(l)
 		}
-		text = text[:at] + strings.TrimPrefix(global, "\n") + "\n" + text[at:]
+		before := text[:at]
+		if before != "" && !strings.HasSuffix(before, "\n") {
+			before += "\n" // a last line with no newline is not glued to
+		}
+		text = before + g + "\n" + text[at:]
 	}
-	if stanzas != "" && !strings.Contains(text, stanzas) {
-		text += stanzas
+	if st := strings.TrimPrefix(stanzas, "\n"); st != "" && !strings.Contains(text, st) {
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += "\n" + st
 	}
 	if text == string(data) {
 		return nil
