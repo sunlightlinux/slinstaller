@@ -226,3 +226,40 @@ func TestEntryCommandsOnlyCreatedAlongside(t *testing.T) {
 		t.Errorf("the existing partition 1 touched:\n%s", got)
 	}
 }
+
+// Each mkfs is given the configured UUID in its own spelling: mkfs.vfat a
+// volume id without the dash, mkfs.xfs through -m, the rest -U; none when
+// nothing was asked.
+func TestMkfsUUIDSpelling(t *testing.T) {
+	for _, c := range []struct{ fs, uuid, want string }{
+		{"vfat", "1A2B-3C4D", "-i 1A2B3C4D"},
+		{"xfs", "0b1a6f5e-1111-2222-3333-444455556666", "-m uuid=0b1a6f5e-1111-2222-3333-444455556666"},
+		{"ext4", "0b1a6f5e-1111-2222-3333-444455556666", "-U 0b1a6f5e-1111-2222-3333-444455556666"},
+		{"swap", "0b1a6f5e-1111-2222-3333-444455556666", "-U 0b1a6f5e-1111-2222-3333-444455556666"},
+	} {
+		cmd, err := mkfsCommand(Partition{Device: "/dev/sda1", Filesystem: c.fs, FsUUID: c.uuid})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(cmd, " "); !strings.Contains(got, " "+c.want+" ") {
+			t.Errorf("%s: %s, want %s in it", c.fs, got, c.want)
+		}
+	}
+	if cmd, _ := mkfsCommand(Partition{Device: "/dev/sda1", Filesystem: "ext4"}); strings.Contains(strings.Join(cmd, " "), "-U") {
+		t.Errorf("a UUID given unasked: %q", cmd)
+	}
+}
+
+// SpareESPs lists the spare EFI System Partitions, and only them.
+func TestSpareESPs(t *testing.T) {
+	pl := &Plan{Parts: []Partition{
+		{Device: "/dev/sda1", Filesystem: "vfat", Mountpoint: "/boot/efi"},
+		{Device: "/dev/sdb1", Filesystem: "vfat", SpareESP: true},
+		{Device: "/dev/sda2", Filesystem: "ext4", Mountpoint: "/"},
+		{Device: "/dev/sdc1", Filesystem: "vfat", SpareESP: true},
+	}}
+	got := pl.SpareESPs()
+	if len(got) != 2 || got[0].Device != "/dev/sdb1" || got[1].Device != "/dev/sdc1" {
+		t.Errorf("SpareESPs = %+v", got)
+	}
+}
