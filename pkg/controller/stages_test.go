@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
+	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
 // These tests run the stages after partitioning one at a time against a
@@ -668,5 +670,30 @@ func TestFirstBootAppliesTheConfigToAnExistingAccount(t *testing.T) {
 	}
 	if want := "chroot " + in.opts.Root + " usermod -a -G wheel -c Ion -p $6$hash ion"; !strings.Contains(flat, want) {
 		t.Errorf("the existing account was not given the config's settings: want %q\n%s", want, flat)
+	}
+}
+
+// sshd is enabled on a slinit system for remote use, a convenience: a
+// target without its service (no openssh in the packages) failed the
+// network stage, after the bootloader was in place, and the install with
+// it. It is skipped with a warning; the rest of the stage still runs.
+func TestNetworkWithoutSshdService(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	var log bytes.Buffer
+	in.opts.Log = &log
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "lib", "slinit.d"), "boot"), nil, 0o644)
+	if err := in.network(); err != nil {
+		t.Fatalf("network without an sshd service: %v", err)
+	}
+	if !strings.Contains(log.String(), "sshd") {
+		t.Errorf("no word of sshd in the log:\n%s", log.String())
+	}
+	if _, err := os.Lstat(filepath.Join(in.opts.Root, "etc", "slinit.d", "boot.d", "sshd")); err == nil {
+		t.Error("a link to a service that does not exist was made")
+	}
+	// The update service, after sshd in the stage, is still installed.
+	if _, err := os.Lstat(filepath.Join(in.opts.Root, "etc", "slinit.d", "boot.d", system.AutoUpdateServiceName)); err != nil {
+		t.Errorf("the update service was not enabled: %v", err)
 	}
 }

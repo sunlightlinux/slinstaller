@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2178,7 +2179,14 @@ func (in *installer) network() error {
 	// update service is installed here as well, enabled unless the config
 	// turns autoUpdate off.
 	if system.IsSlinitSystem(in.opts.Root) {
-		if err := system.EnableSlinitService(in.opts.Root, "sshd"); err != nil {
+		// A target with no sshd service (no openssh in its packages) is
+		// installed all the same: failing here, after the bootloader,
+		// lost the install for a convenience.
+		if err := system.EnableSlinitService(in.opts.Root, "sshd"); errors.Is(err, fs.ErrNotExist) {
+			if in.opts.Log != nil {
+				fmt.Fprintln(in.opts.Log, "warning: the target has no sshd service; it is not enabled")
+			}
+		} else if err != nil {
 			return err
 		}
 		return system.AutoUpdate(in.opts.Root, in.cfg.AutoUpdates())
