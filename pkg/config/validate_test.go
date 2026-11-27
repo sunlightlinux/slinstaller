@@ -127,23 +127,34 @@ func TestValidateMountpointShape(t *testing.T) {
 	validateWants(t, "subvolume", sv, "subvolume \"@log\": mountpoint \"/var/log \" has a space")
 }
 
-// Each LUKS container needs a mapper name of its own; two that come out
-// the same are refused, naming both entries.
-func TestValidateMapperNamesUnique(t *testing.T) {
+// Each LUKS container gets a mapper name of its own: where two roles give
+// the same name, the later one has its device's name added.
+func TestPlanMapperNamesUnique(t *testing.T) {
 	esp := &Media{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"}
-	root := &Media{Name: "sda9", Type: "crypt", FsType: "ext4", Mountpoint: "/", Size: "rest"}
 	crypt := func(n, fs, mnt string) *Media {
 		return &Media{Name: n, Type: "crypt", FsType: fs, Mountpoint: mnt, Size: "1G"}
 	}
-	validateWants(t, "two encrypted swaps",
-		sdaLayout(esp, crypt("sda2", "swap", ""), crypt("sda3", "swap", ""), root),
-		"sda2 and sda3 would both be opened as /dev/mapper/cryptswap")
-	validateWants(t, "/var/lib and /var-lib",
-		sdaLayout(esp, crypt("sda2", "ext4", "/var/lib"), crypt("sda3", "ext4", "/var-lib"), root),
-		"sda2 and sda3 would both be opened as /dev/mapper/cryptvar-lib")
-	validateWants(t, "distinct names",
-		sdaLayout(esp, crypt("sda2", "swap", ""), crypt("sda3", "ext4", "/var/lib"), root), "")
-
+	names := func(c *Config) []string {
+		t.Helper()
+		pl, err := c.Plan()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, p := range pl.Parts {
+			if p.Encrypted {
+				out = append(out, p.MapName)
+			}
+		}
+		return out
+	}
+	root := &Media{Name: "sda4", Type: "crypt", FsType: "ext4", Mountpoint: "/", Size: "rest"}
+	if got := strings.Join(names(sdaLayout(esp, crypt("sda2", "swap", ""), crypt("sda3", "swap", ""), root)), " "); got != "cryptswap cryptswap-sda3 cryptroot" {
+		t.Errorf("two encrypted swaps: %s", got)
+	}
+	if got := strings.Join(names(sdaLayout(esp, crypt("sda2", "ext4", "/var/lib"), crypt("sda3", "ext4", "/var-lib"), root)), " "); got != "cryptvar-lib cryptvar-lib-sda3 cryptroot" {
+		t.Errorf("/var/lib and /var-lib: %s", got)
+	}
 	// An encrypted array named root beside an encrypted root partition.
 	arr := raidConfig()
 	arr.Raid[0].Mountpoint = "/srv"
@@ -151,7 +162,9 @@ func TestValidateMapperNamesUnique(t *testing.T) {
 	arr.TargetMedia[0].Children[1].Size = "1G"
 	arr.TargetMedia[0].Children = append(arr.TargetMedia[0].Children,
 		&Media{Name: "vda3", Type: "crypt", FsType: "ext4", Mountpoint: "/", Size: "rest"})
-	validateWants(t, "array named root", arr, "vda3 and raid root would both be opened as /dev/mapper/cryptroot")
+	if got := strings.Join(names(arr), " "); got != "cryptroot cryptroot-root" {
+		t.Errorf("array named root: %s", got)
+	}
 }
 
 // A key no field reads loads (a clr-installer config must keep working)

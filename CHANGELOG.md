@@ -74,8 +74,8 @@ change.
   encrypted swap was `cryptswap`, `/var/lib` and `/var-lib` were both
   `cryptvar-lib`, and an encrypted array named `root` was `cryptroot`
   beside an encrypted root partition, so the second `luksOpen` failed
-  after the disks were wiped. Such layouts are refused up front, naming
-  both entries.
+  after the disks were wiped. The later one now gets its device's name
+  added (`cryptswap-sdb2`); two encrypted volumes of one group work too.
 - **Mountpoints are checked for shape.** They were compared and written
   to fstab as given: `/home/` and `/home` both passed as different
   mountpoints, `/boot/../tmp` passed, and `/a b` produced a broken fstab

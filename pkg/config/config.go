@@ -1681,37 +1681,6 @@ func (c *Config) Validate() error {
 		add("spare ESPs (esp: true) need the main ESP at /boot/efi, not /boot: at /boot the kernels would be on one disk only")
 	}
 
-	// Every LUKS container is opened under its mapper name, and two that
-	// come out the same (two encrypted swaps, /var/lib and /var-lib, an
-	// array named root beside an encrypted root) cannot both be open.
-	if !c.ReusePartitions {
-		mappers := map[string]string{}
-		mapper := func(where, name string) {
-			if other, ok := mappers[name]; ok {
-				add("%s and %s would both be opened as /dev/mapper/%s", other, where, name)
-				return
-			}
-			mappers[name] = where
-		}
-		for _, disk := range disks {
-			for i, ch := range disk.Children {
-				if ch == nil || !(ch.Type == "crypt" || ch.Type == "lvm" && ch.Encrypted) {
-					continue
-				}
-				where := ch.Name
-				if where == "" {
-					where = fmt.Sprintf("partition %d", i+1)
-				}
-				mapper(where, cryptMapName(ch))
-			}
-		}
-		for _, a := range c.Raid {
-			if a != nil && a.Encrypted {
-				mapper("raid "+a.Name, raidMapName(a.Name))
-			}
-		}
-	}
-
 	for name := range raidMembers {
 		if !declared[name] {
 			add("raid member references undeclared array %q", name)
@@ -2073,6 +2042,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 	if err := checkFreshNumbering(pl); err != nil {
 		return nil, err
 	}
+	uniqueMapNames(pl)
 
 	// A fill physical partition must be the last physical one on its disk —
 	// in on-disk order, which is the number order parted cuts them in, not
@@ -2301,6 +2271,32 @@ func lvParts(vg string, children []*Media) []storage.Partition {
 		lvs = append(lvs, lp)
 	}
 	return lvs
+}
+
+// uniqueMapNames gives every LUKS container of the plan a mapper name of
+// its own. Names come from roles (cryptswap, cryptvar-lib, crypt<vg>), and
+// two volumes can share one: two encrypted swaps, /var/lib beside
+// /var-lib, two encrypted physical volumes of one group, an array named
+// root beside an encrypted root. The second could not be opened ("already
+// exists") — after the disks were wiped. The first keeps its name; each
+// later one gets its device's name added (cryptswap-sdb2).
+func uniqueMapNames(pl *storage.Plan) {
+	used := map[string]bool{}
+	for i := range pl.Parts {
+		p := &pl.Parts[i]
+		if !p.Encrypted || p.MapName == "" {
+			continue
+		}
+		if used[p.MapName] {
+			base := p.MapName + "-" + filepath.Base(p.Device)
+			name := base
+			for n := 2; used[name]; n++ {
+				name = fmt.Sprintf("%s-%d", base, n)
+			}
+			p.MapName = name
+		}
+		used[p.MapName] = true
+	}
 }
 
 // raidMapName is the LUKS mapper name for an encrypted RAID array.
