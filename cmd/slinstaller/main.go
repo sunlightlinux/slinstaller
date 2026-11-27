@@ -14,7 +14,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -1029,30 +1028,13 @@ func checkTargetDisks(disks []string, devs []blockdev.Device) error {
 // the GPT overhead, and leaves the partition that fills the rest at least
 // its minimum (rootMin for a root).
 func checkDiskFit(plan *storage.Plan, devs []blockdev.Device, rootMin uint64, rootMinLabel string) error {
-	fixed, fillMin := plan.FixedBytesByDisk(), plan.FillMinByDisk(rootMin)
-	for _, disk := range plan.DiskList() {
+	return plan.CheckFit(func(disk string) (uint64, bool) {
 		d := blockdev.FindByPath(devs, disk)
 		if d == nil {
-			continue // refused by checkTargetDisks
+			return 0, false // refused by checkTargetDisks
 		}
-		need := fixed[disk] + storage.GPTReserveBytes
-		if need < fixed[disk] { // saturated: an absurd size
-			need = math.MaxUint64
-		}
-		if need > d.Size {
-			return fmt.Errorf("layout needs %s on %s but the disk is only %s - reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
-				humanSize(need), disk, humanSize(d.Size))
-		}
-		if min, ok := fillMin[disk]; ok && d.Size-need < min {
-			what := humanSize(min)
-			if min == rootMin {
-				what = rootMinLabel
-			}
-			return fmt.Errorf("the fixed-size partitions leave %s on %s for the partition that fills it, below its %s minimum - reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
-				humanSize(d.Size-need), disk, what)
-		}
-	}
-	return nil
+		return d.Size, true
+	}, rootMin, rootMinLabel)
 }
 
 // checkLocale rejects a timezone, keymap or language the live system does

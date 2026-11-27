@@ -42,8 +42,8 @@ change.
   (`btfrs`, `ys` at "Encrypt?") used to be taken as the default, so an
   unencrypted or ext4 system was installed. An ended input still gets the
   default (no, at "Proceed?").
-- The full-screen wizard checks the config it built (validation and the
-  partition plan) when Install is pressed, and shows what is wrong while
+- The full-screen wizard checks the config it built (validation, the
+  partition plan, and that the layout fits the disk) when Install is pressed, and shows what is wrong while
   the answers are still there. A bad hostname or a duplicate mountpoint
   used to end the program after the wizard, and every section had to be
   filled in again.

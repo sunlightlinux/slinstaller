@@ -162,6 +162,17 @@ func TestHubInstallButton(t *testing.T) {
 	if nm, _ = m.Update(enter); !nm.(model).confirmed {
 		t.Errorf("--skip-validation-size was not honoured:\n%s", viewOf(nm.(model)))
 	}
+	// A layout larger than its disk is refused here too, not after the
+	// wizard has gone.
+	m = onInstall(readyModel())
+	for i := range m.parts {
+		if m.parts[i].Mount == "/" {
+			m.parts[i].Size = "50000G"
+		}
+	}
+	if nm, _ = m.Update(enter); nm.(model).confirmed || !strings.Contains(viewOf(nm.(model)), "layout needs") {
+		t.Errorf("a layout bigger than the disk went through:\n%s", viewOf(nm.(model)))
+	}
 	m = onInstall(readyModel())
 	m.parts = append(m.parts, m.parts[len(m.parts)-1])
 	if nm, _ = m.Update(enter); nm.(model).confirmed {

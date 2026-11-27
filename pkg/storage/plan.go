@@ -266,6 +266,54 @@ func (pl *Plan) FillMinByDisk(rootMin uint64) map[string]uint64 {
 	return out
 }
 
+// CheckFit checks, before anything is wiped, that each disk the plan cuts
+// holds its fixed-size partitions plus the GPT's own space, and leaves the
+// partition that fills the rest at least its minimum (rootMin, said as
+// rootLabel, for a root). sizeOf gives a disk's size; a disk it does not
+// know is not checked. The installer checks this before it starts and the
+// full-screen wizard before it lets Install be pressed.
+func (pl *Plan) CheckFit(sizeOf func(disk string) (uint64, bool), rootMin uint64, rootLabel string) error {
+	fixed, fillMin := pl.FixedBytesByDisk(), pl.FillMinByDisk(rootMin)
+	for _, disk := range pl.DiskList() {
+		size, ok := sizeOf(disk)
+		if !ok {
+			continue
+		}
+		need := fixed[disk] + GPTReserveBytes
+		if need < fixed[disk] { // saturated: an absurd size
+			need = math.MaxUint64
+		}
+		if need > size {
+			return fmt.Errorf("layout needs %s on %s but the disk is only %s - reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
+				humanBytes(need), disk, humanBytes(size))
+		}
+		if min, ok := fillMin[disk]; ok && size-need < min {
+			what := humanBytes(min)
+			if min == rootMin {
+				what = rootLabel
+			}
+			return fmt.Errorf("the fixed-size partitions leave %s on %s for the partition that fills it, below its %s minimum - reduce partition sizes, use a bigger disk, or pass --skip-validation-size",
+				humanBytes(size-need), disk, what)
+		}
+	}
+	return nil
+}
+
+// humanBytes is a byte count in binary units, one decimal (1.5G).
+func humanBytes(b uint64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%dB", b)
+	}
+	units := []string{"K", "M", "G", "T", "P", "E"}
+	v, i := float64(b), -1
+	for v >= unit && i < len(units)-1 {
+		v /= unit
+		i++
+	}
+	return fmt.Sprintf("%.1f%s", v, units[i])
+}
+
 // PartitionName returns the device path for partition n on disk:
 // /dev/sda -> /dev/sda1, /dev/nvme0n1 -> /dev/nvme0n1p1.
 //

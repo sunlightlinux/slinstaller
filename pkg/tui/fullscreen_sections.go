@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sunlightlinux/slinstaller/pkg/config"
+	"github.com/sunlightlinux/slinstaller/pkg/storage"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
@@ -1221,8 +1222,22 @@ func (m model) installProblem() string {
 		cfg.SkipValidationAll = cfg.SkipValidationAll || m.skipAll
 		err = cfg.Validate()
 	}
+	var plan *storage.Plan
 	if err == nil {
-		_, err = cfg.Plan()
+		plan, err = cfg.Plan()
+	}
+	// The layout has to fit the disk, as the installer checks after the
+	// wizard: refused there, a 500G root on a 64G disk ended the program.
+	if err == nil && !cfg.SkipValidationSize && !cfg.SkipValidationAll {
+		rootMin, rootLabel := cfg.RootMinimum()
+		err = plan.CheckFit(func(disk string) (uint64, bool) {
+			for _, d := range m.disks {
+				if d.Path == disk && d.Size > 0 {
+					return d.Size, true
+				}
+			}
+			return 0, false
+		}, rootMin, rootLabel)
 	}
 	if err != nil {
 		return err.Error()
