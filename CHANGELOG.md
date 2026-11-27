@@ -22,6 +22,47 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
   `--through`/`--resume-from`, config files otherwise); the generated
   scripts ship in `completions/`, and a test keeps them current.
 
+**The command line**
+
+- `--root` is absolute, not `/`, not in a live-system directory (`/dev`,
+  `/run`, `/etc`, …) and not `/tmp`, `/opt`, `/srv` or `/media` themselves;
+  `--through`/`--resume-from` stage names are checked first; a relative
+  `--image` is the current directory's; any two of `--list-disks`,
+  `--genpass`, `--template`, `--json-yaml` and `--discover` are refused
+  together; `--log-level` takes 1-5 (clr-installer's) and clamps others
+  with a warning; `--list-disks` marks disks nothing can be installed to;
+  `--genpass -` asks twice at a terminal.
+- `--json-yaml` reads clr-installer's own descriptors (`"Version":
+  "latest"`), and a user's key file — public-key lines only; a private
+  key is refused. `--discover` formats a `CLR_*` role partition that
+  holds no filesystem, as clr-installer does.
+- A dry run says when `--apply` would refuse (a disk in use), rather
+  than inviting it.
+
+**Files written into the target**
+
+- None is written through a link onto the live system: xbps.d, dracut
+  drop-ins, mdadm.conf, fstab, `/etc/default/grub`, crypttab (new, 0600),
+  the saved config and log, dhcpcd.conf, the first-boot files, write-files
+  — a link there is replaced (resolved inside the target), not followed;
+  an image's `/root` link is followed inside it. rc.local is taken only
+  when appended to, and stays executable.
+- A resolv.conf the config writes (write-files, a hook), or an image's
+  own, is kept at the end; only the install-time copy is taken out.
+- ESP detection matches partition flags whole (`legacy_boot` is not the
+  ESP); a matched disk's named partitions must be its own; a hook's
+  leftover background process no longer holds the install; "Back to
+  menu" after a failure reports the failure.
+
+**Secrets**
+
+- Hook `env:` values named as secrets (…TOKEN, …PASSWORD, …KEY, …) are
+  masked in commands, output, errors and reports; write-files contents
+  and secret env values are left out of the diagnostics archive; an
+  installer message (`message-url`) keeps no terminal controls and no
+  https→http redirect; a download that stalls is given up after ten
+  minutes under 1 KB/s.
+
 **Confirming and stopping**
 
 - The full-screen confirmation selects **Cancel** to begin with: one Enter
@@ -293,8 +334,9 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
   root, and came up as runit: every argument went into
   `GRUB_CMDLINE_LINUX_DEFAULT`, which recovery entries leave out. What the
   system cannot boot without is in `GRUB_CMDLINE_LINUX` now. Kernel
-  arguments are quoted for the shell that sources `/etc/default/grub`, so
-  `$` and backticks are kept.
+  arguments are quoted for the shell that sources `/etc/default/grub`; one
+  holding `' $ ; \ `` ` `` or a line break is refused, as GRUB's own parser of
+  grub.cfg breaks it (a `'` stopped grub-mkconfig at the end of the install).
 - `init=/usr/bin/slinit` was added whenever the slinit binary was in the
   target, even with no slinit boot service (a Void base with the slinit
   package added): the system did not boot. It now needs the boot service

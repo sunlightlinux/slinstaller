@@ -62,7 +62,9 @@ sunlightlinux repository exists, ship its keys here and point
 
 ## 3a. The local repository: slinit
 
-slinit is not in any remote repository yet, so the ISO carries its own:
+The signed Sunlight mirror (`--extra-repo`, on by default) carries these
+packages; the ISO carries its own copy too, for offline installs and as a
+first source:
 an xbps repository at **`/usr/share/slinstaller/repo`** holding the
 `slinit`, `slinit-services`, `sunlight-base` and `slpam` packages from
 slpkgs, with its index (`scripts/make-iso.sh` in sunlight-os builds it):
@@ -77,9 +79,10 @@ xbps-rindex -a <rootfs>/usr/share/slinstaller/repo/*.xbps
 slinstaller passes it to `xbps-install` ahead of the remote repository
 (`--local-repo` names others; a path without an index is skipped). A
 local repository needs no signing key — xbps verifies signatures only
-for remote ones. If the package set asks for one of these and no local
-repository is found, the install stops in preflight, before any disk is
-touched.
+for remote ones. If the package set asks for one of these and neither a
+local repository nor the mirror is there, the install stops in preflight,
+before any disk is touched (and with xbps on the live system, the whole
+package set is dry-run against the repositories first).
 
 ## 4. Tools that run in the target, not on the ISO
 
@@ -137,8 +140,9 @@ shell available if the operator exits it.
 ## 7. Offline and hybrid installs
 
 The base system is fetched with `xbps-install`, which can read several
-repositories at once (`-R` per repository) and installs the **newest**
-version of each package found across them. slinstaller drives this with three
+repositories at once (`-R` per repository) and takes each package from the
+**first** repository listed that has it, whatever version another one has
+(xbps without `bestmatching`). slinstaller drives this with three
 knobs:
 
 - `--repo <url>` — the remote mirror (defaults to the config's `swupdMirror`,
@@ -153,11 +157,12 @@ knobs:
 
 This gives three modes:
 
-- **Online** (the default): remote mirror only. Needs working networking and
-  CA certificates (see §2).
+- **Online** (the default): the local repository when there is one, then the
+  Sunlight mirror, then Void. Needs working networking and CA certificates
+  (see §2).
 - **Hybrid — ISO packages + network updates**: pass **both** a `--local-repo`
-  on the ISO and a `--repo`. The base installs fast from the ISO, and any
-  package the mirror has a newer version of is pulled from the network. This
+  on the ISO and a `--repo`. What the ISO carries comes from it (first
+  repository listed wins), the rest from the network. This
   is already the default shape whenever the ISO carries a local repo and the
   remote is left at its default — no extra flag.
 - **Offline — ISO only**: `--offline` (or `offline: true` in the config)
@@ -192,8 +197,9 @@ The installed system boots **slinit**, and has no runit. Its base is
 `slinit-services` declares the conflict, so xbps refuses the pair
 rather than letting one silently overwrite the other. Everything else
 in the base, and the packages themselves, still come from Void's
-official repository; only slinit, its services and the metapackage
-come from the local one.
+official repository; slinit, its services and the metapackage — and
+whatever else the mirror carries — come from the local repository or the
+mirror.
 
 slinstaller also puts `init=/usr/bin/slinit` on the kernel command line
 when the target has slinit and its boot service (`/usr/bin/init` points
@@ -205,11 +211,10 @@ runs, and Void creates none.
 plain runit system, with no local repository needed — the demo VMs,
 which run without the ISO, need this.
 
-When Sunlight has a remote repository of its own:
-
-- point `--repo` / the config's `swupdMirror` at the sunlightlinux repo and
-  ship its keys in `/var/db/xbps/keys`;
-- the local repository becomes unnecessary.
+The Sunlight mirror is that remote repository: its key is built into
+slinstaller and seeded into the target, and it is written to the target's
+`/etc/xbps.d/10-sunlight.conf` (offline and image installs too) for later
+updates. The local repository is needed only offline.
 
 Nothing in slinstaller's code is Void-specific beyond these defaults (the
 repo URL, the keys path, and the package names in

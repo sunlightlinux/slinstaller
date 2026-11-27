@@ -17,10 +17,10 @@ disk, lays down the base system, installs GRUB, and configures first boot.
 > and its boot services put in), `grub-x86_64-efi` and `slpam`, and boots
 > **slinit**. xbps searches, in order, the live medium's own repository
 > (`--local-repo`, default `/usr/share/slinstaller/repo`), the signed
-> Sunlight mirror (`--extra-repo`), then Void (`--repo`); the Sunlight
-> packages come from the first two, everything else from Void. Preflight
-> refuses a default install when the live medium carries no local
-> repository. `--packages base-system,grub-x86_64-efi,glibc-locales` still
+> Sunlight mirror (`--extra-repo`), then Void (`--repo`), and takes each
+> package from the first that has it (so the mirror's copies of Void
+> packages win too). With neither a local repository nor the mirror,
+> preflight refuses a default install. `--packages base-system,grub-x86_64-efi,glibc-locales` still
 > installs a plain runit system. See [doc/packaging.md](doc/packaging.md).
 
 ## What it installs
@@ -272,7 +272,8 @@ and nothing is done to it; `--json-yaml old.json` converts the JSON descriptor o
 clr-installer's predecessor into a config; `--unmount` takes down what a `--through` run left
 mounted and `--in-target "cmd"` runs a command inside it. A partition table
 whose partitions are named `CLR_BOOT`, `CLR_ROOT`, `CLR_SWAP`,
-`CLR_MNT_/path` (with `_F` to format) comes out of `--discover` already
+`CLR_MNT_/path` (with `_F` to format; one holding no filesystem at all is
+formatted anyway, as in clr-installer) comes out of `--discover` already
 saying what goes where.
 
 **Finer points**, all optional:
@@ -343,7 +344,8 @@ Three things to know:
 - **Arguments are adapted to the machine the wizard runs on.** IOMMU and
   nested-KVM arguments are written for the detected CPU vendor, and the
   Realtime and Telco/RAN profiles compute `isolcpus=`, `nohz_full=`,
-  `rcu_nocbs=`, `irqaffinity=` and the 1 GiB hugepage count from that
+  `rcu_nocbs=`, `irqaffinity=` and the hugepages (1 GiB pages, or 2 MiB
+  ones on an x86 CPU without them) from that
   machine's CPUs, NUMA nodes and RAM, and the saved config holds the result.
   Those values belong to the hardware, so when `kernel-profile` names a
   profile, `--apply` recomputes them for the machine it runs on and reports

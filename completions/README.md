@@ -1,7 +1,7 @@
 # completions
 
-Shell completion scripts for the slinstaller command line (bash, zsh,
-fish), as in slinit's `completions/`.
+Shell completion scripts for the slinstaller command line (bash and fish;
+zsh through `bashcompinit`, below), as in slinit's `completions/`.
 
 `slinstaller.bash` and `slinstaller.fish` complete every flag, the stage
 names after `--through` and `--resume-from`, and config files otherwise.

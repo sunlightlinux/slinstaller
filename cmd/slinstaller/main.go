@@ -167,7 +167,7 @@ func run(args []string) error {
 	fs.StringVar(&swapFileSize, "swap-file-size", "", "create a swap file of this size, e.g. 2G (the config's swapFileSize)")
 	var logLevel int
 	fs.IntVar(&logLevel, "log-level", 3,
-		"how much of the install is shown on the terminal: 4 (debug) and 3 (info) show every command and its output, 2 (warning) and 1 (error) only the stages and the result; the log file always has everything (clr-installer's levels)")
+		"how much of the install is shown on the terminal: 5 (verbose), 4 (debug) and 3 (info) show every command and its output, 2 (warning) and 1 (error) only the stages and the result; others are clamped to 1-5; the log file always has everything (clr-installer's levels)")
 	fs.IntVar(&logLevel, "l", 3, "short for --log-level")
 	var resume bool
 	fs.BoolVar(&resume, "resume", false,
