@@ -12,6 +12,10 @@ change.
 
 ### Fixed
 
+- A config whose administrators had no password between them (an SSH key
+  only) installed a system nobody could become root on: root's password
+  is locked once there is an administrator, and sudo asks for one. It is
+  refused now.
 - A staged run (`--through`) skipped the disk checks along with the tool
   checks: it would partition and format a partition given as the disk, a
   disk in use, or one sharing an array with another. The disk checks now

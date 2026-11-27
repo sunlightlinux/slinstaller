@@ -1613,6 +1613,22 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// An administrator makes the install lock root's password and give
+	// wheel sudo — with a password. When no administrator has one, nobody
+	// can become root on the installed system: root is locked, and sudo
+	// asks every admin for a password they do not have (an SSH key logs
+	// them in, it does not answer sudo).
+	admins, adminWithPassword := []string{}, false
+	for _, u := range c.Users {
+		if u != nil && u.Admin && u.Login != "" {
+			admins = append(admins, u.Login)
+			adminWithPassword = adminWithPassword || u.Password != ""
+		}
+	}
+	if len(admins) > 0 && !adminWithPassword {
+		add("no administrator has a password (%s): root is locked once there is an administrator, and sudo asks for one - give an administrator a password hash", strings.Join(admins, ", "))
+	}
+
 	if c.Hostname != "" && (len(c.Hostname) > 63 || !hostnameRe.MatchString(c.Hostname)) {
 		add("hostname %q must be 1-63 characters of letters, digits and hyphens", c.Hostname)
 	}

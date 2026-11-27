@@ -301,3 +301,21 @@ func TestSaveReportsFailure(t *testing.T) {
 		t.Errorf("Save into a missing directory: %v", err)
 	}
 }
+
+// Administrators with no password between them would leave a system nobody
+// can become root on: root is locked, sudo wants a password.
+func TestAnAdministratorNeedsAPassword(t *testing.T) {
+	c := btrfsConfig()
+	c.Users = []*User{{Login: "ops", Admin: true, SSHKeys: []string{"ssh-ed25519 AAAA"}}, {Login: "guest", Password: "$6$s$h"}}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "no administrator has a password (ops)") {
+		t.Errorf("Validate = %v", err)
+	}
+	c.Users = append(c.Users, &User{Login: "root2", Admin: true, Password: "$6$s$h"})
+	if err := c.Validate(); err != nil {
+		t.Errorf("with an administrator who has one: %v", err)
+	}
+	c.Users = []*User{{Login: "guest"}}
+	if err := c.Validate(); err != nil {
+		t.Errorf("no administrator at all (root left as it is): %v", err)
+	}
+}
