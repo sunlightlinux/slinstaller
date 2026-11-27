@@ -2957,8 +2957,10 @@ func parseSize(s string) (uint64, error) {
 	} else if n, ok := strings.CutSuffix(num, "b"); ok {
 		num, mult = n, 0 // B alone is bytes; after a unit, the unit
 	}
-	unit := true
-	if num != "" {
+	// Nothing left ("B", "iB") has no unit to take: the number is
+	// refused below, not sliced.
+	unit := num != ""
+	if unit {
 		switch num[len(num)-1] {
 		case 'k':
 			mult = 1 << 10

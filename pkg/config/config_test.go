@@ -56,7 +56,9 @@ func TestParseSizeClrUnits(t *testing.T) {
 			t.Errorf("parseSize(%q) = %d, %v; want %d", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"1iB", "1Gi", "1GiBB", "GiB", "1BB", "1Bi"} {
+	// A unit with no number before it ("B", "iB") is refused, not a panic:
+	// with the B or iB taken off nothing was left to take a unit from.
+	for _, bad := range []string{"1iB", "1Gi", "1GiBB", "GiB", "1BB", "1Bi", "B", "b", "iB", "ib", " B "} {
 		if _, err := parseSize(bad); err == nil {
 			t.Errorf("parseSize(%q) = nil error, want failure", bad)
 		}
