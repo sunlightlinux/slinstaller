@@ -704,16 +704,14 @@ func (in *installer) mount() error {
 	mark := filepath.Join(in.opts.Root, resumeMark)
 	if in.opts.ResumeFrom == "" {
 		os.Remove(mark) // a link there is replaced, not followed
-		// Synced, and its directory: the resume's look mounts without
-		// replaying a journal, so a mark only in the journal at a crash
-		// would read as no install to resume.
+		// The resume's look mounts without replaying a journal, so a mark
+		// only in the journal at a crash would read as no install.
 		if err := writeSynced(mark, []byte(want), 0o600); err != nil {
 			return fmt.Errorf("mark the install as in progress: %w", err)
 		}
-		if d, err := os.Open(in.opts.Root); err == nil {
-			d.Sync()
-			d.Close()
-		}
+		// Synced is in the journal; the look skips the journal: a freeze
+		// and thaw puts the mark where it looks.
+		storage.FreezeThaw(in.opts.Root)
 	} else {
 		fi, err := os.Lstat(mark)
 		if err != nil || !fi.Mode().IsRegular() {

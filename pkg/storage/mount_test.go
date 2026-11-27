@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -69,4 +71,16 @@ func TestFstab(t *testing.T) {
 	if strings.Index(got, "\t/\text4") > strings.Index(got, "\t/boot\tvfat") {
 		t.Errorf("fstab lists /boot before /:\n%s", got)
 	}
+}
+
+// Neither is fatal where it cannot act: a regular file is no block device,
+// a temp directory's filesystem may not freeze.
+func TestBlockReadOnlyAndFreezeBestEffort(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "img")
+	os.WriteFile(f, nil, 0o600)
+	if setBlockReadOnly(f) != nil || setBlockReadOnly(filepath.Join(t.TempDir(), "none")) != nil {
+		t.Error("a file taken for a block device")
+	}
+	FreezeThaw(t.TempDir())
+	FreezeThaw(filepath.Join(t.TempDir(), "none"))
 }

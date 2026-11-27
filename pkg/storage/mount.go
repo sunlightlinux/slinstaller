@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"golang.org/x/sys/unix"
 	"os"
 	"path"
 	"path/filepath"
@@ -289,29 +290,31 @@ func (m *Mounter) ReadRootFile(pl *Plan, rel string) ([]byte, error) {
 		if err := os.MkdirAll(m.root, 0o755); err != nil {
 			return nil, err
 		}
-		// Read-only does not stop ext4 replaying a dirty journal (or btrfs
-		// its log tree), and xfs
-		// will not mount a dirty log read-only at all: noload/norecovery
-		// look without writing (a crash before the resume leaves exactly
-		// such a log). Refused those, plain read-only.
+		// A read-only mount still writes: ext4 and xfs replay a dirty
+		// journal, btrfs its log tree, f2fs rolls forward, and ext4 cleans
+		// up orphans — on what may be the wrong disk, and with noload alone,
+		// unjournaled. With the block device itself set read-only, none of
+		// them writes; then the journal is skipped (noload, norecovery,
+		// nologreplay), which a read-only device needs to mount a dirty one
+		// at all. Where the device cannot be set read-only (not a block
+		// device), it is a plain read-only mount, replay and all.
 		flags := uintptr(syscall.MS_RDONLY | syscall.MS_NOEXEC | syscall.MS_NOSUID | syscall.MS_NODEV)
-		opts := p.mountData()
-		noReplay := map[string]string{"ext3": "noload", "ext4": "noload", "xfs": "norecovery", "btrfs": "rescue=nologreplay"}[p.Filesystem]
-		merr := fmt.Errorf("no replay option")
-		if noReplay != "" {
-			d := noReplay
-			if opts != "" {
-				d = opts + "," + noReplay
+		dev, opts := p.EffectiveDevice(), p.mountData()
+		mdata := opts
+		if restore := setBlockReadOnly(dev); restore != nil {
+			defer restore()
+			nr := map[string]string{"ext3": "noload", "ext4": "noload", "xfs": "norecovery", "btrfs": "rescue=nologreplay", "f2fs": "norecovery"}[p.Filesystem]
+			if nr != "" && opts != "" {
+				mdata = opts + "," + nr
+			} else if nr != "" {
+				mdata = nr
 			}
-			merr = syscall.Mount(p.EffectiveDevice(), m.root, p.Filesystem, flags, d)
 		}
-		if merr != nil {
-			if err := syscall.Mount(p.EffectiveDevice(), m.root, p.Filesystem, flags, opts); err != nil {
-				// %v, not %w: a device node not there is ENOENT, which
-				// would read as the file not being there — "nothing to
-				// resume" for a target that cannot be looked at.
-				return nil, fmt.Errorf("storage: mount %s read-only on %s: %v", p.EffectiveDevice(), m.root, err)
-			}
+		if err := syscall.Mount(dev, m.root, p.Filesystem, flags, mdata); err != nil {
+			// %v, not %w: a device node not there is ENOENT, which
+			// would read as the file not being there — "nothing to
+			// resume" for a target that cannot be looked at.
+			return nil, fmt.Errorf("storage: mount %s read-only on %s: %v", dev, m.root, err)
 		}
 		data, err := os.ReadFile(filepath.Join(m.root, rel))
 		if uerr := syscall.Unmount(m.root, 0); uerr != nil && err == nil {
@@ -320,4 +323,38 @@ func (m *Mounter) ReadRootFile(pl *Plan, rel string) ([]byte, error) {
 		return data, err
 	}
 	return nil, fmt.Errorf("storage: the plan has no root filesystem")
+}
+
+// setBlockReadOnly sets a block device read-only (BLKROSET) and returns
+// what puts it back, or nil when dev is not a block device it can set.
+func setBlockReadOnly(dev string) func() {
+	f, err := os.Open(dev)
+	if err != nil {
+		return nil
+	}
+	fd := int(f.Fd())
+	was, err := unix.IoctlGetInt(fd, unix.BLKROGET)
+	if err != nil || unix.IoctlSetPointerInt(fd, unix.BLKROSET, 1) != nil {
+		f.Close()
+		return nil
+	}
+	return func() {
+		unix.IoctlSetPointerInt(fd, unix.BLKROSET, was)
+		f.Close()
+	}
+}
+
+// FreezeThaw freezes the filesystem mounted at dir and thaws it at once:
+// what is in its journal or log goes to its home on disk (a checkpoint), so
+// a look that skips the journal finds it. Best effort.
+func FreezeThaw(dir string) {
+	const fifreeze, fithaw = 0xC0045877, 0xC0045878 // _IOWR('X', 119/120, int)
+	f, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	if unix.IoctlSetInt(int(f.Fd()), fifreeze, 0) == nil {
+		unix.IoctlSetInt(int(f.Fd()), fithaw, 0)
+	}
 }
