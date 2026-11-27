@@ -103,20 +103,24 @@ func TestRunnersDoNotWaitForBackgroundOutput(t *testing.T) {
 }
 
 // A sink slower than outputWait loses none of a command's own output: the
-// pipe is drained into a queue whatever the sink does. (More output than the
-// pipe and scanner buffers hold, and a sink that stalls past outputWait at
-// first: before, the pipe was closed under what was still in flight.)
+// pipe is drained into a queue whatever the sink does. The output (~79 KB)
+// fits the kernel pipe plus the one 32 KB chunk exec's copier holds, so the
+// command exits at once; the sink then stalls on its first line for five
+// times outputWait. Read at the sink's own pace, the kernel pipe was closed
+// under the ~46 KB still in it when outputWait ran out. (The margins are
+// wide: draining it takes far less than 100ms even under -race on a loaded
+// runner — 10ms, the earlier setting, did not always.)
 func TestSlowSinkLosesNothing(t *testing.T) {
 	saved := outputWait
 	defer func() { outputWait = saved }()
-	outputWait = 10 * time.Millisecond
+	outputWait = 100 * time.Millisecond
 	n := 0
 	err := SinkRunner(func(string) {
-		if n++; n < 50 {
-			time.Sleep(time.Millisecond)
+		if n++; n == 2 { // the first line of output (the first is the command line)
+			time.Sleep(5 * outputWait)
 		}
 	})([]string{"seq", "1", "15000"})
-	if err != nil || n != 15001 { // the command line, then 15000 lines (3500 arrived before)
+	if err != nil || n != 15001 { // the command line, then 15000 lines
 		t.Errorf("err %v, %d lines, want 15001", err, n)
 	}
 }
