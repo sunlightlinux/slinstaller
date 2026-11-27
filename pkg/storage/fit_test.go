@@ -189,6 +189,11 @@ func TestCheckVGFitEdges(t *testing.T) {
 	if err := fits(pv("1G", false), lv("8388608T"), lv("8388608T")); err == nil {
 		t.Error("an overflowing sum of volumes fit")
 	}
+	// A group whose PVs are all too small for LVM's own space holds
+	// nothing: judged, not skipped.
+	if err := fits(pv("4M", false), lv("8M")); err == nil {
+		t.Error("a group of a 4M PV took an 8M volume")
+	}
 	// A PV too small for LVM's own space adds nothing, and takes nothing.
 	if err := fits(pv("1M", false), pv("1G", false), lv("1020M")); err != nil {
 		t.Errorf("a 1M PV took from the group: %v", err)

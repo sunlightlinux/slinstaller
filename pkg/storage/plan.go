@@ -360,6 +360,12 @@ func (pl *Plan) checkVGFit(sizeOf func(disk string) (uint64, bool), rootMin uint
 			if p.Encrypted {
 				over += 16 << 20 // the LUKS2 header
 			}
+			// A PV too small for LVM's own space holds nothing, but its
+			// group is still one this check judges: with only such PVs,
+			// every volume is too big for it.
+			if _, seen := capacity[p.VGName]; !seen {
+				capacity[p.VGName] = 0
+			}
 			if n > over {
 				capacity[p.VGName] += n - over
 			}
