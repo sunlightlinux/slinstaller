@@ -442,3 +442,17 @@ func TestManageUsersRevertAndCancelRestore(t *testing.T) {
 		t.Errorf("Confirm: users = %+v", got.users)
 	}
 }
+
+// A full name longer than its column is cut to it, so the row, clipped to
+// the dialog, still shows whether the account is an administrator.
+func TestUserTableKeepsTheAdminColumn(t *testing.T) {
+	m := withSize(newModel(twoTestDisks()))
+	m.users = []userEntry{{Login: "ion", UserName: "Ion Popescu-Ionescu de la Valea Lunga a Prahovei", Password: "correct horse", Admin: true}}
+	m = openSectionInTab(m, 0, secUser)
+	v := viewOf(m)
+	for _, l := range strings.Split(v, "\n") {
+		if strings.Contains(l, "ion ") && !strings.Contains(l, "yes") {
+			t.Errorf("the admin column is gone from the row: %q", l)
+		}
+	}
+}

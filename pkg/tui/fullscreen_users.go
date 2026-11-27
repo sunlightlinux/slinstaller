@@ -260,7 +260,9 @@ func (m model) userListView() string {
 		if u.Admin {
 			admin = "yes"
 		}
-		line := fmt.Sprintf("%-16s %-18s %-10s %s", u.Login, orDash(u.UserName), "****", admin)
+		// The columns clipped to their width, so a long full name does not
+		// push the Admin column off a clipped row.
+		line := fmt.Sprintf("%-16s %-18s %-10s %s", clip(u.Login, 16), clip(orDash(u.UserName), 18), "****", admin)
 		rows = append(rows, row(w, i == m.userCursor, line))
 	}
 	// More accounts than the dialog holds scroll in a window that follows
