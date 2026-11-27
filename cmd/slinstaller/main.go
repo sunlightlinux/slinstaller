@@ -458,7 +458,7 @@ restart:
 		if through != "" || resume || systemCheck {
 			return fmt.Errorf("disk-image writes one image and is done: --through, --resume and --system-check do not apply")
 		}
-		return installDiskImage(cfg, rest[0], apply, stdin)
+		return installDiskImage(cfg, rest[0], apply, forceDestructive, stdin)
 	}
 
 	// Catch a mistyped timezone, keymap or language here, before anything is wiped,

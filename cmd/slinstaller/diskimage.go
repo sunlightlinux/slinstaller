@@ -97,7 +97,7 @@ n=0; for c in $s; do n=$((n+1)); [ "$c" = 0 ] || { echo "disk-image: a step of t
 // installDiskImage is the whole of a disk-image run: resolve the image,
 // show what would be done, and — with apply — check the disk as any target
 // disk is checked, have it confirmed, and write.
-func installDiskImage(cfg *config.Config, cfgPath string, apply bool, stdin *bufio.Reader) error {
+func installDiskImage(cfg *config.Config, cfgPath string, apply, forceDestructive bool, stdin *bufio.Reader) error {
 	target, err := cfg.DiskImageTarget()
 	if err != nil {
 		return err
@@ -136,13 +136,15 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply bool, stdin *buf
 	if listErr != nil {
 		return listErr
 	}
-	switch d := blockdev.FindByPath(devs, disk); {
-	case d == nil:
-		return fmt.Errorf("target disk %s is not among the machine's block devices", disk)
-	case d.Type != "disk" && d.Type != "loop":
-		return fmt.Errorf("target %s is a %s, not a whole disk", disk, d.Type)
-	case d.InUse() != "":
-		return fmt.Errorf("target disk %s is in use: %s", disk, d.InUse())
+	// The same checks as any target disk: it exists, is whole, has a size
+	// and is not in use — and wiping it must not break an array or volume
+	// group it shares with another disk, unless forced.
+	if err := checkTargetDisks([]string{disk}, devs); err != nil {
+		return err
+	}
+	if shared := blockdev.Shared(devs, disk, []string{disk}, blockdev.VolumeGroups()); len(shared) > 0 && !forceDestructive {
+		return fmt.Errorf("writing over %s would break other disks:\n  %s\npass --force-destructive to write it anyway",
+			disk, strings.Join(shared, "\n  "))
 	}
 	var tools []string
 	for _, c := range cmds {

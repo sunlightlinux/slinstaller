@@ -188,6 +188,17 @@ func applyDiskImage(t *testing.T, confirmed string) {
 	setListing(t, e.bin, "")
 	_, err = run(confirmed)
 	e.refused("disk absent", err, "is not among the machine's block devices")
+	// An array shared with a disk the image does not replace: refused, as
+	// any wiping install is.
+	e = newApplyEnv(t, "sh", "dd", "cat")
+	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":64000000000,"type":"disk","children":[
+		{"name":"slitest0p1","path":"`+testDisk+`p1","size":1000,"type":"part","children":[
+			{"name":"md0","path":"/dev/md0","size":1000,"type":"raid1"}]}]},
+		{"name":"sdz","path":"/dev/sdz","size":1000,"type":"disk","children":[
+		{"name":"sdz1","path":"/dev/sdz1","size":1000,"type":"part","children":[
+			{"name":"md0","path":"/dev/md0","size":1000,"type":"raid1"}]}]}`)
+	_, err = run(confirmed)
+	e.refused("disk image over a shared array", err, "would break other disks")
 	e = newApplyEnv(t, "sh", "cat")
 	_, err = run(confirmed)
 	e.refused("no dd", err, "missing tools on the live system: dd")
