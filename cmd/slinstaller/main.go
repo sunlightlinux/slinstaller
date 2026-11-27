@@ -223,6 +223,13 @@ func run(args []string) error {
 		return fmt.Errorf("--root %q must be an absolute path other than / (e.g. /mnt)", root)
 	}
 	root = filepath.Clean(root)
+	// Nor a directory of the live system: --unmount --root /dev detached
+	// the live /dev's mounts, and an install would mount over them.
+	for _, sys := range []string{"/dev", "/proc", "/sys", "/run", "/boot", "/etc", "/usr", "/var", "/home", "/root", "/bin", "/sbin", "/lib", "/lib64"} {
+		if root == sys || strings.HasPrefix(root, sys+"/") {
+			return fmt.Errorf("--root %s is in the live system's %s; use a directory of its own, e.g. /mnt", root, sys)
+		}
+	}
 	// Stage names are known now: a misspelt one was found only once the
 	// disk path had been retyped, or not at all in a dry run.
 	for flagName, stage := range map[string]string{"--through": through, "--resume-from": resumeFrom} {

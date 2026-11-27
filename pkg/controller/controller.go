@@ -1145,6 +1145,13 @@ func (in *installer) swapfile() error {
 	if in.cfg.SwapFileSize == "" {
 		return nil
 	}
+	// A link there (a reused root, an image) would have the commands below
+	// truncate and mkswap whatever it points at; it is replaced.
+	if fi, err := os.Lstat(filepath.Join(in.opts.Root, "swapfile")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(filepath.Join(in.opts.Root, "swapfile")); err != nil {
+			return fmt.Errorf("replace the link at /swapfile: %w", err)
+		}
+	}
 	rootFS := ""
 	for _, p := range in.plan.Parts {
 		if p.Mountpoint == "/" && !p.IsPV && !p.IsRaidMember {

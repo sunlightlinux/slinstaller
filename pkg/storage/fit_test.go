@@ -79,3 +79,15 @@ func TestCheckCreateNumbers(t *testing.T) {
 		t.Errorf("PhysOn = %+v", got)
 	}
 }
+
+// A FAT partition flagged legacy_boot is not an ESP.
+func TestExistingESPWantsTheFlag(t *testing.T) {
+	saved := partedPrintFree
+	defer func() { partedPrintFree = saved }()
+	partedPrintFree = func(string) (string, error) {
+		return "BYT;\n/dev/sda:100000MiB:scsi:512:512:gpt:DISK:;\n1:1MiB:513MiB:512MiB:fat32::legacy_boot;\n2:513MiB:1025MiB:512MiB:fat32::boot, esp;\n", nil
+	}
+	if dev, ok, err := ExistingESP("/dev/sda"); err != nil || !ok || dev != "/dev/sda2" {
+		t.Errorf("ExistingESP = %q %v %v, want /dev/sda2", dev, ok, err)
+	}
+}

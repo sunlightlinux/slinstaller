@@ -114,7 +114,15 @@ func ExistingESP(disk string) (device string, ok bool, err error) {
 	parts, _ := parsePartedFree(out)
 	for _, p := range parts {
 		fat := strings.HasPrefix(p.FsType, "fat")
-		flagged := strings.Contains(p.Flags, "esp") || strings.Contains(p.Flags, "boot")
+		// Whole flags: "legacy_boot" (a BIOS-boot hint on any FAT
+		// partition) contains "boot" and is not an ESP — taken for one,
+		// GRUB went onto a partition the firmware never reads.
+		flagged := false
+		for _, f := range strings.Split(p.Flags, ",") {
+			if f = strings.TrimSpace(f); f == "esp" || f == "boot" {
+				flagged = true
+			}
+		}
 		if fat && flagged {
 			return PartitionName(disk, p.Number), true, nil
 		}

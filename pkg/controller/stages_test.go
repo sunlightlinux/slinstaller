@@ -621,3 +621,25 @@ func TestConfigInitWins(t *testing.T) {
 		t.Errorf("kernel command line: %s", line)
 	}
 }
+
+// A link at /swapfile (a reused root, an image) is replaced, not followed by
+// truncate and mkswap.
+func TestSwapfileReplacesALink(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.SwapFileSize = "2G"
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	mkTarget(t, in, "etc")
+	outside := filepath.Join(t.TempDir(), "precious")
+	os.WriteFile(outside, []byte("data"), 0o644)
+	os.Symlink(outside, filepath.Join(in.opts.Root, "swapfile"))
+	if err := in.swapfile(); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(filepath.Join(in.opts.Root, "swapfile")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("the link is still there")
+	}
+	if got, _ := os.ReadFile(outside); string(got) != "data" {
+		t.Error("the file behind the link was touched")
+	}
+}

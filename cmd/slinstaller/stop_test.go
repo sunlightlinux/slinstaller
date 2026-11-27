@@ -99,7 +99,7 @@ targetMedia:
 // --root is never the live root nor relative, and stage names are checked
 // before anything else is.
 func TestRootAndStageFlags(t *testing.T) {
-	for _, root := range []string{"/", "mnt", "/mnt/..", "//"} {
+	for _, root := range []string{"/", "mnt", "/mnt/..", "//", "/dev", "/run/x", "/usr/local/target"} {
 		if err := run([]string{"--root", root, "--unmount"}); err == nil || !strings.Contains(err.Error(), "--root") {
 			t.Errorf("--root %q: %v", root, err)
 		}
