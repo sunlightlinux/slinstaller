@@ -1163,6 +1163,31 @@ func (in *installer) bootloader() error {
 // new entry first in the boot order, so the spares end up ahead of the entry
 // grub-install made; every one of them starts the same GRUB, so which is
 // tried first makes no difference while the disks are all there.
+// efiBootList is the firmware's boot entries as `efibootmgr` lists them;
+// tests replace it. A machine where it cannot be read has none to clean.
+var efiBootList = func() string {
+	out, _ := exec.Command("efibootmgr").Output()
+	return string(out)
+}
+
+// efiEntriesLabelled returns the numbers of the boot entries whose label is
+// exactly label ("Boot0003* Sunlight (sdb)\tHD(...)" → "0003").
+func efiEntriesLabelled(label string) []string {
+	var nums []string
+	for _, line := range strings.Split(efiBootList(), "\n") {
+		rest, ok := strings.CutPrefix(line, "Boot")
+		if !ok || len(rest) < 5 || strings.Trim(rest[:4], "0123456789ABCDEFabcdef") != "" {
+			continue
+		}
+		name := strings.TrimLeft(rest[4:], "* ")
+		name, _, _ = strings.Cut(name, "\t")
+		if strings.TrimSpace(name) == label {
+			nums = append(nums, rest[:4])
+		}
+	}
+	return nums
+}
+
 func (in *installer) fillSpareESPs(esp string, noNVRAM bool) error {
 	src := filepath.Join(in.opts.Root, esp, "EFI")
 	for _, p := range in.plan.SpareESPs() {
@@ -1179,11 +1204,20 @@ func (in *installer) fillSpareESPs(esp string, noNVRAM bool) error {
 		if noNVRAM {
 			continue
 		}
-		entry := []string{"chroot", in.opts.Root, "efibootmgr", "--create",
+		label := grub.DefaultID + " (" + filepath.Base(p.Disk) + ")"
+		// grub-install replaces its own entry; nothing replaced these, so
+		// every reinstall and resume added another set, the new ones first
+		// in BootOrder and the old ones pointing at partitions since
+		// recreated. An entry with this label is removed first.
+		var cmds [][]string
+		for _, num := range efiEntriesLabelled(label) {
+			cmds = append(cmds, []string{"chroot", in.opts.Root, "efibootmgr", "--bootnum", num, "--delete-bootnum"})
+		}
+		cmds = append(cmds, []string{"chroot", in.opts.Root, "efibootmgr", "--create",
 			"--disk", p.Disk, "--part", fmt.Sprintf("%d", p.Number),
-			"--label", grub.DefaultID + " (" + filepath.Base(p.Disk) + ")",
-			"--loader", `\EFI\` + grub.DefaultID + `\grubx64.efi`}
-		if err := storage.RunCommands([][]string{entry}, in.opts.Runner); err != nil {
+			"--label", label,
+			"--loader", `\EFI\` + grub.DefaultID + `\grubx64.efi`})
+		if err := storage.RunCommands(cmds, in.opts.Runner); err != nil {
 			return err
 		}
 	}

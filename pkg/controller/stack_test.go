@@ -155,6 +155,16 @@ func fillSpareESPsOnTmpfs(t *testing.T, base string) {
 	}
 	os.WriteFile(filepath.Join(efi, "grubx64.efi"), []byte("GRUB"), 0o644)
 
+	// An entry an earlier install left for this spare is replaced, not
+	// added to; the others are left alone.
+	saved := efiBootList
+	defer func() { efiBootList = saved }()
+	efiBootList = func() string {
+		return "BootCurrent: 0001\nBootOrder: 0004,0001,0003\n" +
+			"Boot0001* Sunlight\tHD(1,GPT,...)/File(\\EFI\\Sunlight\\grubx64.efi)\n" +
+			"Boot0003* Windows Boot Manager\tHD(1,GPT,...)\n" +
+			"Boot0004* Sunlight (sdb)\tHD(1,GPT,...)/File(\\EFI\\Sunlight\\grubx64.efi)\n"
+	}
 	in := nsInstaller(root)
 	in.plan.Parts = append(in.plan.Parts[:0], in.plan.Parts[0])
 	in.plan.Parts = append(in.plan.Parts,
@@ -186,6 +196,14 @@ func fillSpareESPsOnTmpfs(t *testing.T, base string) {
 	}
 	if copied != "GRUB|GRUB" {
 		t.Errorf("on the spare ESP: %q, want the loader at both paths", copied)
+	}
+	if del := cmds[len(cmds)-2]; !strings.HasSuffix(del, "efibootmgr --bootnum 0004 --delete-bootnum") {
+		t.Errorf("the old entry for the spare was not removed first: %s", del)
+	}
+	for _, c := range cmds {
+		if strings.Contains(c, "--bootnum 0001") || strings.Contains(c, "--bootnum 0003") {
+			t.Errorf("an entry of something else was touched: %s", c)
+		}
 	}
 	last := cmds[len(cmds)-1]
 	if !strings.Contains(last, "efibootmgr --create --disk /dev/sdb --part 1 --label Sunlight (sdb)") || !strings.Contains(last, `\EFI\Sunlight\grubx64.efi`) {

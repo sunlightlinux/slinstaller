@@ -12,6 +12,9 @@ change.
 
 ### Fixed
 
+- Each install or resume added another set of firmware boot entries for
+  the spare ESPs ("Sunlight (sdb)"), the new ones first in BootOrder.
+  An entry with the same label is removed before it is made again.
 - With an encrypted `/boot`, the initramfs keyfile was named without its
   key device (`rd.luks.key=<path>`), so dracut looked for it on every disk,
   never found it, and asked for the passphrase a second time. It is
