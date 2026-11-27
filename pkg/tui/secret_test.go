@@ -9,7 +9,7 @@ import (
 
 func TestReadSecretReadsLine(t *testing.T) {
 	// ReadSecret reads from the given bufio reader, not os.Stdin, so a
-	// non-terminal input is returned verbatim (trimmed). The echo-off path
+	// non-terminal input is returned verbatim (less its line ending). The echo-off path
 	// needs a real TTY and is exercised interactively.
 	in := bufio.NewReader(strings.NewReader("hunter2\nnext\n"))
 	if got := ReadSecret(in, io.Discard, "Password"); got != "hunter2" {
@@ -19,5 +19,13 @@ func TestReadSecretReadsLine(t *testing.T) {
 	line, _ := in.ReadString('\n')
 	if strings.TrimSpace(line) != "next" {
 		t.Errorf("leftover = %q, want next", line)
+	}
+}
+
+// Spaces are part of a secret: only the line ending is taken off.
+func TestReadSecretKeepsSpaces(t *testing.T) {
+	in := bufio.NewReader(strings.NewReader(" pass phrase \r\n"))
+	if got := ReadSecret(in, io.Discard, "Passphrase"); got != " pass phrase " {
+		t.Errorf("ReadSecret = %q", got)
 	}
 }

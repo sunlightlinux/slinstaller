@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -40,7 +42,11 @@ func readSecret(in *bufio.Reader, w io.Writer, label string) (string, error) {
 		// line so the following output does not run into the prompt.
 		fmt.Fprintln(w)
 	}
-	s := strings.TrimSpace(line)
+	// Only the line ending is taken off: spaces are part of a password or
+	// passphrase (ValidPassphrase allows them; the full-screen front-end
+	// and --crypt-file keep them). Trimmed, "abcdefgh " became a password
+	// other than the one typed, found at the first login or unlock.
+	s := strings.TrimRight(line, "\r\n")
 	if err != nil && s == "" {
 		return "", ErrNoInput
 	}
@@ -63,5 +69,25 @@ func disableEcho() func() {
 	if err := unix.IoctlSetTermios(fd, unix.TCSETS, termios); err != nil {
 		return nil
 	}
-	return func() { _ = unix.IoctlSetTermios(fd, unix.TCSETS, &orig) }
+	// A signal while echo is off (Ctrl+C at the prompt, a hangup) killed
+	// the process with the terminal left not echoing: on a serial console
+	// the operator typed blind afterwards. Echo is put back, and the
+	// process ends as interrupted — nothing has been touched at a prompt.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-sigs:
+			_ = unix.IoctlSetTermios(fd, unix.TCSETS, &orig)
+			fmt.Fprintln(os.Stderr)
+			os.Exit(130)
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(sigs)
+		close(done)
+		_ = unix.IoctlSetTermios(fd, unix.TCSETS, &orig)
+	}
 }

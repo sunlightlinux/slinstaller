@@ -274,7 +274,18 @@ func run(args []string) error {
 	if genpass != "" {
 		pw := genpass
 		if pw == "-" {
-			pw = tui.ReadSecret(bufio.NewReader(os.Stdin), os.Stderr, "Password")
+			in := bufio.NewReader(os.Stdin)
+			pw = tui.ReadSecret(in, os.Stderr, "Password")
+			if pw == "" {
+				return fmt.Errorf("--genpass -: no password was read")
+			}
+			// Typed at a terminal, unseen: asked twice, or a typo became a
+			// hash nobody can log in with. (Piped, it is read once.)
+			if isTerminal(os.Stdin) {
+				if again := tui.ReadSecret(in, os.Stderr, "Password again"); again != pw {
+					return fmt.Errorf("--genpass -: the passwords do not match")
+				}
+			}
 		}
 		if err := config.ValidPassword(pw); err != nil {
 			return err
