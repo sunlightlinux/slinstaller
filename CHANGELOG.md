@@ -29,6 +29,11 @@ change.
   accepted by the check) after the disk was wiped and the system
   installed, and reads `1GB` as 10^9 bytes. It is given the bytes now,
   and `0` is no swap file, as clr-installer documents it.
+- **`dhcp` is read as clr-installer reads it.** `dhcp: 1` (or `t`) on an
+  interface with addresses is DHCP in clr-installer and was configured
+  statically here; a value that is not a boolean (`yes`), which
+  clr-installer refuses to load, was taken as static too. The first is
+  DHCP now, the second refused.
 - **The dry run shows the whole partition stage.** It printed the disk's
   own commands only: for an LVM, RAID or encrypted layout, `pvcreate`,
   `vgcreate`, `lvcreate`, `mdadm --create` and `cryptsetup luksFormat`

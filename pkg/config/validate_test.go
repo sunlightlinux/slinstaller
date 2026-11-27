@@ -335,3 +335,32 @@ func TestValidationLimits(t *testing.T) {
 		}
 	}
 }
+
+// dhcp is read as clr-installer reads it, with strconv.ParseBool: "1", "t"
+// and "True" are DHCP there, and an interface carrying addresses with one
+// of them was configured statically here. A value ParseBool refuses
+// ("yes") stops clr-installer's load; here it was taken as static.
+func TestDHCPIsAClrBool(t *testing.T) {
+	ni := func(dhcp string) *Interface {
+		return &Interface{Name: "eth0", DHCP: dhcp, Addrs: []*Address{{IP: "10.0.0.2", Netmask: "24"}}}
+	}
+	for _, v := range []string{"true", "True", "TRUE", "1", "t", "T"} {
+		if ni(v).Static() {
+			t.Errorf("dhcp %q: static, want DHCP", v)
+		}
+	}
+	for _, v := range []string{"", "false", "0", "f", "F", "False"} {
+		if !ni(v).Static() {
+			t.Errorf("dhcp %q: DHCP, want static", v)
+		}
+	}
+	c := btrfsConfig()
+	c.NetworkInterfaces = []*Interface{ni("yes")}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), `dhcp "yes" is not true or false`) {
+		t.Errorf("dhcp yes: %v", err)
+	}
+	c.NetworkInterfaces = []*Interface{ni("1")}
+	if err := c.Validate(); err != nil {
+		t.Errorf("dhcp 1: %v", err)
+	}
+}

@@ -880,11 +880,13 @@ type Address struct {
 }
 
 // Static reports whether the interface is statically configured: it has
-// addresses and is not explicitly DHCP. clr-installer marks DHCP with
-// dhcp:"true" and treats an interface with addresses as static otherwise,
-// so an unset dhcp alongside addresses still means static.
+// addresses and is not explicitly DHCP. clr-installer reads dhcp with
+// strconv.ParseBool ("true", "1", "t", … are DHCP) and treats an interface
+// with addresses as static otherwise, so an unset dhcp alongside addresses
+// still means static.
 func (i *Interface) Static() bool {
-	return len(i.Addrs) > 0 && !strings.EqualFold(i.DHCP, "true")
+	dhcp, _ := strconv.ParseBool(i.DHCP)
+	return len(i.Addrs) > 0 && !dhcp
 }
 
 // KernelArguments are command-line arguments to add or remove.
@@ -2051,6 +2053,11 @@ func (c *Config) Validate() error {
 			if ip, _, err := net.ParseCIDR(r.To); err == nil && ip.To4() == nil {
 				add("%s: route to %s is IPv6; dhcpcd takes static routes for IPv4 only (IPv6 routes come from router advertisements)", who, r.To)
 			}
+		}
+		// clr-installer refuses to load a dhcp ParseBool does not read;
+		// taken as "not DHCP", "yes" configured the addresses statically.
+		if _, err := strconv.ParseBool(ni.DHCP); ni.DHCP != "" && err != nil {
+			add("%s: dhcp %q is not true or false", who, ni.DHCP)
 		}
 		if len(ni.Routes) > 0 && !ni.Static() {
 			add("%s: static routes need a static address on the interface", who)
