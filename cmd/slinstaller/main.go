@@ -404,6 +404,10 @@ restart:
 		if os.Geteuid() != 0 {
 			return fmt.Errorf("interactive install must run as root (or pass a config file for a dry run)")
 		}
+		// Before the questions, not after them: the answers were thrown away.
+		if arch != "" && !strings.HasPrefix(arch, hostXBPSArch()) {
+			return fmt.Errorf("--arch %s is not this machine's (%s): its packages cannot be configured here", arch, hostXBPSArch())
+		}
 		// Full-screen wizard on a real terminal; the plain prompt flow
 		// over a serial console or a pipe, where it would not render.
 		if !textUI && fullScreenCapable() {
@@ -716,8 +720,8 @@ restart:
 	if systemCheck {
 		logPath = ""
 	}
-	// Refused before the log is opened: opening truncates it, and the one
-	// there may be a failed install's, wanted for its post-mortem.
+	// Refused before the log is opened (and the lock taken, below): a run
+	// that cannot go on leaves no "new run" mark in a failed install's log.
 	// --arch again, now that the wizard or the text flow may have made this
 	// an install (the early check saw no --apply) and for --system-check,
 	// which said "passed" for what --apply refuses.
@@ -867,7 +871,7 @@ restart:
 		// An offline install has no remote repo, so the base must come from a
 		// local repository on the live medium. Fail here, before wiping, if
 		// there is none.
-		if cfg.Offline && len(localRepos) == 0 && !fromImage {
+		if cfg.Offline && len(localRepos) == 0 && !fromImage && reachesBaseInstall(through, resumeFrom) {
 			return fmt.Errorf("offline install needs a local repository (--local-repo), but none is present")
 		}
 

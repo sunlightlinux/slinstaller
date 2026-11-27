@@ -200,3 +200,11 @@ func TestCheckTargetDisksUninstallable(t *testing.T) {
 		}
 	}
 }
+
+// --system-check refuses a foreign --arch, as --apply does.
+func TestSystemCheckForeignArch(t *testing.T) {
+	cfg := writeConfig(t, t.TempDir(), plainConfig())
+	if err := run([]string{"--system-check", "--arch", "riscv64", cfg}); err == nil || !strings.Contains(err.Error(), "--arch riscv64 is not this machine's") {
+		t.Errorf("--system-check --arch riscv64: %v", err)
+	}
+}

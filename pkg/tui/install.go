@@ -218,7 +218,9 @@ func InstallLogPath() string { return installLogPath }
 // OpenInstallLog opens the log at path for writing, mode 0600, appending
 // after a line that marks the new run: a run refused in its checks (or a
 // second one beside a running install) emptied the log a failed install
-// left for its post-mortem. The
+// left for its post-mortem.
+//
+// The
 // default path is in /tmp, where any user can plant something there first
 // for root to write through: a link, a hard link to another file, a file
 // of their own they can read. A link is never followed, and whatever is at

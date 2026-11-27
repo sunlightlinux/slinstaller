@@ -331,7 +331,7 @@ func TestApplyNeedsRoot(t *testing.T) {
 	wantRunErr(t, "interactive as a user", err, "interactive install must run as root")
 
 	// A --log that cannot be written is an error: it was asked for. (As
-	// root: a user is refused before the log is opened, which truncates it.)
+	// root: a user is refused before the log is opened, which appends to it, after a mark.)
 	asRoot := func() { geteuid = func() int { return 0 } }
 	defer func() { geteuid = os.Geteuid }()
 	defer func(p string) { lockPath = p }(lockPath)
