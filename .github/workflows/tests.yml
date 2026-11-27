@@ -71,11 +71,13 @@ jobs:
             echo "::error::a namespace test skipped: the --apply preflight and the mount stages were not tested"
             exit 1
           fi
-          # Three of them, one per package; fewer means one was renamed out
-          # of the pattern above and is no longer being checked here.
+          # Four of them: the --apply preflight (cmd), the mounts (storage),
+          # the mount stages and a whole install (controller). Fewer means
+          # one was renamed out of the pattern above and is no longer being
+          # checked here.
           ran="$(grep -c -- '--- PASS: Test.*InAUserNamespace' namespace.log)"
-          if [ "$ran" -lt 3 ]; then
-            echo "::error::only $ran namespace tests ran, expected 3"
+          if [ "$ran" -lt 4 ]; then
+            echo "::error::only $ran namespace tests ran, expected 4"
             exit 1
           fi
 
