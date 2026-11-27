@@ -2,7 +2,7 @@
 
 Concrete examples for each of the four principles in [CLAUDE.md](CLAUDE.md),
 grounded in real slinstaller scenarios (disk partitioning, filesystems,
-bootloader/EFI, mirror selection). Snippets use Go (the long-term target).
+bootloader/EFI, mirror selection). Snippets use Go.
 
 > Derived from [forrestchang/andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills)
 > (MIT). Examples rewritten for Go + slinstaller.
@@ -91,8 +91,9 @@ type PartitionerFactory struct{}
 func (PartitionerFactory) Build(cfg Config) Partitioner { /* ... */ }
 ```
 
-**Problem:** Sunlight Linux is UEFI-only with one supported layout (ESP +
-root). There is no MBR partitioner, no LVM, no second scheme. The interface +
+**Problem:** Sunlight Linux is UEFI-only, with one partitioning scheme
+(GPT + an ESP). There is no MBR partitioner and no second scheme; LVM,
+LUKS and RAID are layers under the filesystems, not partitioners. The interface +
 factory + decorator are all speculative — and an MBR path actively contradicts
 the UEFI-only invariant.
 

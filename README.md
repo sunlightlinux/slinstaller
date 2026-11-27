@@ -36,7 +36,8 @@ pre-install hooks → partition → mount → bind /proc,/sys,/dev
 | Area | What it does |
 |------|--------------|
 | **Disk** | GPT, an EFI System Partition, partitions by `parted`; `mkfs.*` / `mkswap`; the last partition can fill the disk |
-| **Encryption** | LUKS on any partition typed `crypt` (cryptsetup, crypttab, `rd.luks` cmdline, initramfs rebuild) |
+| **Encryption** | LUKS on any partition typed `crypt`, or with `encrypted: true` on a `type: lvm` partition or a RAID array (cryptsetup, crypttab, `rd.luks` cmdline, initramfs rebuild) |
+| **LVM, RAID** | volume groups and logical volumes (`lvm2`), software RAID arrays (`mdadm`) — see [Servers](#beyond-clr-installers-format) |
 | **Swap** | a swap partition, or a swap file (`swapFileSize`) |
 | **Base system** | `xbps-install` from a repository, with the signing keys and a chrooted reconfigure |
 | **Bootloader** | GRUB for UEFI (`grub-install` + `grub-mkconfig`), kernel arguments from the config |
@@ -74,7 +75,9 @@ Useful flags: `--repo`/`--keys`/`--arch`/`--packages` for the base
 install, `--root` for the target mount tree, and `--through <stage>` to run
 only up to a stage (for VM testing). An encrypted layout takes its
 passphrase from `--crypt-file`, `SLINSTALLER_LUKS_PASSPHRASE` or a prompt —
-never from the config. `slinstaller --help` lists every flag.
+never from the config. `slinstaller --help` lists every flag;
+`slinstaller --completion bash` (or `fish`) prints a completion script
+for them (see [`completions/`](completions)).
 
 > ⚠️ Partitioning, formatting and bootloader installs are **irreversible**.
 > Try changes in a VM (QEMU + OVMF) against a scratch image — see
@@ -147,6 +150,21 @@ work:
 - **Network.** `gateway` and `routes` are IPv4 (IPv6 routes come from
   router advertisements); `dns` is IP addresses separated by spaces;
   interface names are letters, digits and `. _ : -`.
+- **Kernel arguments.** An argument holding `'`, `$`, `;`, `\`, `` ` ``
+  or a line break is refused: GRUB's own parser of `grub.cfg` breaks it.
+- **Plain http.** A `report-url`, an `image` or a `disk-image` over
+  `http://` needs `allowInsecureHTTP` (`--allow-insecure-http`), as a
+  repository and a config named by a URL do.
+
+`skipValidationSize` (`--skip-validation-size`) turns off the size and
+disk-fit checks. `skipValidationAll` (`--skip-validation-all`) also turns
+off the rest of the config check, the package dry run, and the time zone,
+keymap, language and kernel arguments checked against this machine. It
+does not turn off what keeps a value from reaching a device or a boot
+script it should not: disk, RAID, volume group and logical volume names,
+interface names, bond modes, and control characters (a line break) in
+the hostname and network fields are still checked, and so are the other
+disks and a plain http repository.
 
 Config keys nothing reads are not refused, but each is named in a warning
 (`encryptd: true` would otherwise install unencrypted without a word).
@@ -260,7 +278,8 @@ same way.
 `targetMedia` (no layout) writes the image over the disk and stops: the image
 already is the partitioned, configured system.
 
-More on the command line: the config may be an `https://` URL; `--resume`
+More on the command line: the config may be an `https://` URL (`http://`
+needs `--allow-insecure-http`); `--resume`
 continues an install that failed installing the base system without
 partitioning again, and `--resume-from <stage>` does so from any later
 stage — also after a reboot of the live medium: the encrypted volumes,

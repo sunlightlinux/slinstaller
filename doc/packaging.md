@@ -48,6 +48,10 @@ the repo.
 - `cryptsetup` — LUKS (any `type: crypt`, or an encrypted LVM/`/boot`)
 - `lvm2` — LVM (`pvcreate`/`vgcreate`/`lvcreate`)
 - `mdadm` — RAID
+- `ntfs-3g` — `ntfsresize`, to shrink an ntfs partition (`resize`)
+- `kexec-tools` — `kexec`, for `power-state: kexec`
+- `tar` (and `squashfs-tools` for a squashfs) — an `image` install;
+  `curl` too when the image is a URL
 
 If the ISO should handle every layout out of the box, include all of
 these. The installer's preflight names any that are missing.
@@ -56,9 +60,10 @@ these. The installer's preflight names any that are missing.
 
 The base-system install verifies package signatures, so the repository's
 signing keys must be present on the live system at **`/var/db/xbps/keys`**.
-During the interim (Void's repo) these are Void's keys; when the
-sunlightlinux repository exists, ship its keys here and point
-`--repo`/the config's `swupdMirror` at it.
+For `--repo` (Void's repo by default) these are Void's keys. The signed
+Sunlight mirror's key is built into slinstaller
+(`cmd/slinstaller/keys/sunlight-repo.plist`) and seeded into the target,
+so it need not be shipped here.
 
 ## 3a. The local repository: slinit
 
@@ -208,8 +213,7 @@ writes `/etc/machine-id`: slinit reads it as PID 1 before any service
 runs, and Void creates none.
 
 `--packages base-system,grub-x86_64-efi,glibc-locales` still installs a
-plain runit system, with no local repository needed — the demo VMs,
-which run without the ISO, need this.
+plain runit system, with no local repository and no mirror needed.
 
 The Sunlight mirror is that remote repository: its key is built into
 slinstaller and seeded into the target, and it is written to the target's

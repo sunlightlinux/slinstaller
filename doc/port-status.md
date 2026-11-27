@@ -5,7 +5,7 @@ package by package. slinstaller reimplements clr-installer's mechanisms in
 its own code and reads its config format; it is not a copy, and it drops
 everything Clear Linux- or systemd-specific.
 
-_Snapshot: 2026-11-14. Update as the port proceeds._
+_Snapshot: 2026-11-27 (v2.2.0). Update as the port proceeds._
 
 ## Legend
 
@@ -28,7 +28,7 @@ _Snapshot: 2026-11-14. Update as the port proceeds._
 | encrypt | 53 | LUKS | ✅ | `pkg/luks` |
 | hostname/timezone/keyboard/language | ~580 | first-boot | ✅ | `/etc/hostname`, `/etc/localtime`, `KEYMAP` in `/etc/rc.conf`, `/etc/locale.conf` + libc-locales |
 | proxy | 84 | proxy | ✅ | httpsProxy → xbps env |
-| syscheck | 69 | pre-install checks | 🟡 | preflight: tools + disk exist + repo reachable. clr's CPU-feature checks ⛔ Clear |
+| syscheck | 69 | pre-install checks | 🟡 | preflight: tools + disk exist + repo and mirror reachable + the package set dry-run against them. clr's CPU-feature checks ⛔ Clear |
 | massinstall | 244 | unattended from file | ✅ | the file front-end (`slinstaller config.yaml`) |
 | args/utils/progress | ~1255 | CLI/helpers | ✅ | own (flags, stdlib, VerboseRunner) |
 | tui | 6742 | full-screen UI | ✅ | `pkg/tui` — a full-screen wizard in clr's Required/Advanced layout (bubbletea), and a plain prompt flow for serial consoles and pipes. Adds Sunlight's own kernel sections (see the README) |
@@ -44,8 +44,8 @@ named by serial, WWN, model or stable path; fstab mount options and btrfs
 subvolumes; bootloader options (serial menu, removable-media path, no NVRAM,
 other systems); `write-files`, `power-state`, the http and no-proxy settings;
 swap sized from memory, RAID hot spares, whole-disk wipe modes. On the
-command line: `--system-check`, a diagnostics archive on failure, and an
-install lock.
+command line: `--system-check`, a diagnostics archive on failure, an
+install lock, and shell completions (`--completion bash|fish`).
 
 Also: installing the base system from a tar or squashfs image (`image`),
 describing a disk's present layout as a config (`--discover`), and shrinking
@@ -69,6 +69,10 @@ and filesystems, `--discover`, shrinking ext4, ntfs and btrfs with the data
 intact, and btrfs subvolumes with their mount options. Everything past the
 partition and mount stages - the bootloader, a first boot, RAID with a disk
 removed, bonds and VLANs on the installed system - still wants a VM.
+A whole install, every stage, also runs in a user namespace with real
+mounts and recorded or stand-in commands
+(`pkg/controller/e2e_ns_test.go`); it checks the files the stages write,
+not that the result boots.
 
 And the last of both lists: `--resume-from` any stage, partitioned RAID
 arrays, `kernel-remove`, `--json-yaml` and installer messages

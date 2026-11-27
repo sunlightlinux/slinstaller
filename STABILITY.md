@@ -8,9 +8,10 @@ deciding whether a change is allowed.
 
 ## The short version
 
-slinstaller is in **early bootstrap**. There are no releases, and
-**nothing is stable yet**: package layout, command-line flags, and
-behaviour may change without notice until the first tagged release.
+slinstaller is in **early bootstrap**. Releases are tagged (see
+[CHANGELOG.md](CHANGELOG.md)), but **nothing is stable yet**: package
+layout, command-line flags, and behaviour may still change from one
+release to the next.
 
 One contract is being designed to outlast that, because it is the one
 that travels:

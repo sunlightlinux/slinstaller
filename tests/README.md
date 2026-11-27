@@ -36,3 +36,21 @@ sudo tests/loop/run.sh ./slinstaller
 ```
 
 CI runs it on every push (the `loop` job).
+
+## The other CI jobs
+
+These live in [`.github/workflows/tests.yml`](../.github/workflows/tests.yml),
+not here:
+
+- `unit` — gofmt, `go vet`, `go test -race ./...` and a 95% coverage
+  floor. It includes the tests that run as root in
+  a user namespace: `--apply`'s checks before a wipe
+  (`cmd/slinstaller/apply_ns_test.go`), the mount stages
+  (`pkg/storage/mount_ns_test.go`, `pkg/controller/mount_ns_test.go`), and
+  an install through every stage with real mounts and recorded or stand-in
+  commands (`pkg/controller/e2e_ns_test.go`). They skip themselves where a
+  user namespace cannot mount; CI lifts the runner's restriction and fails
+  if they skipped anyway.
+- `fuzz` — every `Fuzz*` target, found with `go test -list`, for 20 s each.
+- `dry-run` — every `demo/*.yaml` and `demo/vm/config*.yaml`, and a
+  `--template` config, must still plan.

@@ -33,17 +33,20 @@ convention:
   cmd/slinstaller  --\
   (a config file)     \
                        >--->  config.Config  --->  controller  --->  pkg/storage, ...
-  (terminal UI)       /        (validated)
-  (graphical UI)   --/
+  pkg/tui             /        (validated)
+  (wizard, prompts)--/
 ```
 
 A front-end's only job is to produce a valid config. It must not perform
 an installation step, and it must not know how a step is carried out —
 how slinit materialises a service, how a partition is formatted. A
 front-end that does either has crossed the boundary this design exists to
-hold. Today there is one front-end, `cmd/slinstaller`, which reads a
-config from a file; a terminal and a graphical front-end are the obvious
-later additions, and they produce the same document.
+hold. There are three front-ends: `cmd/slinstaller` reading a config
+file, and `pkg/tui`'s full-screen wizard and plain prompt flow, which
+return the same document (`tui.RunFullscreen`, `tui.Run`). The wizard
+also shows the install's progress, but the install itself is the
+controller's (`tui.RunInstall` calls `controller.Install`). There is no
+graphical front-end.
 
 ## The core is a port of clr-installer
 
@@ -54,9 +57,9 @@ clr-installer's; the code and the scope are ours:
 
 - It is driven by `config.Config` (clr-installer's schema), reduced to a
   `storage.Plan`, not by clr-installer's `BlockDevice` model.
-- It is reduced to what Sunlight installs — UEFI + GPT + an ESP. RAID,
-  LVM, encryption and clr's advanced paths are not carried over. They
-  arrive if and when a layout needs them, not before.
+- It is reduced to what Sunlight installs — UEFI + GPT + an ESP, with
+  LUKS, LVM and software RAID layered under the filesystems. clr's
+  install into an image file is not carried over.
 - Clear Linux specifics — `swupd`, telemetry, bundles — are dropped in
   favour of the Void lineage slinstaller inherits (`xbps`, slinit).
 
@@ -68,9 +71,9 @@ clr-installer's; the code and the scope are ours:
   `parted` for the GPT label, the partitions and the ESP type,
   `mkfs.*` / `mkswap` for filesystems. The destructive work is a command
   list computed purely from the plan (`Plan.Commands`) and run by
-  `RunCommands`, so there is one list to audit. The one exception is
-  `cryptsetup`, which the controller runs itself because it is fed the
-  passphrase on stdin.
+  `RunCommands`. The arrays and volume groups have lists of their own
+  (`mdadm.Commands`, `lvm.Commands`), and `cryptsetup` is run by the
+  controller itself because it is fed the passphrase on stdin.
 - **`pkg/luks`, `pkg/lvm`, `pkg/mdadm`** — encrypted volumes, volume groups
   and software RAID arrays, layered under the filesystems.
 - **`pkg/blockdev`** — discovers the machine's disks and what is in use.
@@ -83,7 +86,10 @@ clr-installer's; the code and the scope are ours:
   locale, accounts, slinit services) and the machine detection the wizard's
   kernel sections use.
 - **`pkg/network`** — `dhcpcd` configuration and the connectivity check.
-- **`pkg/tui`** — the full-screen wizard and the plain prompt flow.
+- **`pkg/tui`** — the full-screen wizard and the plain prompt flow. Its
+  bubbletea is a vendored copy, `third_party/bubbletea` (v1.2.4 without
+  its terminal query at start; see the README there), wired in with a
+  `replace` in `go.mod`.
 
 What is still to port is tracked in [port-status.md](port-status.md).
 

@@ -54,10 +54,12 @@ than failing partway through.
 
 Then `./run.sh --installed` boots the freshly installed disk.
 
-> **Interim:** with no Sunlight repository yet, the base system comes from
-> Void's official repo, so what installs is a Void base with **runit**,
-> not slinit — enough to prove the installer's plumbing. slinit takes
-> over once it is in a repo we control.
+> **Packages:** the Void live ISO carries no local Sunlight repository,
+> so the Sunlight packages (`sunlight-base`, slinit, `slpam`) come from
+> the signed Sunlight mirror (`--extra-repo`, on by default) and the rest
+> from Void's repo: what installs boots **slinit**, and the guest needs
+> to reach the mirror. `--packages base-system,grub-x86_64-efi,glibc-locales`
+> installs a plain Void base with runit instead.
 
 ## Requirements
 
