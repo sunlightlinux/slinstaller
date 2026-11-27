@@ -1,6 +1,7 @@
 package grub
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -59,5 +60,25 @@ func TestCmdlineConfig(t *testing.T) {
 func TestDistributorConfig(t *testing.T) {
 	if got, want := DistributorConfig(), "GRUB_DISTRIBUTOR=\"Sunlight OS\"\n"; got != want {
 		t.Errorf("DistributorConfig = %q, want %q", got, want)
+	}
+}
+
+// What the system cannot boot without goes where the recovery entries see
+// it too; arguments reach the kernel as written, not expanded by the
+// shell that sources /etc/default/grub.
+func TestCmdlineConfigKeepsBootArgsForRecovery(t *testing.T) {
+	got := Options{KernelArgs: []string{"quiet", "rd.luks.uuid=u1", "init=/usr/bin/slinit", "console=ttyS0,115200", "loglevel=3", "rd.lvm.lv=vg/root"}}.CmdlineConfig()
+	want := "GRUB_CMDLINE_LINUX=\"rd.luks.uuid=u1 init=/usr/bin/slinit console=ttyS0,115200 rd.lvm.lv=vg/root\"\n" +
+		"GRUB_CMDLINE_LINUX_DEFAULT=\"quiet loglevel=3\"\n"
+	if got != want {
+		t.Errorf("CmdlineConfig =\n%s\nwant\n%s", got, want)
+	}
+	got = Options{KernelArgs: []string{"foo=$HOME", "bar=`id`", `baz="x"\y`}}.CmdlineConfig()
+	out, err := exec.Command("sh", "-c", got+`printf %s "$GRUB_CMDLINE_LINUX_DEFAULT"`).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "foo=$HOME bar=`id` baz=\"x\"\\y" {
+		t.Errorf("sourced as shell: %q (from %q)", out, got)
 	}
 }

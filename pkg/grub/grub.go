@@ -157,15 +157,54 @@ func serialPort(kargs []string) (unit, speed, word, parity string) {
 	return
 }
 
-// CmdlineConfig renders the /etc/default/grub line that sets the kernel
+// CmdlineConfig renders the /etc/default/grub lines that set the kernel
 // command line, or "" when there are no arguments. Appended after the
-// package default, it wins because the file is sourced as shell and the
+// package default, they win because the file is sourced as shell and the
 // later assignment takes effect.
+//
+// What the system cannot boot without — the initramfs's rd.* arguments
+// (LUKS, LVM, RAID), init=, root=, resume= and console= — goes in
+// GRUB_CMDLINE_LINUX, which every entry gets; the rest in
+// GRUB_CMDLINE_LINUX_DEFAULT, which grub-mkconfig leaves out of the
+// "(recovery mode)" entries. With everything in _DEFAULT, a recovery entry
+// on an encrypted, LVM or RAID root could not find its root.
 func (o Options) CmdlineConfig() string {
 	if len(o.KernelArgs) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("GRUB_CMDLINE_LINUX_DEFAULT=%q\n", strings.Join(o.KernelArgs, " "))
+	var always, normal []string
+	for _, a := range o.KernelArgs {
+		if bootCritical(a) {
+			always = append(always, a)
+		} else {
+			normal = append(normal, a)
+		}
+	}
+	var b strings.Builder
+	if len(always) > 0 {
+		fmt.Fprintf(&b, "GRUB_CMDLINE_LINUX=%s\n", shellQuote(strings.Join(always, " ")))
+	}
+	fmt.Fprintf(&b, "GRUB_CMDLINE_LINUX_DEFAULT=%s\n", shellQuote(strings.Join(normal, " ")))
+	return b.String()
+}
+
+// bootCritical reports whether a kernel argument is one the system cannot
+// boot without, recovery mode included.
+func bootCritical(a string) bool {
+	for _, p := range []string{"rd.", "init=", "root=", "rootflags=", "rootfstype=", "resume=", "console="} {
+		if strings.HasPrefix(a, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// shellQuote double-quotes s for /etc/default/grub, which is sourced by
+// sh: $, `, \ and " are escaped so they reach the kernel as written. (Go's
+// %q quotes for Go, not for the shell: "$x" came out as an expansion.)
+func shellQuote(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", `\$`, "`", "\\`")
+	return `"` + r.Replace(s) + `"`
 }
 
 // DistributorConfig renders the /etc/default/grub line that names the

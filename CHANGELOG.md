@@ -12,6 +12,19 @@ change.
 
 ### Fixed
 
+- With an encrypted `/boot`, the initramfs keyfile was named without its
+  key device (`rd.luks.key=<path>`), so dracut looked for it on every disk,
+  never found it, and asked for the passphrase a second time. It is
+  `rd.luks.key=<path>:/` now: the key is in the initramfs.
+- The root volume's `discard` crypt option never reached the initramfs:
+  dracut's crypt module reads no `rd.luks.options`. It is passed as
+  `rd.luks.allow-discards=<uuid>` as well.
+- The recovery-mode boot entries could not boot an encrypted, LVM or RAID
+  root: every argument went into `GRUB_CMDLINE_LINUX_DEFAULT`, which
+  recovery entries leave out. What the system cannot boot without
+  (`rd.*`, `init=`, `root=`, `resume=`, `console=`) is in
+  `GRUB_CMDLINE_LINUX` now. Kernel arguments are quoted for the shell
+  that sources `/etc/default/grub`, so `$` and backticks are kept.
 - A config whose administrators had no password between them (an SSH key
   only) installed a system nobody could become root on: root's password
   is locked once there is an administrator, and sudo asks for one. It is

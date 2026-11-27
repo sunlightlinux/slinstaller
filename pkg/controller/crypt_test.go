@@ -219,7 +219,7 @@ func TestEncryptedBootUnlocksThroughGrubAndAKeyfile(t *testing.T) {
 		t.Errorf("GRUB cannot unlock /boot without GRUB_ENABLE_CRYPTODISK=y:\n%s", grub)
 	}
 	cmd := cmdlineArgs(t, in)
-	if n, got := count(cmd, "rd.luks.key="); n != 1 || got != "rd.luks.key="+keyfilePath {
+	if n, got := count(cmd, "rd.luks.key="); n != 1 || got != "rd.luks.key="+keyfilePath+":/" {
 		t.Errorf("rd.luks.key: %d, last %q\n%v", n, got, cmd)
 	}
 	if n, _ := count(cmd, "rd.luks.uuid=uuid-sda2"); n != 1 {

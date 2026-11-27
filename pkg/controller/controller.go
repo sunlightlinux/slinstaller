@@ -1029,6 +1029,15 @@ func (in *installer) bootloader() error {
 				// where the initramfs reads them.
 				if p.CryptOptions != "" {
 					kargs = append(kargs, "rd.luks.options="+p.CryptOptions)
+					// dracut's own crypt module (no systemd here) reads no
+					// rd.luks.options; the one option it has a switch for is
+					// discard, which it takes per volume.
+					for _, o := range strings.Split(p.CryptOptions, ",") {
+						if o = strings.TrimSpace(o); o == "discard" || o == "allow-discards" {
+							kargs = append(kargs, "rd.luks.allow-discards="+uuid)
+							break
+						}
+					}
 				}
 			}
 		}
@@ -1044,8 +1053,12 @@ func (in *installer) bootloader() error {
 	}
 	// When /boot is encrypted the keyfile is in the initramfs; point dracut
 	// at it so it opens root without a prompt (GRUB already asked once).
+	// The ":/" names the initramfs itself as where the key is: with no key
+	// device dracut probes every block device for the path instead, never
+	// finds it (it is only in the initramfs), and asks for the passphrase
+	// a second time.
 	if in.keyfile != "" && in.bootOnEncrypted() {
-		kargs = append(kargs, "rd.luks.key="+in.keyfile)
+		kargs = append(kargs, "rd.luks.key="+in.keyfile+":/")
 	}
 
 	// A root on a RAID array must have the array assembled by the initramfs

@@ -55,15 +55,20 @@ func mkTarget(t *testing.T, in *installer, rel ...string) string {
 }
 
 // grubCmdline pulls the kernel command line out of the target's
-// /etc/default/grub.
+// /etc/default/grub: GRUB_CMDLINE_LINUX (what every entry gets) then
+// GRUB_CMDLINE_LINUX_DEFAULT, as a normal boot entry has them.
 func grubCmdline(t *testing.T, in *installer) string {
 	t.Helper()
+	var always, normal string
 	for _, line := range strings.Split(readTarget(t, in, "etc", "default", "grub"), "\n") {
-		if strings.HasPrefix(line, "GRUB_CMDLINE_LINUX_DEFAULT=") {
-			return strings.Trim(strings.TrimPrefix(line, "GRUB_CMDLINE_LINUX_DEFAULT="), `"`)
+		if v, ok := strings.CutPrefix(line, "GRUB_CMDLINE_LINUX="); ok {
+			always = strings.Trim(v, `"`)
+		}
+		if v, ok := strings.CutPrefix(line, "GRUB_CMDLINE_LINUX_DEFAULT="); ok {
+			normal = strings.Trim(v, `"`)
 		}
 	}
-	return ""
+	return strings.TrimSpace(always + " " + normal)
 }
 
 func TestBootloaderWritesKernelCommandLine(t *testing.T) {

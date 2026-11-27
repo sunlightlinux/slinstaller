@@ -224,7 +224,8 @@ func TestCryptOptions(t *testing.T) {
 	if err := in.bootloader(); err != nil {
 		t.Fatal(err)
 	}
-	if args := cmdlineArgs(t, in); !contains(args, "rd.luks.options=discard") {
+	// dracut's crypt module takes discard as rd.luks.allow-discards=<uuid>.
+	if args := cmdlineArgs(t, in); !contains(args, "rd.luks.options=discard") || !strings.Contains(strings.Join(args, " "), "rd.luks.allow-discards=") {
 		t.Errorf("kernel arguments: %v", args)
 	}
 	// Without the option nothing of the kind is written.
