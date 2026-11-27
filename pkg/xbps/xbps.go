@@ -35,8 +35,8 @@ type Options struct {
 	// ExtraRepos are additional REMOTE repositories searched ahead of Repo
 	// — the Sunlight mirror layered over Void's. Like Repo they are
 	// signature-checked, so their signing key must be in KeysDir. A package
-	// they carry wins over Repo's when its version is higher (Sunlight's +1
-	// revision does this), or on a tie because they are listed first.
+	// they carry wins over Repo's whatever the versions: xbps takes a
+	// package from the first repository listed that has it.
 	ExtraRepos []string
 
 	// KeysDir holds the repository signing keys to seed into the target
@@ -106,8 +106,9 @@ func (o Options) Commands() ([][]string, error) {
 		install = append(install, "-R", r)
 	}
 	// Extra remote repositories (the Sunlight mirror) before the default
-	// remote: on a version tie the first-listed wins, and a higher revision
-	// wins regardless, so these override Repo for the packages they carry.
+	// remote: xbps takes each package from the first repository that has
+	// it (no bestmatching), so these override Repo for what they carry —
+	// and the local repositories, listed first, override them.
 	for _, r := range o.ExtraRepos {
 		install = append(install, "-R", r)
 	}

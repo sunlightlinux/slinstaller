@@ -945,8 +945,12 @@ func (in *installer) unpackImage() error {
 // into the target, but leaves no persistent repo config; a later
 // `xbps-install -Su` then saw only Void and pulled Void versions — which
 // skewed dbus against dbus-libs on the first installs. This closes that gap.
-// (It does not stop a package Void ships at a HIGHER version from winning;
-// keeping the Sunlight fork current is the separate half of that.)
+// Precedence is xbps's first match, not the highest version: without
+// bestmatching=true the first repository that has a package supplies it,
+// whatever another one ships. /etc/xbps.d is read before Void's
+// /usr/share/xbps.d, so the mirror is first and every package it carries —
+// Void's own included, security updates too — moves only when the mirror
+// republishes. Keeping the mirror current is the other half of this.
 func (in *installer) writeTargetRepos() error {
 	// The mirror is recorded first: the upgrade below runs the target's own
 	// xbps-install, which reads only the target's xbps.d. Upgrading before
