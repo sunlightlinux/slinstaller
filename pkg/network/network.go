@@ -9,6 +9,7 @@
 package network
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -36,7 +37,7 @@ func VerifyConnectivityVia(url, proxy string) error {
 	}
 	pu, err := neturl.Parse(strings.TrimSpace(proxy))
 	if err != nil {
-		return fmt.Errorf("network: proxy %q: %w", proxy, err)
+		return errors.New("network: the proxy is not a URL") // its text may hold a password
 	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = http.ProxyURL(pu)
