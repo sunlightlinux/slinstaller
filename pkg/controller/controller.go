@@ -708,6 +708,36 @@ func ImageTools(image string) []string {
 	return []string{ImageCommand(image, "/", false)[0]}
 }
 
+// forgetImageIdentity removes what makes the system the image was taken
+// from that one machine: its machine-id, the random seed it saved and its
+// SSH host keys. Kept, every machine installed from one image shared them
+// — one machine-id for slinit's journal and logind, one seed for every
+// first boot's RNG, one host key, so one machine could pass for another.
+// The first-boot stage writes a machine-id and a seed of this machine's
+// own; the host keys are made anew here when the image has ssh-keygen.
+func (in *installer) forgetImageIdentity() error {
+	root := in.opts.Root
+	files := []string{"etc/machine-id", "var/lib/dbus/machine-id",
+		"var/lib/seedrng/seed.credit", "var/lib/seedrng/seed.no-credit"}
+	keys, _ := filepath.Glob(filepath.Join(root, "etc", "ssh", "ssh_host_*"))
+	for _, f := range files {
+		keys = append(keys, filepath.Join(root, f))
+	}
+	for _, f := range keys {
+		// Lstat, not Stat: a link (dbus's machine-id often is one) is
+		// removed itself, never followed out of the target.
+		if fi, err := os.Lstat(f); err == nil && !fi.IsDir() {
+			if err := os.Remove(f); err != nil {
+				return fmt.Errorf("image: %w", err)
+			}
+		}
+	}
+	if exists(filepath.Join(root, "usr", "bin", "ssh-keygen")) && exists(filepath.Join(root, "etc", "ssh")) {
+		return storage.RunCommands([][]string{{"chroot", root, "ssh-keygen", "-A"}}, in.opts.Runner)
+	}
+	return nil
+}
+
 // unpackImage installs the base system from the config's image. What was
 // unpacked has to be able to boot: without GRUB in it the install would go
 // on to fail at the bootloader, so that is checked here, where the reason
@@ -739,6 +769,9 @@ func (in *installer) unpackImage() error {
 		if err := in.mountMeta(); err != nil {
 			return err
 		}
+	}
+	if err := in.forgetImageIdentity(); err != nil {
+		return err
 	}
 	for _, dir := range []string{"usr/bin", "usr/sbin", "bin", "sbin"} {
 		if _, err := os.Stat(filepath.Join(in.opts.Root, dir, "grub-install")); err == nil {

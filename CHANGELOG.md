@@ -12,6 +12,11 @@ change.
 
 ### Fixed
 
+- An install from an image kept the image's machine-id, saved random seed
+  and SSH host keys, so every machine installed from one image shared
+  them. They are removed after the unpack; the first-boot stage writes a
+  machine-id and seed of the machine's own, and the host keys are made
+  anew (`ssh-keygen -A`).
 - A resume after the keyfile was added to some encrypted volumes but not
   all skipped them all, and crypttab pointed the rest at a key they did
   not hold. Each volume the keyfile does not open is given it now.

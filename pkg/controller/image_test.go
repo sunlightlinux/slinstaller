@@ -179,3 +179,37 @@ func TestKernelFallback(t *testing.T) {
 		t.Errorf("a second attempt with no fallback:\n%s", r.flat())
 	}
 }
+
+// What makes the image's machine that machine is not carried to every
+// machine installed from it: the machine-id and seed go (first-boot writes
+// this machine's own) and the SSH host keys are made anew.
+func TestImageIdentityIsForgotten(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	root := in.opts.Root
+	outside := filepath.Join(t.TempDir(), "machine-id")
+	os.WriteFile(outside, []byte("live\n"), 0o444)
+	for _, f := range []string{"etc/machine-id", "var/lib/seedrng/seed.credit", "etc/ssh/ssh_host_ed25519_key", "etc/ssh/ssh_host_ed25519_key.pub", "etc/ssh/sshd_config", "usr/bin/ssh-keygen"} {
+		os.MkdirAll(filepath.Dir(filepath.Join(root, f)), 0o755)
+		os.WriteFile(filepath.Join(root, f), []byte("image"), 0o644)
+	}
+	os.MkdirAll(filepath.Join(root, "var/lib/dbus"), 0o755)
+	os.Symlink(outside, filepath.Join(root, "var/lib/dbus/machine-id"))
+	if err := in.forgetImageIdentity(); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"etc/machine-id", "var/lib/seedrng/seed.credit", "etc/ssh/ssh_host_ed25519_key", "etc/ssh/ssh_host_ed25519_key.pub", "var/lib/dbus/machine-id"} {
+		if _, err := os.Lstat(filepath.Join(root, f)); err == nil {
+			t.Errorf("%s kept from the image", f)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc/ssh/sshd_config")); err != nil {
+		t.Error("sshd_config, not an identity, was removed")
+	}
+	if got, _ := os.ReadFile(outside); string(got) != "live\n" {
+		t.Error("a link out of the target was followed")
+	}
+	if !strings.Contains(r.flat(), "chroot "+root+" ssh-keygen -A") {
+		t.Errorf("host keys not made anew:\n%s", r.flat())
+	}
+}
