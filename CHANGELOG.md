@@ -20,6 +20,10 @@ change.
 
 ### Fixed
 
+- **Sizes in clr-installer's documented units load.** `150MiB`, `2.6GiB`,
+  `1GB`, `512KB` and `1P` — clr-installer's own syntax example writes
+  `150MiB` — were refused as "not a byte count". They are read as
+  clr-installer reads them: every unit a power of 1024, `GB` included.
 - **The dry run shows the whole partition stage.** It printed the disk's
   own commands only: for an LVM, RAID or encrypted layout, `pvcreate`,
   `vgcreate`, `lvcreate`, `mdadm --create` and `cryptsetup luksFormat`

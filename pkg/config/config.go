@@ -2896,7 +2896,10 @@ func (c *Config) installDisks() ([]*Media, error) {
 
 // parseSize parses a clr-installer size to bytes. It appears three ways:
 // a byte count ("157286400"), an integer with a unit ("150M"), and a
-// decimal with a unit ("1.364G"). Units are powers of 1024.
+// decimal with a unit ("1.364G"). Units are powers of 1024, in any case,
+// and may be written as clr-installer documents and reads them (its
+// storage.ParseVolumeSize): K, M, G, T or P alone or followed by B or iB
+// (150MiB, 1GB — a GB is 2^30 bytes there too), or B for bytes.
 func parseSize(s string) (uint64, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -2904,26 +2907,41 @@ func parseSize(s string) (uint64, error) {
 	}
 
 	mult := 1.0
-	num := s
-	switch s[len(s)-1] {
-	case 'K', 'k':
-		mult = 1 << 10
-	case 'M', 'm':
-		mult = 1 << 20
-	case 'G', 'g':
-		mult = 1 << 30
-	case 'T', 't':
-		mult = 1 << 40
-	case 'B', 'b':
-		mult = 1
+	num := strings.ToLower(s)
+	if n, ok := strings.CutSuffix(num, "ib"); ok {
+		num = n // only after a K/M/G/T/P, checked below
+	} else if n, ok := strings.CutSuffix(num, "b"); ok {
+		num, mult = n, 0 // B alone is bytes; after a unit, the unit
 	}
-	if mult != 1 || s[len(s)-1] == 'B' || s[len(s)-1] == 'b' {
-		num = s[:len(s)-1]
+	unit := true
+	if num != "" {
+		switch num[len(num)-1] {
+		case 'k':
+			mult = 1 << 10
+		case 'm':
+			mult = 1 << 20
+		case 'g':
+			mult = 1 << 30
+		case 't':
+			mult = 1 << 40
+		case 'p':
+			mult = 1 << 50
+		default:
+			unit = false
+		}
+	}
+	switch {
+	case unit:
+		num = num[:len(num)-1]
+	case mult == 0: // "512B"
+		mult = 1
+	case num != strings.ToLower(s): // "iB" with no unit before it
+		num = ""
 	}
 
 	f, err := strconv.ParseFloat(num, 64)
 	if err != nil || f < 0 || math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0, fmt.Errorf("size %q is not a byte count or a number with a K/M/G/T unit (e.g. 512M, 10G)", s)
+		return 0, fmt.Errorf("size %q is not a byte count or a number with a K/M/G/T unit (e.g. 512M, 10G, 150MiB)", s)
 	}
 	b := math.Round(f * mult)
 	if b >= float64(1<<64) {

@@ -367,7 +367,7 @@ func TestValidSwapSize(t *testing.T) {
 			t.Errorf("%q: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"0", "2GB", "", "-1G"} {
+	for _, bad := range []string{"0", "2Gi", "", "-1G"} {
 		if ValidSwapSize(bad) == nil {
 			t.Errorf("%q accepted", bad)
 		}
@@ -419,12 +419,12 @@ func TestLVSizes(t *testing.T) {
 				{Name: "root", FsType: "ext4", Mountpoint: "/"}}},
 		}}}}
 	}
-	if err := lv("10GB").Validate(); err == nil || !strings.Contains(err.Error(), `size "10GB" is not a byte count`) {
-		t.Errorf("10GB: %v", err)
+	if err := lv("10GX").Validate(); err == nil || !strings.Contains(err.Error(), `size "10GX" is not a byte count`) {
+		t.Errorf("10GX: %v", err)
 	}
 	// Every size without a unit lvcreate reads as the config does: in MiB.
 	for in, want := range map[string]string{"1500000000": "1431m", "2e9": "1908m", "1048576.5": "2m", "10G": "10G", "10.5G": "10.5G", "512m": "512m",
-		"18446744073709549568": "17592186044416m"} { // near 2^64: no wrap to 0m
+		"10GiB": "10240m", "18446744073709549568": "17592186044416m"} { // near 2^64: no wrap to 0m
 		pl, err := lv(in).Plan()
 		if err != nil {
 			t.Fatal(err)

@@ -41,6 +41,44 @@ func TestParseSize(t *testing.T) {
 	}
 }
 
+// clr-installer documents (scripts/InstallerYAMLSyntax.md) and parses
+// (storage.ParseVolumeSize) a unit with a B or iB after it, and P, all
+// powers of 1024: its own syntax example says "150MiB" and "2.6GiB". A
+// clr config written that way was refused here.
+func TestParseSizeClrUnits(t *testing.T) {
+	cases := map[string]uint64{
+		"150MiB": 150 << 20, "2.6GiB": uint64(math.Round(2.6 * (1 << 30))), "64MiB": 64 << 20,
+		"1GB": 1 << 30, "512KB": 512 << 10, "512kib": 512 << 10, "2TB": 2 << 40, "1TiB": 1 << 40,
+		"1P": 1 << 50, "1PB": 1 << 50, "1pib": 1 << 50, "10gb": 10 << 30,
+	}
+	for in, want := range cases {
+		if got, err := parseSize(in); err != nil || got != want {
+			t.Errorf("parseSize(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"1iB", "1Gi", "1GiBB", "GiB", "1BB", "1Bi"} {
+		if _, err := parseSize(bad); err == nil {
+			t.Errorf("parseSize(%q) = nil error, want failure", bad)
+		}
+	}
+	// The whole way: Validate and Plan take clr's syntax example's sizes.
+	c := &Config{TargetMedia: []*Media{{Name: "sda", Type: "disk", Children: []*Media{
+		{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "150MiB"},
+		{Name: "sda2", Type: "part", FsType: "swap", Size: "1GB"},
+		{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: "/", Size: "2.6GiB"},
+	}}}, SwapFileSize: "64MiB"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	pl, err := c.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if pl.Parts[0].Size != "157286400" || pl.Parts[1].Size != "1073741824" {
+		t.Errorf("sizes in the plan: %q %q", pl.Parts[0].Size, pl.Parts[1].Size)
+	}
+}
+
 func TestPartNumber(t *testing.T) {
 	cases := []struct {
 		name string
