@@ -1253,8 +1253,11 @@ func installStoppable(cfg *config.Config, opts controller.Options) error {
 	go func() {
 		select {
 		case <-sigs:
-			fmt.Fprintln(os.Stderr, "\nInterrupted: winding the install down after this step (a Ctrl+C on the terminal stops the running command too). Ctrl+C again leaves now.")
+			// The stop first, then the word of it: said first, the stage
+			// after could begin in between (the test that waits for the
+			// word saw the mount stage start).
 			close(stop)
+			fmt.Fprintln(os.Stderr, "\nInterrupted: winding the install down after this step (a Ctrl+C on the terminal stops the running command too). Ctrl+C again leaves now.")
 		case <-done:
 			return
 		}
