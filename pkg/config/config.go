@@ -1208,6 +1208,11 @@ func ValidSwapSize(s string) error {
 	if n == 0 {
 		return fmt.Errorf("a swap of size 0 is no swap; choose none instead")
 	}
+	// What Validate holds a swap file and a partition to: taken here and
+	// refused there, the size ended the flow after every question.
+	if n < storage.MinPartitionSize {
+		return fmt.Errorf("a swap of %s is too small (at least 1 MiB)", s)
+	}
 	return nil
 }
 

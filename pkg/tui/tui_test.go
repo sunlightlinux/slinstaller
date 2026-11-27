@@ -264,3 +264,22 @@ func TestPromptChoiceIgnoresCase(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// A swap size the prompt takes is one the install takes: the prompt is
+// asked again until right, but a size it let through and Validate then
+// refused ended the whole flow after every question had been answered —
+// "512K" for a swap file, since swapFileSize has a 1 MiB floor.
+func TestPromptedSwapSizePassesValidate(t *testing.T) {
+	for _, swap := range []string{"file", "partition"} {
+		for _, size := range []string{"512K", "1023K", "0.5M", "100", "1M", "2G"} {
+			if config.ValidSwapSize(size) != nil {
+				continue
+			}
+			cfg := assemble(assembly{Disk: "sda", RootFS: "ext4", Swap: swap, SwapSize: size,
+				Hostname: "box", Login: "ion", PassHash: "$6$abc$def"})
+			if err := cfg.Validate(); err != nil {
+				t.Errorf("swap %s %q: the prompt took it, Validate: %v", swap, size, err)
+			}
+		}
+	}
+}

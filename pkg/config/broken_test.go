@@ -381,12 +381,12 @@ func TestEncryptedWhereNotReadIsRefused(t *testing.T) {
 }
 
 func TestValidSwapSize(t *testing.T) {
-	for _, ok := range []string{"auto", "2G", "512M"} {
+	for _, ok := range []string{"auto", "2G", "512M", "1M"} {
 		if err := ValidSwapSize(ok); err != nil {
 			t.Errorf("%q: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"0", "2Gi", "", "-1G"} {
+	for _, bad := range []string{"0", "2Gi", "", "-1G", "512K", "100"} {
 		if ValidSwapSize(bad) == nil {
 			t.Errorf("%q accepted", bad)
 		}
