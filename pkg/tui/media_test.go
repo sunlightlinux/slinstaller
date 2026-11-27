@@ -480,3 +480,46 @@ func TestSafeInstallOffersToShrink(t *testing.T) {
 		t.Errorf("with no listing: popup %d", m.popup)
 	}
 }
+
+// The partition editor lays out a new table: a Safe layout's entries (the
+// kept ESP, the root cut in free space) do not follow it there, where they
+// were numbered by position and an added swap formatted an existing
+// partition. Encryption a Safe install cannot do is refused, and a box
+// ticked but not confirmed does not stay ticked over a plain layout.
+func TestSafeLayoutStaysOutOfTheEditor(t *testing.T) {
+	m := mediaDialog()
+	m.parts = []partEntry{
+		{Name: "sdb1", Type: "part", FS: "vfat", Mount: "/boot/efi", Preserve: true},
+		{Name: "sdb5", Type: "part", FS: "ext4", Mount: "/", Create: true, Start: "60000M", Size: "20000M"},
+	}
+	m.safeInstall = true
+	m.mediaCursor = m.mediaEncIndex() + 2 // Partition
+	got := send(m, enter)
+	if got.view != viewPartList || len(got.parts) != 0 || got.safeInstall {
+		t.Errorf("editor after a Safe layout: view %d, parts %+v, safe %v", got.view, got.parts, got.safeInstall)
+	}
+	// Advanced confirm, likewise.
+	m.mediaMode, m.mediaCursor = 1, m.mediaEncIndex()+1
+	if got = send(m, enter); len(got.parts) != 0 || got.safeInstall {
+		t.Errorf("Advanced after a Safe layout: parts %+v", got.parts)
+	}
+
+	// Safe with encryption ticked: refused, saying why.
+	m = mediaDialog()
+	m.encrypt, m.mediaMode, m.mediaCursor = true, 2, m.mediaEncIndex()+1
+	if got = send(m, enter); got.popup != popupMessage || !strings.Contains(viewOf(got), "cannot encrypt") || len(got.parts) != 0 {
+		t.Errorf("Safe + encryption: popup %d\n%s", got.popup, viewOf(got))
+	}
+
+	// Ticked, then left with Esc: back to what the layout is.
+	m = mediaDialog()
+	m.parts = autoLayout(false)
+	m.mediaCursor = m.mediaEncIndex()
+	m = send(m, enter)
+	if !m.encrypt {
+		t.Fatal("the box did not tick")
+	}
+	if got = send(m, tea.KeyMsg{Type: tea.KeyEsc}); got.encrypt {
+		t.Error("left ticked over an unencrypted layout")
+	}
+}

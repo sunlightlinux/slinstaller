@@ -101,7 +101,7 @@ func hasCrypt(parts []partEntry) bool {
 // mediaModes are the installation modes, in clr's order.
 var mediaModes = []struct{ name, desc string }{
 	{"Destructive Installation", "Erase the whole disk and install with a standard layout."},
-	{"Advanced Installation", "Lay out or reuse partitions yourself (the partition editor)."},
+	{"Advanced Installation", "Lay out the disk's partitions yourself (the disk is erased)."},
 	{"Safe Installation", "Add Sunlight in the disk's free space, keeping what is there."},
 }
 
@@ -122,6 +122,7 @@ func (m model) updateMedia(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	btnBase := encIdx + 1
 	switch key.String() {
 	case "esc":
+		m.encrypt = layoutEncrypted(m.parts)
 		m.view = viewHub
 	case "up", "k", "shift+tab", "left", "h":
 		if m.mediaCursor > 0 {
@@ -160,8 +161,7 @@ func (m model) updateMedia(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.confirmMedia()
 			case 1: // Partition (manual editor)
 				m.diskSet = true
-				m.view = viewPartList
-				m.partCursor = 0
+				m.toEditor()
 			case 2: // Rescan Media
 				if devs, err := blockdev.List(); err == nil {
 					if disks := blockdev.Available(devs); len(disks) > 0 {
@@ -173,6 +173,7 @@ func (m model) updateMedia(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				m.mediaCursor = 0
 			case 3: // Cancel
+				m.encrypt = layoutEncrypted(m.parts)
 				m.view = viewHub
 			}
 		}
@@ -193,12 +194,59 @@ func (m model) confirmMedia() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case 1: // Advanced: the manual partition editor
-		m.view = viewPartList
-		m.partCursor = 0
+		m.toEditor()
 		return m, nil
 	default: // Safe: install into the disk's free space, keeping what is there
+		if m.encrypt {
+			m.encrypt = layoutEncrypted(m.parts)
+			m.popup = popupMessage
+			m.popupMsg = []string{"Safe Installation", "",
+				"A Safe install keeps the disk's partitions as they are, so it",
+				"cannot encrypt the new system. Untick Enable Encryption to go",
+				"on unencrypted, or use Destructive to encrypt."}
+			return m, nil
+		}
 		return m.confirmSafe()
 	}
+}
+
+// toEditor opens the partition editor. The editor lays out a new table on
+// the whole disk; a Safe layout's entries — an existing ESP kept, a
+// partition cut in free space — mean nothing there, and kept in the list
+// they were numbered by position: adding a swap formatted the disk's
+// existing third partition. Such a layout is cleared, for one laid out
+// from scratch. Whatever is laid out here wipes the disk, as the
+// confirmation then says.
+func (m *model) toEditor() {
+	if m.safeInstall || hasSafeEntries(m.parts) {
+		m.parts = nil
+	}
+	m.safeInstall = false
+	m.view = viewPartList
+	m.partCursor = 0
+}
+
+// hasSafeEntries reports whether any entry is a Safe install's: named,
+// kept, created in free space or shrunk.
+func hasSafeEntries(parts []partEntry) bool {
+	for _, p := range parts {
+		if p.Name != "" || p.Preserve || p.Create || p.Start != "" || p.Resize != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// layoutEncrypted reports whether the layout encrypts anything, which is
+// what the Enable Encryption box shows once the dialog is left without
+// Confirm: ticked and left, it showed [x] over an unencrypted layout.
+func layoutEncrypted(parts []partEntry) bool {
+	for _, p := range parts {
+		if p.Type == "crypt" || p.Encrypted {
+			return true
+		}
+	}
+	return false
 }
 
 // confirmSafe builds a Safe/alongside layout: reuse the disk's existing EFI

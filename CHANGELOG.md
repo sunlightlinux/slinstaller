@@ -55,6 +55,15 @@ change.
 
 ### Fixed
 
+- **The partition editor after a Safe install formatted existing
+  partitions.** The Safe layout's entries (the kept ESP, the root cut in
+  free space) stayed in the editor's list, where new entries were numbered
+  by position: adding a 4G swap ran `mkswap` on the disk's existing third
+  partition. Opening the editor (or Advanced) now starts from an empty
+  layout, which wipes the disk as the confirmation says.
+- A Safe install with Enable Encryption ticked installed unencrypted
+  without a word; it is refused, saying why. The box ticked and left
+  without Confirm no longer shows [x] over an unencrypted layout.
 - `--resume-from` after a reboot of the live system failed at the mount:
   nothing re-opened the encrypted volumes, assembled the arrays or
   activated the volume groups. A resume now brings back whatever of that
