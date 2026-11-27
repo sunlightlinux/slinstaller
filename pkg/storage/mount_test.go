@@ -86,3 +86,24 @@ func TestBlockReadOnlyAndFreezeBestEffort(t *testing.T) {
 		FreezeThaw(t.TempDir())
 	}
 }
+
+// A mountpoint that leads out of the target through a link is not mounted on.
+func TestMountpointInside(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	os.Symlink(outside, filepath.Join(root, "boot"))
+	m := NewMounter(root)
+	if err := m.inside(filepath.Join(root, "boot")); err == nil || !strings.Contains(err.Error(), "leads outside the target") {
+		t.Errorf("boot -> outside: %v", err)
+	}
+	os.MkdirAll(filepath.Join(root, "real", "home"), 0o755)
+	os.Symlink("real/home", filepath.Join(root, "home"))
+	if err := m.inside(filepath.Join(root, "home")); err != nil {
+		t.Errorf("a relative link inside: %v", err)
+	}
+	if err := m.inside(root); err != nil {
+		t.Errorf("the root itself: %v", err)
+	}
+	if err := (&Mounter{root: root}).MountAll(&Plan{Parts: []Partition{{Device: "tmpfs", Filesystem: "tmpfs", Mountpoint: "/boot"}}}); err == nil || !strings.Contains(err.Error(), "leads outside") {
+		t.Errorf("MountAll through the link: %v", err)
+	}
+}

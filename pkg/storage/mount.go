@@ -80,6 +80,9 @@ func (m *Mounter) MountAll(pl *Plan) error {
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return fmt.Errorf("storage: mkdir %s: %w", target, err)
 		}
+		if err := m.inside(target); err != nil {
+			return err
+		}
 		if err := syscall.Mount(p.EffectiveDevice(), target, p.Filesystem, syscall.MS_RELATIME, p.mountData()); err != nil {
 			return fmt.Errorf("storage: mount %s on %s: %w", p.EffectiveDevice(), target, err)
 		}
@@ -107,6 +110,9 @@ func (m *Mounter) MountMeta() error {
 		target := filepath.Join(m.root, name)
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return fmt.Errorf("storage: mkdir %s: %w", target, err)
+		}
+		if err := m.inside(target); err != nil {
+			return err
 		}
 		// MS_BIND rebinds the live filesystem; MS_REC carries submounts.
 		if err := syscall.Mount(src, target, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
@@ -368,4 +374,23 @@ func FreezeThaw(dir string) {
 	if unix.IoctlSetInt(int(f.Fd()), fifreeze, 0) == nil {
 		unix.IoctlSetInt(int(f.Fd()), fithaw, 0)
 	}
+}
+
+// inside refuses a mountpoint that, its links followed, is not under the
+// mount root: in a preserved root, /boot or /dev may be an absolute link,
+// and mounted through, the target's /boot went onto the live system's (or
+// /dev's bind over the live /dev).
+func (m *Mounter) inside(target string) error {
+	root, err := filepath.EvalSymlinks(m.root)
+	if err != nil {
+		root = m.root
+	}
+	real, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return fmt.Errorf("storage: %s: %w", target, err)
+	}
+	if real != root && !strings.HasPrefix(real, root+string(os.PathSeparator)) {
+		return fmt.Errorf("storage: %s leads outside the target (to %s); not mounted on", target, real)
+	}
+	return nil
 }
