@@ -2,9 +2,11 @@ package storage
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
+	"time"
 )
 
 // SinkRunner returns a Runner that echoes each command and streams its
@@ -16,6 +18,23 @@ import (
 // particular takes minutes), so a long step shows activity rather than a
 // frozen bar. sink is called from the command's lifetime; it must be safe
 // to call from the runner's goroutine.
+// outputWait bounds how long a finished command's output pipe is waited
+// on. A command (a hook, often) that leaves a process in the background
+// with the pipe still open kept the install waiting for as long as that
+// process lived; once the command itself has exited, its output gets this
+// long to drain. A variable for tests.
+var outputWait = 5 * time.Second
+
+// outputWaited is a command's result once outputWait has passed: the
+// command exited well, only something it left behind still held its
+// output, which is not the command failing.
+func outputWaited(err error) error {
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return nil
+	}
+	return err
+}
+
 func SinkRunner(sink func(line string)) Runner {
 	return func(args []string) error {
 		if len(args) == 0 {
@@ -24,6 +43,7 @@ func SinkRunner(sink func(line string)) Runner {
 		sink("+ " + ShowCommand(args))
 
 		c := exec.Command(args[0], args[1:]...)
+		c.WaitDelay = outputWait
 		pr, pw := io.Pipe()
 		c.Stdout, c.Stderr = pw, pw
 
@@ -47,6 +67,6 @@ func SinkRunner(sink func(line string)) Runner {
 		err := c.Run()
 		pw.Close() // unblock the scanner at EOF
 		<-done     // drain remaining lines before returning
-		return err
+		return outputWaited(err)
 	}
 }

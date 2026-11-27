@@ -344,9 +344,10 @@ func StreamRunner(w io.Writer) Runner {
 		}
 		fmt.Fprintf(w, "    + %s\n", ShowCommand(args))
 		c := exec.Command(args[0], args[1:]...)
+		c.WaitDelay = outputWait // see SinkRunner
 		c.Stdout = w
 		c.Stderr = w
-		return c.Run()
+		return outputWaited(c.Run())
 	}
 }
 

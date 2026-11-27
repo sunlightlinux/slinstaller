@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A password hash in a command is masked where the command is shown.
@@ -75,5 +76,28 @@ func TestRunCommandsErrorIsMasked(t *testing.T) {
 	}
 	if got := FormatCommands([][]string{{"env", "https_proxy=http://a:b@p"}}); strings.Contains(got, ":b@") {
 		t.Errorf("FormatCommands = %q", got)
+	}
+}
+
+// A command that leaves something in the background holding its output
+// does not keep the install waiting for it, and is not taken as failed.
+func TestRunnersDoNotWaitForBackgroundOutput(t *testing.T) {
+	saved := outputWait
+	defer func() { outputWait = saved }()
+	outputWait = 200 * time.Millisecond
+	var lines []string
+	start := time.Now()
+	err := SinkRunner(func(l string) { lines = append(lines, l) })([]string{"sh", "-c", "sleep 3 & echo hi"})
+	if err != nil || time.Since(start) > 2*time.Second {
+		t.Errorf("SinkRunner: %v after %v", err, time.Since(start))
+	}
+	var b strings.Builder
+	start = time.Now()
+	if err := StreamRunner(&b)([]string{"sh", "-c", "sleep 3 & echo hi"}); err != nil || time.Since(start) > 2*time.Second {
+		t.Errorf("StreamRunner: %v after %v", err, time.Since(start))
+	}
+	// A real failure is still one.
+	if err := SinkRunner(func(string) {})([]string{"sh", "-c", "exit 3"}); err == nil {
+		t.Error("a failing command was taken as fine")
 	}
 }
