@@ -150,8 +150,10 @@ func TestDiagRedactsEnvAndFiles(t *testing.T) {
 }
 
 func TestLogLevelRange(t *testing.T) {
-	for _, l := range []string{"0", "5", "-1"} {
-		if err := run([]string{"--log-level", l, "x.yaml"}); err == nil || !strings.Contains(err.Error(), "the levels are 1") {
+	// Out of 1-5 is clamped with a warning, as clr-installer does; 5 is
+	// taken. (The run then fails on the missing config, after the check.)
+	for _, l := range []string{"0", "5", "9", "-1"} {
+		if err := run([]string{"--log-level", l, "no-such.yaml"}); err == nil || strings.Contains(err.Error(), "log-level") {
 			t.Errorf("--log-level %s: %v", l, err)
 		}
 	}

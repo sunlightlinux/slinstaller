@@ -543,7 +543,10 @@ func TestSaveIsPrivate(t *testing.T) {
 
 func TestSecretName(t *testing.T) {
 	for n, want := range map[string]bool{"API_TOKEN": true, "db_password": true, "WIFI_PSK": true, "ssh_key": true, "API_URL": false, "HOSTNAME": false,
-		"KEYMAP": false, "KEYBOARD": false, "AUTHOR": false, "BYPASS_CACHE": false, "SSH_KEY_PATH": false, "MY_SECRET": true, "authToken": true, "dbPassword": true} {
+		"KEYMAP": false, "KEYBOARD": false, "AUTHOR": false, "BYPASS_CACHE": false, "SSH_KEY_PATH": false, "MY_SECRET": true, "authToken": true, "dbPassword": true,
+		"API_TOKENS": true, "CLIENT_SECRETS": true, "SSH_KEYS": true, "DB_PASSWORDS": true, "sshPrivateKey": true, "privateKey": true,
+		"deployKey": true, "SECRETKEY": true, "dbPass": true, "DBPASS": true, "passwordHash": true, "tokenValue": true, "GPG_PRIVKEY": true,
+		"KEYRING": false, "KEYMAPS": false, "LANGUAGE": false, "DEBUG": false, "ADDRESS": false} {
 		if SecretName(n) != want {
 			t.Errorf("%s: %v", n, !want)
 		}

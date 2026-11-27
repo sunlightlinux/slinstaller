@@ -23,8 +23,15 @@ func TestConfirmRequiresTheDiskPathRetyped(t *testing.T) {
 	if !answer("  /dev/sda  \n") {
 		t.Error("surrounding whitespace should not matter")
 	}
-	// A mistyped answer is asked again, three tries in all; an empty line
-	// stops at once.
+	// Piped, a wrong answer aborts at once: no later line confirms.
+	defer func(f func() bool) { stdinIsTerminal = f }(stdinIsTerminal)
+	stdinIsTerminal = func() bool { return false }
+	if answer("sda\n/dev/sda\n") {
+		t.Error("a piped second line confirmed")
+	}
+	// Typed, a mistyped answer is asked again, three tries in all; an empty
+	// line stops at once.
+	stdinIsTerminal = func() bool { return true }
 	if !answer("sda\n/dev/sdb\n/dev/sda\n") {
 		t.Error("the third try was not taken")
 	}

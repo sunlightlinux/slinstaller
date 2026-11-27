@@ -165,3 +165,13 @@ func TestMaskSecretBareAndRegistered(t *testing.T) {
 		t.Errorf("sink output: %q", lines)
 	}
 }
+
+// With a secret registered, a \r-ended progress redraw is passed on at once.
+func TestMaskWriterPassesProgress(t *testing.T) {
+	var b strings.Builder
+	m := &maskWriter{w: &b}
+	m.Write([]byte("10%\r"))
+	if b.String() != "10%\r" {
+		t.Errorf("held back: %q", b.String())
+	}
+}

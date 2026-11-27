@@ -244,8 +244,12 @@ func run(args []string) error {
 		return fmt.Errorf("--arch %s is not this machine's (%s): its packages cannot be configured here; use it only with --through", arch, hostXBPSArch())
 	}
 
-	if logLevel < 1 || logLevel > 4 {
-		return fmt.Errorf("--log-level %d: the levels are 1 (error) to 4 (debug)", logLevel)
+	// clr-installer's levels are 1 to 5 (5 verbose, shown here as 4) and
+	// it clamps anything else with a warning; so does this.
+	if logLevel < 1 || logLevel > 5 {
+		clamped := min(max(logLevel, 1), 5)
+		fmt.Fprintf(os.Stderr, "warning: --log-level %d is not 1 (error) to 5 (verbose); using %d\n", logLevel, clamped)
+		logLevel = clamped
 	}
 
 	// Stage names are known now: a misspelt one was found only once the
@@ -1285,6 +1289,9 @@ func resolvePackages(opts controller.Options, cfg *config.Config) error {
 	return nil
 }
 
+// stdinIsTerminal says whether answers are being typed; a variable for tests.
+var stdinIsTerminal = func() bool { return isTerminal(os.Stdin) }
+
 // geteuid is os.Geteuid; a variable so tests reach the checks after it.
 var geteuid = os.Geteuid
 
@@ -1596,13 +1603,19 @@ func confirm(in *bufio.Reader, plan *storage.Plan) bool {
 	// A mismatch says what was wanted and asks again, three tries in all:
 	// "sda" for "/dev/sda" ended the run, throwing away every answer of the
 	// text flow, passwords included. An ended input still aborts.
+	// Retries only for someone typing: piped answers that are off by one
+	// would otherwise confirm with whichever later line names the disk.
+	tries := 1
+	if stdinIsTerminal() {
+		tries = 3
+	}
 	for try := 1; ; try++ {
 		line, err := in.ReadString('\n')
 		got := strings.TrimSpace(line)
 		if got == disks[0] && err == nil { // cut off before Enter is not typed
 			return true
 		}
-		if err != nil || got == "" || try == 3 {
+		if err != nil || got == "" || try >= tries {
 			return false
 		}
 		fmt.Fprintf(os.Stderr, "%q is not %s - type it exactly (an empty line aborts): ", got, disks[0])

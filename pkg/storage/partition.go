@@ -367,7 +367,7 @@ func StreamRunner(w io.Writer) Runner {
 }
 
 // maskWriter writes what it is given with the registered secrets masked, a
-// line at a time (a secret split across two writes is still found); a line
+// line (or a \r-ended progress redraw) at a time (a secret split across two writes is still found); a line
 // longer than 64 KiB is masked and written as it stands.
 type maskWriter struct {
 	mu  sync.Mutex
@@ -380,7 +380,9 @@ func (m *maskWriter) Write(p []byte) (int, error) {
 	defer m.mu.Unlock()
 	m.buf = append(m.buf, p...)
 	for {
-		i := bytes.IndexByte(m.buf, '\n')
+		// \r ends a line too: a progress bar redraws with it, and held
+		// until a \n the console looked frozen through a download.
+		i := bytes.IndexAny(m.buf, "\r\n")
 		if i < 0 {
 			break
 		}

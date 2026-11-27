@@ -2755,31 +2755,58 @@ func partNumber(name string, fallback int) int {
 // a secret (API_TOKEN, DB_PASSWORD, WIFI_PSK, …): its value is masked
 // wherever commands are shown or reported, and left out of diagnostics.
 func SecretName(name string) bool {
+	// The name's words: split at _ - . and where camelCase turns upper
+	// (sshPrivateKey: SSH PRIVATE KEY), and a plural's S taken off.
+	var parts []string
+	var cur []rune
+	prevLower := false
+	for _, r := range name {
+		switch {
+		case r == '_' || r == '-' || r == '.':
+			parts, cur, prevLower = append(parts, string(cur)), nil, false
+			continue
+		case unicode.IsUpper(r) && prevLower:
+			parts, cur = append(parts, string(cur)), nil
+		}
+		cur = append(cur, r)
+		prevLower = unicode.IsLower(r)
+	}
+	parts = append(parts, string(cur))
+	var words []string
+	for _, p := range parts {
+		if p = strings.ToUpper(p); p != "" {
+			if len(p) > 3 && strings.HasSuffix(p, "S") && !strings.HasSuffix(p, "SS") {
+				p = strings.TrimSuffix(p, "S") // TOKENS, SECRETS, KEYS (not PASS)
+			}
+			words = append(words, p)
+		}
+	}
+	if len(words) == 0 {
+		return false
+	}
 	// A name ending in PATH, FILE, DIR, URL or NAME holds where a secret is,
 	// or what it is called, not the secret.
-	parts := strings.FieldsFunc(strings.ToUpper(name), func(r rune) bool { return r == '_' || r == '-' || r == '.' })
-	if len(parts) > 1 {
-		switch parts[len(parts)-1] {
+	if len(words) > 1 {
+		switch words[len(words)-1] {
 		case "PATH", "FILE", "DIR", "URL", "NAME":
 			return false
 		}
 	}
-	// One word (authToken, dbPassword): by how it ends.
-	if len(parts) == 1 {
-		for _, w := range []string{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "PASSPHRASE", "APIKEY", "PSK"} {
-			if strings.HasSuffix(parts[0], w) {
-				return true
-			}
+	for _, w := range words {
+		switch w {
+		case "TOKEN", "SECRET", "PASS", "PASSWD", "PASSWORD", "PASSPHRASE", "PWD",
+			"KEY", "APIKEY", "PRIVKEY", "SECRETKEY", "PSK", "AUTH", "CRED", "CREDENTIAL", "PRIVATE":
+			return true
 		}
 	}
-	// By the parts of the name, not substrings: KEYMAP, KEYBOARD, AUTHOR,
-	// BYPASS_… are not secrets, and their values (de-latin1, /root, true)
-	// masked everywhere garbled every log line that held them.
-	for _, part := range parts {
-		switch part {
-		case "TOKEN", "SECRET", "PASS", "PASSWD", "PASSWORD", "PASSPHRASE", "KEY", "APIKEY",
-			"PSK", "AUTH", "CRED", "CREDS", "CREDENTIAL", "CREDENTIALS", "PRIVATE":
-			return true
+	// One run-together word (DBPASS, SECRETKEY, MYTOKEN): by how it ends.
+	// Not KEYMAP, KEYBOARD, AUTHOR, BYPASS_…: those are whole words or
+	// parts that do not end so.
+	if len(words) == 1 {
+		for _, w := range []string{"TOKEN", "SECRET", "PASS", "PASSWD", "PASSWORD", "PASSPHRASE", "KEY", "PSK"} {
+			if strings.HasSuffix(words[0], w) {
+				return true
+			}
 		}
 	}
 	return false
