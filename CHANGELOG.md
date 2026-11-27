@@ -12,6 +12,9 @@ change.
 
 ### Changed
 
+- The network check before an install makes one request per attempt, each
+  bounded by what is left of its minute: an unreachable mirror took two
+  10 s timeouts per attempt and 66 s in all.
 - The keyfile's LUKS slot (non-root volumes, an encrypted `/boot`) uses
   pbkdf2 at the minimum iteration count: the key is 2048 random bytes, so
   argon2id's seconds and memory bought nothing, at install or at boot.

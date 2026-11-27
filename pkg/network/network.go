@@ -23,12 +23,14 @@ import (
 // question, not the exact status; only a transport error (no DNS, no
 // route) is a failure. It uses the environment's proxy, if any.
 func VerifyConnectivity(url string) error {
-	client := &http.Client{Timeout: 10 * time.Second}
-	if resp, err := client.Head(url); err == nil {
-		resp.Body.Close()
-		return nil
-	}
-	// Some servers refuse HEAD; a GET that connects is still reachable.
+	return verify(url, 10*time.Second)
+}
+
+// verify makes one request, a GET whose body is not read: a server that
+// refuses HEAD still answers it, and one request instead of a HEAD then a
+// GET halves the time an unreachable mirror takes to fail.
+func verify(url string, timeout time.Duration) error {
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("network: cannot reach %s: %w", url, err)
@@ -42,9 +44,21 @@ func VerifyConnectivity(url string) error {
 // up -- dhcpcd backgrounds at once, then spends seconds probing its
 // address before applying it -- so one attempt fails installs that a
 // short wait would let through. notify, if set, is called once, before
-// the first retry, so the operator knows why nothing is happening.
+// the first retry, so the operator knows why nothing is happening. Each
+// attempt waits at most 5 seconds and no longer than what is left, so the
+// whole returns by its deadline (it used to take 66 s for a minute).
 func WaitForConnectivity(url string, wait time.Duration, notify func()) error {
-	return retry(func() error { return VerifyConnectivity(url) }, wait, 3*time.Second, notify)
+	deadline := time.Now().Add(wait)
+	return retry(func() error {
+		left := time.Until(deadline)
+		if left > 5*time.Second {
+			left = 5 * time.Second
+		}
+		if left < time.Second {
+			left = time.Second
+		}
+		return verify(url, left)
+	}, wait, 3*time.Second, notify)
 }
 
 // retry calls check until it succeeds or wait has passed, sleeping every

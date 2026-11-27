@@ -1,6 +1,7 @@
 package network
 
 import (
+	"net"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -251,5 +252,31 @@ func TestDhcpcdConfRefusesABadNetmask(t *testing.T) {
 	// An IPv6 mask written out in full.
 	if n, err := maskToCIDR("ffff:ffff:ffff:ffff::", true); err != nil || n != 64 {
 		t.Errorf("IPv6 mask = %d, %v", n, err)
+	}
+}
+
+// A mirror that accepts and never answers fails within the wait given, not
+// a timeout or two past it.
+func TestWaitForConnectivityKeepsItsDeadline(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close() // held open, never answered
+		}
+	}()
+	start := time.Now()
+	if err := WaitForConnectivity("http://"+ln.Addr().String()+"/", 2*time.Second, nil); err == nil {
+		t.Fatal("a silent mirror counted as reachable")
+	}
+	if took := time.Since(start); took > 4*time.Second {
+		t.Errorf("took %v for a 2s wait", took)
 	}
 }
