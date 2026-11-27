@@ -482,7 +482,13 @@ func TestResumeNeedsTheMark(t *testing.T) {
 	if err := in.mount(); err != nil {
 		t.Errorf("resume with the mark: %v", err)
 	}
+	// A mark from an attempt with another disk layout is not this one's.
+	in.cfg.TargetMedia[0].Children[1].Size = "10G"
+	wantErr(t, in.mount(), "another disk layout")
 	os.Remove(mark)
+	wantErr(t, in.mount(), "nothing to resume")
+	// A link in its place is not taken for it.
+	os.Symlink("/etc/hostname", mark)
 	wantErr(t, in.mount(), "nothing to resume")
 }
 

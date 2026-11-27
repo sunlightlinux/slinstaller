@@ -117,7 +117,7 @@ now be refused by the config check (see [STABILITY.md](STABILITY.md)).
   whatever the disk held — another system, or an old install of the same
   layout after a stop in the pre-install hooks — and install into it with
   no confirmation. The mount stage marks the target
-  (`/var/lib/slinstaller/in-progress`), a complete install removes the
+  (`/.slinstaller-in-progress`), a complete install removes the
   mark, and a resume without it is refused. A resize install can be
   resumed (its partition already shrunk is not refused), a first-boot
   stopped while generating the locale generates it on resume, and a stop

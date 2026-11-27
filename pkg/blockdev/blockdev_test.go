@@ -206,8 +206,7 @@ func TestTeardownRSTContainer(t *testing.T) {
 	}
 }
 
-// Multipath: the kpartx partition, then the map, are removed; the map is a
-// holder another path shares.
+// Multipath: the kpartx partition, then the map, are removed.
 func TestTeardownMultipath(t *testing.T) {
 	mp := Device{Name: "mpatha", Path: "/dev/mapper/mpatha", Type: "mpath", Children: []Device{
 		{Name: "mpatha1", Path: "/dev/mapper/mpatha1", Type: "part", FsType: "ext4"}}}
@@ -216,8 +215,9 @@ func TestTeardownMultipath(t *testing.T) {
 	if got := fmt.Sprint(Teardown(sda)); got != "[[dmsetup remove mpatha1] [dmsetup remove mpatha] [wipefs -a /dev/sda]]" {
 		t.Errorf("teardown: %s", got)
 	}
-	if got := Shared([]Device{sda, sdb}, "/dev/sda", []string{"/dev/sda"}, nil); len(got) == 0 {
-		t.Error("a multipath map on two disks is not shared")
+	// sda and sdb are two paths to one LUN: not "shared" with itself.
+	if got := Shared([]Device{sda, sdb}, "/dev/sda", []string{"/dev/sda"}, nil); len(got) != 0 {
+		t.Errorf("one LUN refused as shared with itself: %v", got)
 	}
 }
 

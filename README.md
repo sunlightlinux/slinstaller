@@ -259,7 +259,7 @@ partitioning again, and `--resume-from <stage>` does so from any later
 stage — also after a reboot of the live medium: the encrypted volumes,
 arrays and volume groups are brought back first, and the passphrase is
 asked once. A resume needs the mark an unfinished install leaves in its
-target (`/var/lib/slinstaller/in-progress`, made at the mount, removed when
+target (`/.slinstaller-in-progress`, made at the mount, removed when
 the install completes): without it the disk holds no install to resume,
 and nothing is done to it; `--json-yaml old.json` converts the JSON descriptor of
 clr-installer's predecessor into a config; `--unmount` takes down what a `--through` run left

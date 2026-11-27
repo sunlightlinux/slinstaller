@@ -18,6 +18,8 @@ package controller
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -288,13 +290,6 @@ func (in *installer) run() error {
 			return fmt.Errorf("controller: hooks after %s: %w", s.name, err)
 		}
 	}
-	// Finished: nothing left to resume. (A staged run keeps the mark: it
-	// is meant to be resumed.)
-	if in.opts.Through == "" {
-		if err := removeIfPresent(filepath.Join(in.opts.Root, resumeMark)); err != nil && in.opts.Log != nil {
-			fmt.Fprintf(in.opts.Log, "warning: %v\n", err)
-		}
-	}
 	if in.opts.Progress != nil {
 		in.opts.Progress(limit, limit, "complete")
 	}
@@ -356,6 +351,12 @@ func (in *installer) finish() error {
 	}
 	if resolvErr != nil {
 		return errors.Join(resolvErr, in.mnt.UnmountAll())
+	}
+	// Finished: nothing is left to resume. (Last of what finish can fail
+	// at short of unmounting; a staged run keeps the mark, meant to be
+	// resumed.)
+	if err := removeIfPresent(filepath.Join(in.opts.Root, resumeMark)); err != nil && in.opts.Log != nil {
+		fmt.Fprintf(in.opts.Log, "warning: %v\n", err)
 	}
 	if err := in.archiveLog(); err != nil && in.opts.Log != nil {
 		fmt.Fprintf(in.opts.Log, "warning: the install log was not saved on the target: %v\n", err)
@@ -652,13 +653,24 @@ func (in *installer) mount() error {
 	// resume. Without it --resume mounted whatever the disk held — another
 	// system, an old install of the same layout after a stop in the
 	// pre-install hooks — and installed into it with no confirmation.
+	// It names the disk layout it was made for: a mark left by an earlier
+	// attempt with another layout (on a preserved partition, say) is not
+	// this install's.
 	mark := filepath.Join(in.opts.Root, resumeMark)
+	want := "slinstaller install in progress; layout " + in.layoutPrint() + "\n"
 	if in.opts.ResumeFrom == "" {
-		if err := writeMark(in.opts.Root, mark); err != nil {
+		os.Remove(mark) // a link there is replaced, not followed
+		if err := os.WriteFile(mark, []byte(want), 0o600); err != nil {
 			return fmt.Errorf("mark the install as in progress: %w", err)
 		}
-	} else if !exists(mark) || !insideTarget(in.opts.Root, filepath.Dir(mark)) {
-		return fmt.Errorf("resume: the target holds no install this installer left unfinished (no /%s) - nothing to resume; run the install without --resume", resumeMark)
+	} else {
+		fi, err := os.Lstat(mark)
+		if err != nil || !fi.Mode().IsRegular() {
+			return fmt.Errorf("resume: the target holds no install this installer left unfinished (no /%s) - nothing to resume; run the install without --resume", resumeMark)
+		}
+		if got, _ := os.ReadFile(mark); string(got) != want {
+			return fmt.Errorf("resume: the unfinished install on the target was made for another disk layout than this config's - run the install without --resume")
+		}
 	}
 	// Resuming past the stage that made it, the keyfile the first attempt
 	// put in the target is the one the bootloader stage has to point at.
@@ -668,20 +680,17 @@ func (in *installer) mount() error {
 	return nil
 }
 
-// resumeMark, in the target, marks an install in progress (see mount).
-const resumeMark = "var/lib/slinstaller/in-progress"
+// resumeMark, in the target, marks an install in progress (see mount). At
+// the top of the root filesystem, where nothing an image unpacks collides
+// with it: under var/, a /var link in the image met a non-empty directory
+// and GNU tar spun on it for ever.
+const resumeMark = ".slinstaller-in-progress"
 
-// writeMark makes the resume mark, not through a link out of the target.
-func writeMark(root, mark string) error {
-	dir := filepath.Dir(mark)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if !insideTarget(root, dir) {
-		return fmt.Errorf("%s leads outside the installed system", dir)
-	}
-	os.Remove(mark) // a link there is replaced, not followed
-	return os.WriteFile(mark, []byte("slinstaller: an install in progress; removed when it completes\n"), 0o600)
+// layoutPrint is a fingerprint of the config's disk layout.
+func (in *installer) layoutPrint() string {
+	data, _ := yaml.Marshal(in.cfg.TargetMedia)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
 }
 
 func exists(path string) bool {
@@ -1845,16 +1854,8 @@ func (in *installer) writeFiles() error {
 		// The deepest directory that exists is checked before any is made:
 		// MkdirAll through a link out of the target made directories on the
 		// live system before the check below refused.
-		for d := dir; ; d = filepath.Dir(d) {
-			if _, err := os.Lstat(d); err == nil {
-				if !insideTarget(root, d) {
-					return fmt.Errorf("write-files: %s leads outside the installed system", w.Path)
-				}
-				break
-			}
-			if d == root || d == filepath.Dir(d) {
-				break
-			}
+		if !existingInside(root, dir) {
+			return fmt.Errorf("write-files: %s leads outside the installed system", w.Path)
 		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("write-files: %w", err)
@@ -2016,6 +2017,9 @@ func copyPath(root, src, dst string, fi os.FileInfo) error {
 		if err != nil {
 			return err
 		}
+		if !existingInside(root, dst) {
+			return fmt.Errorf("%s leads outside the installed system", dst)
+		}
 		if err := os.MkdirAll(dst, fi.Mode().Perm()); err != nil {
 			return err
 		}
@@ -2035,6 +2039,9 @@ func copyPath(root, src, dst string, fi os.FileInfo) error {
 	if !fi.Mode().IsRegular() {
 		return nil
 	}
+	if !existingInside(root, filepath.Dir(dst)) {
+		return fmt.Errorf("%s leads outside the installed system", filepath.Dir(dst))
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
@@ -2047,6 +2054,21 @@ func copyPath(root, src, dst string, fi os.FileInfo) error {
 	// the Wi-Fi key kept 0644; and a link there, or a directory leading
 	// out of the target, was written through onto the live system.
 	return writeInTarget(root, dst, data, fi.Mode().Perm())
+}
+
+// existingInside reports whether the deepest existing directory on the way
+// to dir is in the target at root: checked before a MkdirAll, which made
+// directories on the live system through a link out of the target before
+// a later check refused.
+func existingInside(root, dir string) bool {
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Lstat(d); err == nil {
+			return insideTarget(root, d)
+		}
+		if d == root || d == filepath.Dir(d) {
+			return true
+		}
+	}
 }
 
 // writeInTarget writes path, in the target at root, as a new file of mode

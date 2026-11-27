@@ -455,3 +455,20 @@ func TestCopyPathModeAndLinks(t *testing.T) {
 		t.Error("written through a link")
 	}
 }
+
+// A copied directory under a target directory that links out makes nothing
+// outside.
+func TestCopyPathMakesNoDirsOutside(t *testing.T) {
+	root, live, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	os.MkdirAll(filepath.Join(live, "wpa", "sub"), 0o755)
+	os.WriteFile(filepath.Join(live, "wpa", "sub", "f"), []byte("x"), 0o600)
+	os.MkdirAll(filepath.Join(root, "etc"), 0o755)
+	os.Symlink(outside, filepath.Join(root, "etc", "wpa"))
+	fi, _ := os.Lstat(filepath.Join(live, "wpa"))
+	if err := copyPath(root, filepath.Join(live, "wpa"), filepath.Join(root, "etc", "wpa"), fi); err == nil {
+		t.Error("copied through a link out of the target")
+	}
+	if ents, _ := os.ReadDir(outside); len(ents) != 0 {
+		t.Errorf("made outside: %v", ents)
+	}
+}

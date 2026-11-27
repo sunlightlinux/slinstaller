@@ -461,7 +461,7 @@ func e2ePlain(t *testing.T, dir string) {
 	cfg.StageHooks = map[string][]*config.Hook{"fstab": {{Cmd: "grep -q 'UUID=7A3B-19C2' ${chrootDir}/etc/fstab"}},
 		// The install is marked as in progress from the mount on (a resume
 		// requires the mark) ...
-		"mount": {{Cmd: "test -f ${chrootDir}/var/lib/slinstaller/in-progress"}}}
+		"mount": {{Cmd: "test -f ${chrootDir}/.slinstaller-in-progress"}}}
 
 	keys := filepath.Join(dir, "keys")
 	os.MkdirAll(keys, 0o755)
@@ -654,12 +654,13 @@ func e2ePlain(t *testing.T, dir string) {
 	}
 
 	// ... and no longer once it is complete: nothing is left to resume.
+	// (Looked at when finish loads the kernel, the target still mounted.)
 	markGone := false
-	prev := e.atComplete
-	e.atComplete = func() {
+	prevKexec := e.atKexec
+	e.atKexec = func() {
 		markGone = !exists(filepath.Join(e.root, resumeMark))
-		if prev != nil {
-			prev()
+		if prevKexec != nil {
+			prevKexec()
 		}
 	}
 	if err := e.install(cfg, opts); err != nil {

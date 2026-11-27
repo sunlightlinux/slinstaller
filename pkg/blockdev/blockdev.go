@@ -327,7 +327,15 @@ func Shared(devs []Device, disk string, wiped []string, vgs map[string][]string)
 	seen := map[string]bool{}
 	var walk func(dev Device)
 	walk = func(dev Device) {
-		if isHolder(dev.Type) && !seen[dev.Path] {
+		// A multipath map's other members are other paths to this same
+		// disk, not other disks: nothing on them is harmed that is not on
+		// this one. (Counted, one LUN was refused as shared with itself.)
+		if dev.Type == "mpath" {
+			for _, dk := range disksHolding(devs, dev.Path) {
+				inWiped[dk] = true
+			}
+		}
+		if isHolder(dev.Type) && dev.Type != "mpath" && !seen[dev.Path] {
 			seen[dev.Path] = true
 			if other := elsewhere(dev.Path); len(other) > 0 {
 				out = append(out, fmt.Sprintf("%s (%s) also uses %s", dev.Path, dev.Type, strings.Join(other, ", ")))
