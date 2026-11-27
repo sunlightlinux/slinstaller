@@ -673,7 +673,7 @@ func (in *installer) baseInstall() error {
 // fit anywhere but the target. tar cannot tell a stream's compression for
 // itself, so it is told from the name. The URL and the root reach the shell
 // as arguments, never as part of its command line.
-func ImageCommand(image, root string) []string {
+func ImageCommand(image, root string, allowInsecureHTTP bool) []string {
 	ext := strings.ToLower(filepath.Ext(image))
 	if config.IsRemote(image) {
 		flag := ""
@@ -687,7 +687,7 @@ func ImageCommand(image, root string) []string {
 		case ".bz2":
 			flag = "-j "
 		}
-		return []string{"sh", "-c", `curl -fsSL "$1" | tar -xpf - ` + flag + `-C "$2" --numeric-owner`, "sh", image, root}
+		return []string{"sh", "-c", config.CurlFetch(image, allowInsecureHTTP) + ` | tar -xpf - ` + flag + `-C "$2" --numeric-owner`, "sh", image, root}
 	}
 	switch ext {
 	case ".squashfs", ".sqfs", ".sfs":
@@ -702,7 +702,7 @@ func ImageTools(image string) []string {
 	if config.IsRemote(image) {
 		return []string{"sh", "curl", "tar"}
 	}
-	return []string{ImageCommand(image, "/")[0]}
+	return []string{ImageCommand(image, "/", false)[0]}
 }
 
 // unpackImage installs the base system from the config's image. What was
@@ -729,7 +729,7 @@ func (in *installer) unpackImage() error {
 		return err
 	}
 	in.resolvCopy = ""
-	if err := storage.RunCommands([][]string{ImageCommand(image, in.opts.Root)}, in.opts.Runner); err != nil {
+	if err := storage.RunCommands([][]string{ImageCommand(image, in.opts.Root, in.cfg.AllowInsecureHTTP)}, in.opts.Runner); err != nil {
 		return err
 	}
 	if bound {

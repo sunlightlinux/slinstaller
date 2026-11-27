@@ -17,7 +17,7 @@ import (
 // image is written through the decompressor its name asks for, and the
 // kernel re-reads the new partition table. The image and the disk are
 // passed to the shell as arguments, never spliced into its command line.
-func diskImageCommands(devs []blockdev.Device, image, disk string) [][]string {
+func diskImageCommands(devs []blockdev.Device, image, disk string, allowInsecureHTTP bool) [][]string {
 	var cmds [][]string
 	if d := blockdev.FindByPath(devs, disk); d != nil {
 		cmds = append(cmds, blockdev.Teardown(*d)...)
@@ -36,9 +36,9 @@ func diskImageCommands(devs []blockdev.Device, image, disk string) [][]string {
 	var reader string
 	switch {
 	case config.IsRemote(image) && unpack != "":
-		reader = `curl -fsSL "$1" | ` + unpack
+		reader = config.CurlFetch(image, allowInsecureHTTP) + ` | ` + unpack
 	case config.IsRemote(image):
-		reader = `curl -fsSL "$1"`
+		reader = config.CurlFetch(image, allowInsecureHTTP)
 	case unpack != "":
 		reader = unpack + ` "$1"`
 	default:
@@ -74,7 +74,7 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply bool, stdin *buf
 	disk := "/dev/" + target.Name
 
 	devs, listErr := blockdev.List()
-	cmds := diskImageCommands(devs, image, disk)
+	cmds := diskImageCommands(devs, image, disk, cfg.AllowInsecureHTTP)
 	fmt.Print(storage.FormatCommands(cmds))
 	if !apply {
 		fmt.Fprintf(os.Stderr, "\nDry run. Re-run with --apply to write %s over %s - this destroys its contents.\n", image, disk)

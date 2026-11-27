@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -53,7 +54,7 @@ func (s *eventSink) summary() string {
 
 func TestReporter(t *testing.T) {
 	sink := newEventSink(t)
-	r := newReporter(sink.URL, "box")
+	r := newReporter(sink.URL, "box", true)
 	r.stage(0, 3, "pre-install")
 	r.stage(1, 3, "partition")
 	r.stage(3, 3, "complete") // the end is reported by finish, with the result
@@ -71,7 +72,7 @@ func TestReporter(t *testing.T) {
 	}
 
 	// No URL: nothing is sent and nothing breaks.
-	var none *reporter = newReporter("", "box")
+	var none *reporter = newReporter("", "box", false)
 	none.stage(0, 1, "x")
 	none.finish(nil)
 }
@@ -85,10 +86,10 @@ func TestReporterFailuresAreWarnedOnce(t *testing.T) {
 	errFile, _ := os.Create(filepath.Join(dir, "err"))
 	saved := os.Stderr
 	os.Stderr = errFile
-	r := newReporter(sink.URL, "box")
+	r := newReporter(sink.URL, "box", true)
 	r.stage(0, 2, "a")
 	r.stage(1, 2, "b")
-	gone := newReporter("http://127.0.0.1:1/nothing-listens-here", "box")
+	gone := newReporter("http://127.0.0.1:1/nothing-listens-here", "box", true)
 	gone.finish(nil)
 	os.Stderr = saved
 	errFile.Close()
@@ -150,6 +151,46 @@ func TestConfigFromAURL(t *testing.T) {
 	}
 }
 
+// An https config URL that redirects to plain http is refused unless plain
+// http was allowed: the up-front check on the URL is otherwise for nothing.
+func TestConfigRedirectToPlainHTTP(t *testing.T) {
+	data, _ := yaml.Marshal(plainConfig())
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
+	defer plain.Close()
+	secure := httptest.NewTLSServer(http.RedirectHandler(plain.URL+"/config.yaml", http.StatusFound))
+	defer secure.Close()
+	// fetchConfig uses the default transport: have it trust the test server.
+	tr := http.DefaultTransport.(*http.Transport)
+	saved := tr.TLSClientConfig
+	tr.TLSClientConfig = secure.Client().Transport.(*http.Transport).TLSClientConfig
+	t.Cleanup(func() { tr.TLSClientConfig = saved; tr.CloseIdleConnections() })
+
+	t.Setenv("TMPDIR", t.TempDir())
+	if _, err := fetchConfig(secure.URL+"/config.yaml", false); err == nil || !strings.Contains(err.Error(), "redirected to plain http") {
+		t.Errorf("https -> http redirect: %v", err)
+	}
+	path, err := fetchConfig(secure.URL+"/config.yaml", true)
+	if err != nil {
+		t.Fatalf("https -> http redirect with plain http allowed: %v", err)
+	}
+	os.RemoveAll(filepath.Dir(path))
+
+	// The reporter is held to the same rule.
+	var hits atomic.Int32
+	plainSink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+	defer plainSink.Close()
+	toPlain := httptest.NewTLSServer(http.RedirectHandler(plainSink.URL, http.StatusTemporaryRedirect))
+	defer toPlain.Close()
+	saved2 := os.Stderr
+	os.Stderr, _ = os.Open(os.DevNull)
+	newReporter(toPlain.URL, "box", false).finish(nil)
+	os.Stderr.Close()
+	os.Stderr = saved2
+	if hits.Load() != 0 {
+		t.Error("the report followed a redirect to plain http")
+	}
+}
+
 func TestUnmountAndInTargetFlags(t *testing.T) {
 	dir := t.TempDir()
 	_, errOut, err := runWith(t, "", "--unmount", "--root", dir)
@@ -164,6 +205,9 @@ func TestUnmountAndInTargetFlags(t *testing.T) {
 	onlyTools(t, dir)
 	_, _, err = runWith(t, "", "--report-url", "ftp://example.org/x", writeConfig(t, dir, plainConfig()))
 	wantRunErr(t, "bad report URL", err, "is not an http or https URL")
+	// Plain http needs the same allowance as a config or a repository.
+	_, _, err = runWith(t, "", "--report-url", "http://example.org/x", writeConfig(t, dir, plainConfig()))
+	wantRunErr(t, "plain http report URL", err, "report-url: http://example.org/x is plain http")
 }
 
 func TestJSONYAMLFlag(t *testing.T) {

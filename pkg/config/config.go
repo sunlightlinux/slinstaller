@@ -1236,6 +1236,9 @@ func (c *Config) Validate() error {
 	}
 	if c.ReportURL != "" && !strings.HasPrefix(c.ReportURL, "http://") && !strings.HasPrefix(c.ReportURL, "https://") {
 		add("report-url: %s is not an http or https URL", c.ReportURL)
+	} else if strings.HasPrefix(c.ReportURL, "http://") && !c.AllowInsecureHTTP {
+		// A report carries the hostname and the install's errors.
+		add("report-url: %s is plain http; use https, or set allowInsecureHTTP", c.ReportURL)
 	}
 	if err := c.checkRemote("image", c.Image); err != nil {
 		add("%v", err)
@@ -2349,6 +2352,17 @@ func (c *Config) checkRemote(key, image string) error {
 		return fmt.Errorf("%s: %s is plain http; use https, or set allowInsecureHTTP", key, image)
 	}
 	return fmt.Errorf("%s: %s is not an https URL or a file", key, image)
+}
+
+// CurlFetch is the shell command that writes the URL in "$1" to stdout. For
+// an https URL a redirect is held to https unless plain http is allowed, as
+// checkRemote holds the URL itself: curl would otherwise follow an https
+// server on to plain http.
+func CurlFetch(url string, allowInsecureHTTP bool) string {
+	if strings.HasPrefix(url, "https://") && !allowInsecureHTTP {
+		return `curl -fsSL --proto-redir =https "$1"`
+	}
+	return `curl -fsSL "$1"`
 }
 
 // DiskImageTarget is the one disk a disk-image is written to. A config that

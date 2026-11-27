@@ -630,7 +630,7 @@ restart:
 	if quiet != nil {
 		opts.Output = quiet
 	}
-	report := newReporter(cfg.ReportURL, cfg.Hostname)
+	report := newReporter(cfg.ReportURL, cfg.Hostname, cfg.AllowInsecureHTTP)
 	if report != nil {
 		opts.Progress = report.stage
 	}

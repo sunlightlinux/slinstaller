@@ -12,6 +12,13 @@ change.
 
 ### Fixed
 
+- **An https URL can no longer be redirected to plain http.** Only the
+  URL as given was checked: a config, progress report or remote image
+  fetched over https followed a server's redirect to http. Such a
+  redirect is now refused unless plain http is allowed
+  (`--allow-insecure-http` / `allowInsecureHTTP`), and curl is run with
+  `--proto-redir =https` for an https image. A plain http `report-url`
+  now needs the same allowance.
 - **Probe failures say why.** blkid, parted, lsblk, mdadm, cryptsetup and
   openssl run for their output reported only `exit status N` when they
   failed, dropping the tool's own message. That message is now part of

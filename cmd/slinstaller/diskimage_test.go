@@ -18,7 +18,7 @@ func TestDiskImageCommands(t *testing.T) {
 	devs := []blockdev.Device{{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []blockdev.Device{
 		{Name: "sda1", Path: "/dev/sda1", Type: "part"}}}}
 	var got []string
-	for _, c := range diskImageCommands(devs, "/img/My Image.raw.zst", "/dev/sda") {
+	for _, c := range diskImageCommands(devs, "/img/My Image.raw.zst", "/dev/sda", false) {
 		got = append(got, strings.Join(c, "|"))
 	}
 	// What is on the disk is released first; the image and the disk reach
@@ -34,14 +34,14 @@ func TestDiskImageCommands(t *testing.T) {
 		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	for ext, reader := range map[string]string{".raw": `cat "$1" | dd`, ".img": `cat "$1" | dd`, ".xz": `xz -dc "$1" | dd`, ".GZ": `gzip -dc "$1" | dd`} {
-		cmds := diskImageCommands(nil, "/img/disk"+ext, "/dev/sdb")
+		cmds := diskImageCommands(nil, "/img/disk"+ext, "/dev/sdb", false)
 		if !strings.HasPrefix(cmds[0][2], reader) {
 			t.Errorf("%s: %s", ext, cmds[0][2])
 		}
 	}
 	// From a URL it is written as it downloads, the URL an argument too.
-	remote := diskImageCommands(nil, "https://img.example/disk.raw.zst", "/dev/sdb")[0]
-	if remote[2] != `curl -fsSL "$1" | zstd -dc | dd of="$2" bs=4M conv=fsync status=none` || remote[4] != "https://img.example/disk.raw.zst" {
+	remote := diskImageCommands(nil, "https://img.example/disk.raw.zst", "/dev/sdb", false)[0]
+	if remote[2] != `curl -fsSL --proto-redir =https "$1" | zstd -dc | dd of="$2" bs=4M conv=fsync status=none` || remote[4] != "https://img.example/disk.raw.zst" {
 		t.Errorf("remote image: %v", remote)
 	}
 }

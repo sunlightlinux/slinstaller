@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,21 @@ func isURL(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }
 
+// refuseDowngrade is an http.Client CheckRedirect that refuses a redirect to
+// plain http unless plain http is allowed: refusing an http:// URL up front
+// protects nothing if an https server can send the client on to one.
+func refuseDowngrade(allowInsecure bool) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if req.URL.Scheme == "http" && !allowInsecure {
+			return fmt.Errorf("redirected to plain http %s; use https, or pass --allow-insecure-http", req.URL.Redacted())
+		}
+		return nil
+	}
+}
+
 // maxConfigBytes bounds a fetched config: a config is a few kilobytes, and
 // an endless response must not fill the live system's memory.
 const maxConfigBytes = 4 << 20
@@ -35,7 +51,7 @@ func fetchConfig(url string, allowInsecure bool) (string, error) {
 	if strings.HasPrefix(url, "http://") && !allowInsecure {
 		return "", fmt.Errorf("config %s is plain http; use https, or pass --allow-insecure-http", url)
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: refuseDowngrade(allowInsecure)}
 	resp, err := client.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("fetching the config: %w", err)
@@ -73,11 +89,12 @@ type reporter struct {
 	client *http.Client
 }
 
-func newReporter(url, hostname string) *reporter {
+func newReporter(url, hostname string, allowInsecure bool) *reporter {
 	if url == "" {
 		return nil
 	}
-	return &reporter{url: url, host: hostname, client: &http.Client{Timeout: 5 * time.Second}}
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: refuseDowngrade(allowInsecure)}
+	return &reporter{url: url, host: hostname, client: client}
 }
 
 // event is one report. Fields that do not apply are left out.

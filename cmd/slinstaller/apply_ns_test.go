@@ -216,7 +216,7 @@ func applyChild(t *testing.T) {
 	// Reported as it goes, and how it ended, to whoever asked.
 	sink := newEventSink(t)
 	e = newApplyEnv(t)
-	if _, err = e.run(confirmed, plainConfig(), "--through", "partition", "--report-url", sink.URL); err != nil {
+	if _, err = e.run(confirmed, plainConfig(), "--through", "partition", "--allow-insecure-http", "--report-url", sink.URL); err != nil {
 		t.Errorf("reported install: %v", err)
 	}
 	if got := sink.summary(); got != "stage pre-install, stage partition, finish success" {
@@ -224,14 +224,14 @@ func applyChild(t *testing.T) {
 	}
 	sink = newEventSink(t)
 	e = newApplyEnv(t)
-	_, _ = e.run(confirmed, plainConfig(), "--report-url", sink.URL)
+	_, _ = e.run(confirmed, plainConfig(), "--allow-insecure-http", "--report-url", sink.URL)
 	if got := sink.summary(); !strings.HasSuffix(got, "stage mount, finish failure") {
 		t.Errorf("reported events for a failed install = %s", got)
 	}
 	// An operator who declines has started nothing, and nothing is reported.
 	sink = newEventSink(t)
 	e = newApplyEnv(t)
-	_, _ = e.run("no\n", plainConfig(), "--report-url", sink.URL)
+	_, _ = e.run("no\n", plainConfig(), "--allow-insecure-http", "--report-url", sink.URL)
 	if got := sink.summary(); got != "" {
 		t.Errorf("an aborted install was reported: %s", got)
 	}
