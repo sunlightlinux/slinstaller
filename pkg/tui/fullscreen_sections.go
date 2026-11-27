@@ -46,6 +46,7 @@ var bundleOptions = []bundleEntry{
 // checkbox).
 func (m model) updateMiniForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.String() == "esc" {
+		m.restoreSection()
 		m.view = viewHub
 		return m, nil
 	}
@@ -191,11 +192,13 @@ func (m model) updateBundles(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if key.String() == "enter" && m.btnFocus == focusCancel {
+		m.restoreSection()
 		m.view = viewHub
 		return m, nil
 	}
 	switch key.String() {
 	case "esc":
+		m.restoreSection()
 		m.view = viewHub
 	case "up", "k":
 		if m.bundleCursor > 0 {
@@ -473,6 +476,7 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		if m.bundleChecked == nil {
 			m.bundleChecked = make([]bool, len(bundleOptions))
 		}
+		m.saveSection()
 		m.view = viewBundles
 		m.bundleCursor = 0
 		m.btnFocus = focusList
@@ -484,8 +488,10 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		// fill them in.
 		m.cpuIso = system.ComputeCPUIsolation()
 		m.hugeGiB = system.HugepagesGiB()
+		m.saveSection()
 		return m.openList(kernelProfileNames(), m.kernelProfile), nil
 	case secMirror:
+		m.saveSection()
 		m.view = viewMiniForm
 		m.formStep = 0
 		ti := textinput.New()
@@ -523,6 +529,7 @@ func (m model) openSection(s section) (tea.Model, tea.Cmd) {
 		// Two-field form: crashkernel reservation, then panic-reboot seconds.
 		// Suggest the RAM-scaled default when nothing is set yet; clearing the
 		// crashkernel field turns kdump off.
+		m.saveSection()
 		m.view = viewMiniForm
 		m.formStep = 0
 		m.formErr = ""
@@ -708,7 +715,13 @@ func (m model) sectionValue(s section) string {
 		case m.kernelProfile != "" && m.kernelProfile != "Custom":
 			return m.kernelProfile + " profile"
 		case strings.TrimSpace(m.kernelArgs) != "" || strings.TrimSpace(m.kernelArgsRemove) != "":
-			return "Custom: " + strings.TrimSpace(m.kernelArgs+" "+m.kernelArgsRemove)
+			// Removed arguments shown as such: run together with the added
+			// ones they read as more arguments to add.
+			sum := strings.Join(strings.Fields(m.kernelArgs), " ")
+			if rm := strings.Fields(m.kernelArgsRemove); len(rm) > 0 {
+				sum = strings.TrimSpace(sum + " -" + strings.Join(rm, " -"))
+			}
+			return "Custom: " + sum
 		default:
 			return "No kernel command line configuration defined"
 		}

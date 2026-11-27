@@ -358,7 +358,13 @@ type model struct {
 	// Select Additional Bundles checklist: which bundles are ticked, and the
 	// cursor over them.
 	bundleChecked []bool
-	bundleCursor  int
+
+	// undo holds a section's values as they were when it was opened, put
+	// back when it is left with Esc or Cancel: a two-step form kept its
+	// first step, picking Custom wiped the profile's arguments, and ticks
+	// stayed in a checklist whose Cancel left the packages as they were.
+	undo         *sectionValues
+	bundleCursor int
 
 	// btnFocus is where keyboard focus is on a page whose content is a list
 	// above a Cancel / Confirm pair (the selection lists, the bundles):
@@ -646,4 +652,32 @@ func (m model) popupBox() string {
 		}
 	}
 	return popupBoxStyle.Render(strings.Join(inner, "\n"))
+}
+
+// sectionValues are the values the Kernel Command Line, Kdump, Swupd Mirror
+// and Bundles sections change, saved for their Esc and Cancel.
+type sectionValues struct {
+	kernelProfile, kernelArgs, kernelArgsRemove, governor string
+	crashkernel, panicSecs, mirror                        string
+	allowInsecure                                         bool
+	bundles                                               []bool
+}
+
+func (m *model) saveSection() {
+	m.undo = &sectionValues{m.kernelProfile, m.kernelArgs, m.kernelArgsRemove, m.governor,
+		m.crashkernel, m.panicSecs, m.mirror, m.allowInsecure, append([]bool(nil), m.bundleChecked...)}
+}
+
+// restoreSection puts back what saveSection saved, if anything.
+func (m *model) restoreSection() {
+	u := m.undo
+	if u == nil {
+		return
+	}
+	m.kernelProfile, m.kernelArgs, m.kernelArgsRemove, m.governor = u.kernelProfile, u.kernelArgs, u.kernelArgsRemove, u.governor
+	m.crashkernel, m.panicSecs, m.mirror, m.allowInsecure = u.crashkernel, u.panicSecs, u.mirror, u.allowInsecure
+	if m.bundleChecked != nil {
+		copy(m.bundleChecked, u.bundles)
+	}
+	m.undo, m.formErr = nil, ""
 }

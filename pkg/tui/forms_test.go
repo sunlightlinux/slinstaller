@@ -326,3 +326,60 @@ func TestStaticInterfaceIsAppliedToTheLiveSystem(t *testing.T) {
 		t.Error("DHCP ran live commands")
 	}
 }
+
+// Esc or Cancel leaves a section as it was opened: a two-step form does not
+// keep its first step, Custom does not wipe the profile's arguments, and the
+// checklist's ticks are undone.
+func TestSectionEscUndoes(t *testing.T) {
+	base := withSize(newModel(twoTestDisks()))
+	tabOf := func(s section) int {
+		for tab := 0; tab < 2; tab++ {
+			for _, x := range base.visibleSections(tab) {
+				if x == s {
+					return tab
+				}
+			}
+		}
+		t.Fatalf("section %v in no tab", s)
+		return 0
+	}
+
+	m := openSectionInTab(base, tabOf(secKdump), secKdump)
+	m = send(send(m, enter), escKey) // the suggested crashkernel, then Esc on panic=
+	if m.crashkernel != base.crashkernel || m.panicSecs != base.panicSecs {
+		t.Errorf("kdump kept its first step: %q %q", m.crashkernel, m.panicSecs)
+	}
+
+	m = openSectionInTab(base, tabOf(secMirror), secMirror)
+	m = send(send(send(m, runes("https://x/y")), enter), escKey)
+	if m.mirror != base.mirror {
+		t.Errorf("mirror kept: %q", m.mirror)
+	}
+
+	m = openSectionInTab(base, tabOf(secKernelArgs), secKernelArgs)
+	m = kernelTop(m)
+	for i := 0; i < kernelProfileIndex("Custom"); i++ {
+		m = send(m, down)
+	}
+	m = send(send(m, enter), escKey)
+	if m.kernelProfile != base.kernelProfile || m.kernelArgs != base.kernelArgs {
+		t.Errorf("Esc on Custom: profile %q args %q, was %q %q", m.kernelProfile, m.kernelArgs, base.kernelProfile, base.kernelArgs)
+	}
+
+	m = openSectionInTab(base, tabOf(secBundles), secBundles)
+	m = send(send(m, runes(" ")), escKey)
+	for i, c := range m.bundleChecked {
+		if c {
+			t.Errorf("bundle %d still ticked after Esc", i)
+		}
+	}
+}
+
+// The hub tells Custom's removed arguments from its added ones.
+func TestCustomArgsSummary(t *testing.T) {
+	m := newModel(twoTestDisks())
+	m.kernelProfile, m.kernelArgs, m.kernelArgsRemove = "Custom", "quiet", "splash rhgb"
+	if got := m.sectionValue(secKernelArgs); got != "Custom: quiet -splash -rhgb" {
+		t.Errorf("summary %q", got)
+	}
+}
