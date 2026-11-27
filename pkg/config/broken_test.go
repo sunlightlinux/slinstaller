@@ -458,3 +458,22 @@ func TestSizeHelpers(t *testing.T) {
 		t.Errorf("https with plain http allowed: %q", got)
 	}
 }
+
+// A volume group over an encrypted and a plain physical volume would put
+// some of what is on it — possibly the initramfs keyfile — in the clear.
+func TestVolumeGroupIsEncryptedWhole(t *testing.T) {
+	c := &Config{TargetMedia: []*Media{
+		{Name: "vda", Type: "disk", Children: []*Media{
+			{Name: "vda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Size: "512M"},
+			{Name: "vda2", Type: "lvm", VolumeGroup: "vg0", Encrypted: true, Children: []*Media{{Name: "root", FsType: "ext4", Mountpoint: "/"}}}}},
+		{Name: "vdb", Type: "disk", Children: []*Media{
+			{Name: "vdb1", Type: "lvm", VolumeGroup: "vg0"}}},
+	}}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "volume group vg0 has an encrypted physical volume (vda2) and a plain one (vdb1)") {
+		t.Errorf("Validate = %v", err)
+	}
+	c.TargetMedia[1].Children[0].Encrypted = true
+	if err := c.Validate(); err != nil {
+		t.Errorf("all encrypted: %v", err)
+	}
+}

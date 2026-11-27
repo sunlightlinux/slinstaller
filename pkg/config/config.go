@@ -1509,6 +1509,21 @@ func (c *Config) Validate() error {
 	// declared on any of them, so names and "fill" are counted per group.
 	lvNames := map[string]bool{}
 	lvFills := map[string]int{}
+	// pvCrypt records, per volume group, whether its physical volumes are
+	// encrypted: a group with both kinds spreads its volumes — the root,
+	// /boot, the keyfile the initramfs carries — over a plain one too.
+	pvCrypt := map[string]map[bool]string{}
+	notePV := func(vg string, encrypted bool, where string) {
+		if vg == "" {
+			return
+		}
+		if pvCrypt[vg] == nil {
+			pvCrypt[vg] = map[bool]string{}
+		}
+		if _, ok := pvCrypt[vg][encrypted]; !ok {
+			pvCrypt[vg][encrypted] = where
+		}
+	}
 	var checkLVs func(where, vg string, children []*Media)
 
 	// checkMount checks a filesystem's fstab options and btrfs subvolumes.
@@ -1641,6 +1656,7 @@ func (c *Config) Validate() error {
 				}
 				checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "physical-volume size")
 				checkLVs(where, ch.VolumeGroup, ch.Children)
+				notePV(ch.VolumeGroup, ch.Encrypted, where)
 				continue
 			}
 
@@ -1740,6 +1756,7 @@ func (c *Config) Validate() error {
 				add("raid %s: an array that is a physical volume (volumeGroup) carries no filesystem of its own; put it on a logical volume", where)
 			}
 			checkLVs("raid "+where, a.VolumeGroup, a.Children)
+			notePV(a.VolumeGroup, a.Encrypted, "raid "+where)
 		} else if len(a.Children) > 0 {
 			add("raid %s: children are logical volumes and need a volumeGroup", where)
 		} else if a.FsType == "vfat" && (a.Mountpoint == "/boot" || a.Mountpoint == "/boot/efi") {
@@ -1758,6 +1775,12 @@ func (c *Config) Validate() error {
 	}
 	if spareESPs > 0 && espAtBoot {
 		add("spare ESPs (esp: true) need the main ESP at /boot/efi, not /boot: at /boot the kernels would be on one disk only")
+	}
+
+	for vg, kinds := range pvCrypt {
+		if len(kinds) == 2 {
+			add("volume group %s has an encrypted physical volume (%s) and a plain one (%s): what is on it — the root, the key the initramfs carries — can land on the plain one; encrypt all of them or none", vg, kinds[true], kinds[false])
+		}
 	}
 
 	for name := range raidMembers {

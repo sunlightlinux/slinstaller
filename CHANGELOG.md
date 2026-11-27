@@ -55,6 +55,10 @@ change.
 
 ### Fixed
 
+- A volume group over an encrypted and a plain physical volume was
+  accepted: its volumes — the root, and with an encrypted `/boot` the
+  initramfs and the key it carries — could land on the plain one, and the
+  key opens every LUKS volume. Such a group is refused.
 - A logical volume's size was not checked (`10GB` reached `lvcreate`), and
   a bare number — bytes in a config — went to `lvcreate -L`, which reads
   it as MiB. LV sizes are validated, and any size without a unit (a bare
