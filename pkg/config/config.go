@@ -2302,7 +2302,7 @@ func (c *Config) Plan() (*storage.Plan, error) {
 	// unquoted, where "sda;reboot" ran reboot.
 	for _, d := range disks {
 		if d.Name == "" || d.Name == "." || d.Name == ".." || !diskNameRe.MatchString(d.Name) {
-			return nil, fmt.Errorf("config: disk %q: give the device's name (e.g. sda), not a path", d.Name)
+			return nil, fmt.Errorf("config: disk %q is not a kernel device name (e.g. sda, nvme0n1): letters, digits and . _ : + -, not a path", d.Name)
 		}
 	}
 	// A logical volume is /dev/<vg>/<lv>: an empty or ".." name in either
