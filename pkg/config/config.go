@@ -1597,9 +1597,14 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// checkFSMin checks a size against what its filesystem's mkfs takes.
-	checkFSMin := func(where, fsType, sizeStr string) {
+	// checkFSMin checks a size against what its filesystem's mkfs takes:
+	// an encrypted partition's mkfs is given it less the LUKS header.
+	checkFSMin := func(where, fsType, sizeStr string, encrypted bool) {
 		if min, label := storage.MinFilesystemSize(fsType); min > 0 {
+			if encrypted {
+				min += storage.LUKSHeaderSize
+				label += " and the 16 MiB LUKS header"
+			}
 			checkMin(where, sizeStr, min, label, fsType+" size")
 		}
 	}
@@ -1743,7 +1748,7 @@ func (c *Config) Validate() error {
 				}
 			}
 			checkMin(lvWhere, lv.Size, storage.MinPartitionSize, "1 MiB", "size")
-			checkFSMin(lvWhere, lv.FsType, lv.Size)
+			checkFSMin(lvWhere, lv.FsType, lv.Size, false)
 			if lv.Mountpoint == "/" {
 				checkMin(lvWhere, lv.Size, rootMin, rootMinLabel, "root size")
 			}
@@ -1828,7 +1833,7 @@ func (c *Config) Validate() error {
 			checkFS(where, ch.FsType, ch.Mountpoint)
 			checkMount(where, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, ch.Preserve)
 			checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "size")
-			checkFSMin(where, ch.FsType, ch.Size)
+			checkFSMin(where, ch.FsType, ch.Size, ch.Type == "crypt")
 			if ch.Mountpoint == "/" {
 				checkMin(where, ch.Size, rootMin, rootMinLabel, "root size")
 			}
@@ -1891,7 +1896,7 @@ func (c *Config) Validate() error {
 				checkFS(pw, ch.FsType, ch.Mountpoint)
 				checkMount(pw, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, false)
 				checkMin(pw, ch.Size, storage.MinPartitionSize, "1 MiB", "size")
-				checkFSMin(pw, ch.FsType, ch.Size)
+				checkFSMin(pw, ch.FsType, ch.Size, false)
 				if ch.Mountpoint == "/" {
 					checkMin(pw, ch.Size, rootMin, rootMinLabel, "root size")
 				}

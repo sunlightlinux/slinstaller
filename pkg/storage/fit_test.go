@@ -272,3 +272,19 @@ func TestCheckFitFillHoldsTheFilesystemMinimum(t *testing.T) {
 		t.Errorf("300 MiB for a filling xfs: %v", err)
 	}
 }
+
+// An encrypted one that fills the disk gets the LUKS2 header off the top.
+func TestCheckFitFillEncryptedXFS(t *testing.T) {
+	pl := &Plan{Wipe: true, Disk: "/dev/sdb", Parts: []Partition{
+		{Number: 1, Device: "/dev/sdb1", Filesystem: "xfs", Mountpoint: "/data", Size: SizeRest, Encrypted: true, MapName: "cryptdata"},
+	}}
+	size := func(n uint64) func(string) (uint64, bool) {
+		return func(string) (uint64, bool) { return n, true }
+	}
+	if err := pl.CheckFit(size(300<<20+GPTReserveBytes), MinRootSize, "2 GB"); err == nil {
+		t.Error("300 MiB for a filling encrypted xfs passed")
+	}
+	if err := pl.CheckFit(size(316<<20+GPTReserveBytes), MinRootSize, "2 GB"); err != nil {
+		t.Errorf("316 MiB for a filling encrypted xfs: %v", err)
+	}
+}

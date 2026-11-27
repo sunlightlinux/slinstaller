@@ -79,3 +79,21 @@ func TestXFSBelowItsMinimumIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// An encrypted xfs partition is made on the LUKS mapper, the partition
+// less the LUKS2 header's 16 MiB: at 300M, mkfs.xfs was given 284 MiB and
+// refused it, after the wipe.
+func TestEncryptedXFSHoldsTheHeaderToo(t *testing.T) {
+	for _, tc := range []struct {
+		size string
+		ok   bool
+	}{{"300M", false}, {"315M", false}, {"316M", true}, {"0", true}} {
+		c := btrfsConfig()
+		c.TargetMedia[0].Children[2].Size = "20G"
+		c.TargetMedia[0].Children = append(c.TargetMedia[0].Children,
+			&Media{Name: "sda4", Type: "crypt", FsType: "xfs", Mountpoint: "/data", Size: tc.size})
+		if err := c.Validate(); tc.ok != (err == nil) {
+			t.Errorf("encrypted xfs partition of %s: %v", tc.size, err)
+		}
+	}
+}

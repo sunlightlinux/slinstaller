@@ -263,7 +263,11 @@ func (pl *Plan) FillMinByDisk(rootMin uint64) map[string]uint64 {
 			out[disk] = MinESPSize
 		default:
 			// Or what its mkfs takes, where that is more.
+			// An encrypted one's mkfs gets the LUKS header's less.
 			fsMin, _ := MinFilesystemSize(p.Filesystem)
+			if fsMin > 0 && p.Encrypted {
+				fsMin += LUKSHeaderSize
+			}
 			out[disk] = max(MinPartitionSize, fsMin)
 		}
 	}
@@ -361,7 +365,7 @@ func (pl *Plan) checkVGFit(sizeOf func(disk string) (uint64, bool), rootMin uint
 			}
 			over := uint64(4 << 20) // LVM's label and metadata
 			if p.Encrypted {
-				over += 16 << 20 // the LUKS2 header
+				over += LUKSHeaderSize
 			}
 			// A PV too small for LVM's own space holds nothing, but its
 			// group is still one this check judges: with only such PVs,

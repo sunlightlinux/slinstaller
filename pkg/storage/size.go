@@ -65,6 +65,11 @@ const (
 	MinRootSize = uint64(2) * 1000 * 1000 * 1000
 )
 
+// LUKSHeaderSize is what a LUKS2 container keeps for itself at the start
+// of its partition (luksFormat's default data offset): the filesystem in it
+// is made on what is left.
+const LUKSHeaderSize = uint64(16) << 20
+
 // MinFilesystemSize is the smallest device the filesystem's mkfs makes it
 // on, and how to say it; 0 where the partition minimum is the only floor.
 // mkfs.xfs has refused anything under 300 MiB since xfsprogs 5.19.
