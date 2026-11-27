@@ -1119,9 +1119,6 @@ var hostnameRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
 // loginRe is what useradd accepts for a login name.
 var loginRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 
-// envNameRe is a shell variable name, what a hook refers to an env entry by.
-var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
 // Limits on accounts, clr-installer's: a login of at most 31 characters,
 // and a password of 8 to 255.
 const (
@@ -2140,8 +2137,14 @@ func (c *Config) checkArgs() []string {
 	}
 	sort.Strings(envNames)
 	for _, k := range envNames {
-		if !envNameRe.MatchString(k) {
-			add("env: %q is not a variable name (letters, digits and _, not starting with a digit)", k)
+		// clr-installer takes any name (it substitutes the text $name and
+		// ${name}); refused are those that break the substitution or
+		// env(1): empty (every "$" replaced), with "=" (split elsewhere),
+		// beginning with "-" (an option to env), or holding a space or a
+		// control character.
+		if k == "" || strings.Contains(k, "=") || strings.HasPrefix(k, "-") ||
+			strings.IndexFunc(k, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+			add("env: %q is not a name a hook can use (empty, or with =, a leading -, a space or a control character)", k)
 		}
 	}
 	return probs

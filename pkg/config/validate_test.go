@@ -258,11 +258,12 @@ func TestClrImageKeysAreQuiet(t *testing.T) {
 // an option to env.
 func TestEnvNamesValidation(t *testing.T) {
 	c := btrfsConfig()
-	c.Environment = map[string]string{"MIRROR": "x", "_a1": "y"}
+	// clr-installer's names are any text: these are fine.
+	c.Environment = map[string]string{"MIRROR": "x", "_a1": "y", "build-dir": "z", "my.var": "w", "1A": "v"}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	for _, bad := range []string{"", "A=B", "-i", "1A", "A B", "A-B"} {
+	for _, bad := range []string{"", "A=B", "-i", "A B", "A\tB", "A\nB"} {
 		c.Environment = map[string]string{bad: "v"}
 		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "env:") {
 			t.Errorf("env name %q: %v", bad, err)
