@@ -34,7 +34,11 @@ func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	disk := disks[promptIndex(in, w, "Install to which disk", len(disks))-1]
+	n, err := promptIndex(in, w, "Install to which disk", len(disks))
+	if err != nil {
+		return nil, "", err
+	}
+	disk := disks[n-1]
 	fmt.Fprintf(w, "\nSelected %s (%s %s) - it will be ERASED.\n\n", disk.Path, gib(disk.Size), disk.Model)
 
 	fs := promptChoice(in, w, "Root filesystem", rootFilesystems, "ext4")
@@ -337,15 +341,19 @@ func promptYesNo(in *bufio.Reader, w io.Writer, label string, def bool) bool {
 }
 
 // promptIndex asks for a number in 1..max, repeating until it gets one.
-func promptIndex(in *bufio.Reader, w io.Writer, label string, max int) int {
+func promptIndex(in *bufio.Reader, w io.Writer, label string, max int) (int, error) {
 	for {
 		fmt.Fprintf(w, "%s (1-%d): ", label, max)
 		line, err := in.ReadString('\n')
 		if n, perr := strconv.Atoi(strings.TrimSpace(line)); perr == nil && n >= 1 && n <= max {
-			return n
+			return n, nil
 		}
-		if err == io.EOF {
-			return 1 // non-interactive fallback: the first disk
+		// Any read error ends it — not only EOF: a serial hangup (EIO)
+		// re-asked millions of times a second. And an ended input picks no
+		// disk: it used to pick the first, which is then erased.
+		if err != nil {
+			return 0, ErrNoInput
 		}
+		fmt.Fprintf(w, "  %q is not a number from 1 to %d\n", strings.TrimSpace(line), max)
 	}
 }

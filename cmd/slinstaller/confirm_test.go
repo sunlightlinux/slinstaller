@@ -23,6 +23,17 @@ func TestConfirmRequiresTheDiskPathRetyped(t *testing.T) {
 	if !answer("  /dev/sda  \n") {
 		t.Error("surrounding whitespace should not matter")
 	}
+	// A mistyped answer is asked again, three tries in all; an empty line
+	// stops at once.
+	if !answer("sda\n/dev/sdb\n/dev/sda\n") {
+		t.Error("the third try was not taken")
+	}
+	if answer("sda\nsda\nsda\n/dev/sda\n") {
+		t.Error("a fourth try was taken")
+	}
+	if answer("sda\n\n/dev/sda\n") {
+		t.Error("an empty line did not abort")
+	}
 	for _, no := range []string{
 		"y\n", "yes\n", "\n", // a yes/no reflex is not a confirmation
 		"/dev/sdb\n",  // another disk

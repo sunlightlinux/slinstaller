@@ -1568,11 +1568,20 @@ func confirm(in *bufio.Reader, plan *storage.Plan) bool {
 		}
 		fmt.Fprintf(os.Stderr, "Type the first disk path (%s) to confirm: ", disks[0])
 	}
-	line, err := in.ReadString('\n')
-	if err != nil {
-		return false
+	// A mismatch says what was wanted and asks again, three tries in all:
+	// "sda" for "/dev/sda" ended the run, throwing away every answer of the
+	// text flow, passwords included. An ended input still aborts.
+	for try := 1; ; try++ {
+		line, err := in.ReadString('\n')
+		got := strings.TrimSpace(line)
+		if got == disks[0] && err == nil { // cut off before Enter is not typed
+			return true
+		}
+		if err != nil || got == "" || try == 3 {
+			return false
+		}
+		fmt.Fprintf(os.Stderr, "%q is not %s - type it exactly (an empty line aborts): ", got, disks[0])
 	}
-	return strings.TrimSpace(line) == disks[0]
 }
 
 // orDash renders an empty mountpoint as a dash.

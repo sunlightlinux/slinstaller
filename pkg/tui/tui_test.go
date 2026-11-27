@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
 )
@@ -236,15 +237,22 @@ func TestPromptYesNoOnlyYesMeansYes(t *testing.T) {
 
 func TestPromptIndex(t *testing.T) {
 	var out bytes.Buffer
-	// Out-of-range and non-numeric answers are asked again.
-	if got := promptIndex(answers("0", "9", "two", "2"), &out, "Install to which disk", 3); got != 2 {
-		t.Errorf("index = %d, want 2", got)
+	// Out-of-range and non-numeric answers are asked again, saying why.
+	if got, err := promptIndex(answers("0", "9", "two", "2"), &out, "Install to which disk", 3); got != 2 || err != nil {
+		t.Errorf("index = %d %v, want 2", got, err)
 	}
 	if n := strings.Count(out.String(), "Install to which disk"); n != 4 {
 		t.Errorf("asked %d times, want 4", n)
 	}
-	// It ends rather than spinning when the input does.
-	if got := promptIndex(answers("9"), &out, "Install to which disk", 3); got != 1 {
-		t.Errorf("index on ended input = %d", got)
+	if !strings.Contains(out.String(), `"two" is not a number from 1 to 3`) {
+		t.Errorf("no reason given:\n%s", out.String())
+	}
+	// It ends rather than spinning when the input does, and picks no disk.
+	if got, err := promptIndex(answers("9"), &out, "Install to which disk", 3); err != ErrNoInput || got != 0 {
+		t.Errorf("ended input: %d %v", got, err)
+	}
+	// Any read error ends it, not only EOF.
+	if _, err := promptIndex(bufio.NewReader(iotest.ErrReader(errors.New("EIO"))), &out, "Install to which disk", 3); err != ErrNoInput {
+		t.Errorf("read error: %v", err)
 	}
 }
