@@ -330,3 +330,28 @@ func TestPackageNamesValidation(t *testing.T) {
 		}
 	}
 }
+
+// skipValidationAll turns the layout checks off, not the ones on what
+// becomes a command's argument: a package "-r" made xbps-install install
+// into the live system's root, an env name "-i" was an option to env(1).
+func TestSkipValidationAllKeepsArgumentChecks(t *testing.T) {
+	for name, set := range map[string]func(*Config){
+		"packages":      func(c *Config) { c.Packages = []string{"vim", "-r", "/"} },
+		"kernel":        func(c *Config) { c.Kernel = "--repository=http://x" },
+		"kernel-remove": func(c *Config) { c.KernelRemove = []string{"-f"} },
+		"env":           func(c *Config) { c.Environment = map[string]string{"-i": "v"} },
+	} {
+		c := btrfsConfig()
+		c.Kernel = "linux6.12"
+		c.SkipValidationAll = true
+		set(c)
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "is not a") {
+			t.Errorf("%s with skipValidationAll: %v", name, err)
+		}
+	}
+	c := btrfsConfig()
+	c.SkipValidationAll = true
+	if err := c.Validate(); err != nil {
+		t.Errorf("a plain config with skipValidationAll: %v", err)
+	}
+}

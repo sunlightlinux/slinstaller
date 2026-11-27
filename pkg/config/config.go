@@ -1389,18 +1389,7 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
-	// The env is substituted into the hooks as $name and set by env(1) as
-	// name=value: an empty name replaced every "$" in the hooks.
-	var envNames []string
-	for k := range c.Environment {
-		envNames = append(envNames, k)
-	}
-	sort.Strings(envNames)
-	for _, k := range envNames {
-		if !envNameRe.MatchString(k) {
-			add("env: %q is not a variable name (letters, digits and _, not starting with a digit)", k)
-		}
-	}
+	probs = append(probs, c.checkArgs()...)
 	if c.MessageURL != "" && !strings.HasPrefix(c.MessageURL, "http://") && !strings.HasPrefix(c.MessageURL, "https://") {
 		add("message-url: %s is not an http or https URL", c.MessageURL)
 	}
@@ -1452,22 +1441,8 @@ func (c *Config) Validate() error {
 	}
 
 	for _, k := range c.KernelRemove {
-		if k == "" || strings.ContainsAny(k, " \t/") || strings.HasPrefix(k, "-") {
-			add("kernel-remove: %q is not a package name", k)
-		}
 		if k != "" && k == c.KernelPackage() {
 			add("kernel-remove: %s is the kernel the config installs", k)
-		}
-	}
-	// What xbps-install is handed as a package: one beginning with "-" is
-	// an option to it (packages: [-r, /] installed into the live root).
-	// (An empty entry is dropped where the packages are gathered.)
-	pkgs := map[string][]string{"packages": c.Packages, "kernel": {c.KernelPackage()}, "kernel-fallback": {c.KernelFallback}}
-	for _, key := range []string{"packages", "kernel", "kernel-fallback"} {
-		for _, p := range pkgs[key] {
-			if p = strings.TrimSpace(p); p != "" && (strings.ContainsAny(p, " \t/") || strings.HasPrefix(p, "-")) {
-				add("%s: %q is not a package name", key, p)
-			}
 		}
 	}
 	if c.KernelFallback != "" && c.KernelPackage() == "" {
@@ -2134,6 +2109,44 @@ func problems(probs []string) error {
 	}
 }
 
+// checkArgs is the part of Validate, kept under skipValidationAll, on the
+// config values that become arguments of a command: a package xbps-install
+// is handed (one beginning with "-" is an option to it: packages: [-r, /]
+// installed into the live system's root), and the env's names, substituted
+// into the hooks as $name and passed to env(1) as name=value (an empty name
+// replaced every "$" in the hooks; one beginning with "-" is an option to
+// env).
+func (c *Config) checkArgs() []string {
+	var probs []string
+	add := func(format string, a ...any) { probs = append(probs, fmt.Sprintf(format, a...)) }
+	notPackage := func(p string) bool { return strings.ContainsAny(p, " \t/") || strings.HasPrefix(p, "-") }
+	// (An empty entry is dropped where the packages are gathered.)
+	pkgs := map[string][]string{"packages": c.Packages, "kernel": {c.KernelPackage()}, "kernel-fallback": {c.KernelFallback}}
+	for _, key := range []string{"packages", "kernel", "kernel-fallback"} {
+		for _, p := range pkgs[key] {
+			if p = strings.TrimSpace(p); p != "" && notPackage(p) {
+				add("%s: %q is not a package name", key, p)
+			}
+		}
+	}
+	for _, k := range c.KernelRemove {
+		if k == "" || notPackage(k) {
+			add("kernel-remove: %q is not a package name", k)
+		}
+	}
+	var envNames []string
+	for k := range c.Environment {
+		envNames = append(envNames, k)
+	}
+	sort.Strings(envNames)
+	for _, k := range envNames {
+		if !envNameRe.MatchString(k) {
+			add("env: %q is not a variable name (letters, digits and _, not starting with a digit)", k)
+		}
+	}
+	return probs
+}
+
 // checkWritten is the part of Validate that skipValidationAll does not
 // turn off: the values written into files the installed system runs or
 // reads as configuration at every boot. An interface name or bond mode
@@ -2143,6 +2156,7 @@ func problems(probs []string) error {
 // root); one in the hostname a new entry in /etc/hosts.
 func (c *Config) checkWritten() []string {
 	var probs []string
+	probs = append(probs, c.checkArgs()...)
 	add := func(format string, a ...any) { probs = append(probs, fmt.Sprintf(format, a...)) }
 	control := func(v string) bool {
 		return strings.IndexFunc(v, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
