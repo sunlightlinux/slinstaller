@@ -296,6 +296,67 @@ func (pl *Plan) CheckFit(sizeOf func(disk string) (uint64, bool), rootMin uint64
 				humanBytes(size-need), disk, what)
 		}
 	}
+	return pl.checkVGFit(sizeOf)
+}
+
+// checkVGFit checks that each volume group's fixed-size logical volumes fit
+// its physical volumes: CheckFit counted only partitions, so a 500G LV on a
+// PV filling a 64G disk passed, and lvcreate failed after the wipe. A PV
+// that fills its disk is taken at what the disk leaves it, less LVM's and
+// (encrypted) LUKS's own space. A group on an array, or on a disk sizeOf
+// does not know, is not checked.
+func (pl *Plan) checkVGFit(sizeOf func(disk string) (uint64, bool)) error {
+	fixed := pl.FixedBytesByDisk()
+	capacity, lvs := map[string]uint64{}, map[string]uint64{}
+	unknown := map[string]bool{}
+	for _, p := range pl.Parts {
+		switch {
+		case p.IsPV:
+			if p.Raid {
+				unknown[p.VGName] = true
+				continue
+			}
+			disk := p.Disk
+			if disk == "" {
+				disk = pl.Disk
+			}
+			var n uint64
+			if p.Size == SizeRest || p.Size == "" {
+				size, ok := sizeOf(disk)
+				if !ok || size < fixed[disk]+GPTReserveBytes {
+					unknown[p.VGName] = true
+					continue
+				}
+				n = size - fixed[disk] - GPTReserveBytes
+			} else if v, err := ParseSize(p.Size); err == nil {
+				n = v
+			} else {
+				unknown[p.VGName] = true
+				continue
+			}
+			over := uint64(4 << 20) // LVM's label and metadata
+			if p.Encrypted {
+				over += 16 << 20 // the LUKS2 header
+			}
+			if n > over {
+				capacity[p.VGName] += n - over
+			}
+		case p.LV && p.Size != SizeRest && p.Size != "":
+			if v, err := ParseSize(p.Size); err == nil {
+				if lvs[p.VGName] > math.MaxUint64-v {
+					lvs[p.VGName] = math.MaxUint64
+				} else {
+					lvs[p.VGName] += v
+				}
+			}
+		}
+	}
+	for vg, need := range lvs {
+		if have, ok := capacity[vg]; ok && !unknown[vg] && need > have {
+			return fmt.Errorf("the logical volumes of %s need %s but its physical volumes hold about %s - reduce the volume sizes, or pass --skip-validation-size",
+				vg, humanBytes(need), humanBytes(have))
+		}
+	}
 	return nil
 }
 

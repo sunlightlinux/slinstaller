@@ -588,3 +588,37 @@ func TestSwapFileCountsAgainstRoot(t *testing.T) {
 		t.Errorf("4G swap file on 60 GiB: %v", err)
 	}
 }
+
+// A volume group's fixed-size volumes have to fit its physical volumes.
+func TestLVsFitTheirVG(t *testing.T) {
+	mk := func(pvSize, lvSize string, encrypted bool) *Config {
+		return &Config{TargetMedia: []*Media{{Name: "sda", Type: "disk", Children: []*Media{
+			{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+			{Name: "sda2", Type: "lvm", VolumeGroup: "vg0", Size: pvSize, Encrypted: encrypted, Children: []*Media{
+				{Name: "root", FsType: "ext4", Mountpoint: "/", Size: lvSize},
+				{Name: "home", FsType: "ext4", Mountpoint: "/home"},
+			}},
+		}}}}
+	}
+	disk := func(string) (uint64, bool) { return 64 << 30, true }
+	for _, c := range []struct {
+		pv, lv string
+		enc    bool
+		ok     bool
+	}{
+		{"", "500G", false, false}, // the PV fills a 64G disk
+		{"20G", "30G", false, false},
+		{"", "40G", true, true},
+		{"20G", "20G", true, false}, // the LUKS header and LVM metadata take their share
+		{"20G", "19G", true, true},
+	} {
+		pl, err := mk(c.pv, c.lv, c.enc).Plan()
+		if err != nil {
+			t.Fatalf("%+v: %v", c, err)
+		}
+		err = pl.CheckFit(disk, 2<<30, "2 GB")
+		if c.ok != (err == nil) || err != nil && !strings.Contains(err.Error(), "logical volumes of vg0") {
+			t.Errorf("%+v: %v", c, err)
+		}
+	}
+}

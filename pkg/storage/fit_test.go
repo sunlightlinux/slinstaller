@@ -91,3 +91,37 @@ func TestExistingESPWantsTheFlag(t *testing.T) {
 		t.Errorf("ExistingESP = %q %v %v, want /dev/sda2", dev, ok, err)
 	}
 }
+
+func TestCheckVGFit(t *testing.T) {
+	size := func(n uint64) func(string) (uint64, bool) { return func(string) (uint64, bool) { return n, true } }
+	pl := &Plan{Disk: "/dev/sda", Parts: []Partition{
+		{Device: "/dev/sda1", Disk: "/dev/sda", Filesystem: "vfat", Mountpoint: "/boot", Size: "512M"},
+		{Device: "/dev/sda2", Disk: "/dev/sda", IsPV: true, VGName: "vg0", Size: SizeRest, Encrypted: true},
+		{LV: true, VGName: "vg0", Mountpoint: "/", Filesystem: "ext4", Size: "500G"},
+		{LV: true, VGName: "vg0", Mountpoint: "/home", Filesystem: "ext4", Size: SizeRest},
+	}}
+	if err := pl.CheckFit(size(64<<30), MinRootSize, "2 GB"); err == nil || !strings.Contains(err.Error(), "logical volumes of vg0 need 500.0G") {
+		t.Errorf("500G on 64G: %v", err)
+	}
+	pl.Parts[2].Size = "40G"
+	if err := pl.CheckFit(size(64<<30), MinRootSize, "2 GB"); err != nil {
+		t.Errorf("40G on 64G: %v", err)
+	}
+	// A disk it does not know, or a PV on an array: not checked.
+	pl.Parts[2].Size = "500G"
+	if err := pl.CheckFit(func(string) (uint64, bool) { return 0, false }, MinRootSize, "2 GB"); err != nil {
+		t.Errorf("unknown disk: %v", err)
+	}
+	pl.Parts[1].Raid = true
+	if err := pl.CheckFit(size(64<<30), MinRootSize, "2 GB"); err != nil {
+		t.Errorf("PV on an array: %v", err)
+	}
+	pl.Parts[1].Raid, pl.Parts[1].Size = false, "20G"
+	if err := pl.CheckFit(size(64<<30), MinRootSize, "2 GB"); err == nil {
+		t.Error("500G on a 20G PV")
+	}
+	pl.Parts[1].Size = "bogus"
+	if err := pl.CheckFit(size(64<<30), MinRootSize, "2 GB"); err != nil {
+		t.Errorf("unparsed PV size: %v", err)
+	}
+}
