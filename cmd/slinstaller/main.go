@@ -544,13 +544,18 @@ restart:
 	}
 	// Extra remote repositories (the Sunlight mirror). Dropped offline, like
 	// the remote repo above — they too would reach the network.
-	var extraRepos []string
-	if !cfg.Offline {
-		for _, r := range strings.Split(extraRepo, ",") {
-			if r = strings.TrimSpace(r); r != "" {
-				extraRepos = append(extraRepos, r)
-			}
+	// targetRepos are the mirrors the installed system updates from, kept
+	// whatever this install itself fetches from: an offline or image install
+	// left them out of the target's xbps.d, and its first update then saw
+	// Void alone.
+	var extraRepos, targetRepos []string
+	for _, r := range strings.Split(extraRepo, ",") {
+		if r = strings.TrimSpace(r); r != "" {
+			targetRepos = append(targetRepos, r)
 		}
+	}
+	if !cfg.Offline {
+		extraRepos = append(extraRepos, targetRepos...)
 	}
 	var packages []string
 	seen := map[string]bool{}
@@ -682,14 +687,15 @@ restart:
 	}
 
 	opts := controller.Options{
-		Root:       root,
-		Through:    through,
-		LocalRepos: localRepos,
-		ExtraRepos: extraRepos,
-		Repo:       repo,
-		KeysDir:    keys,
-		Arch:       arch,
-		Packages:   packages,
+		Root:        root,
+		Through:     through,
+		LocalRepos:  localRepos,
+		ExtraRepos:  extraRepos,
+		TargetRepos: targetRepos,
+		Repo:        repo,
+		KeysDir:     keys,
+		Arch:        arch,
+		Packages:    packages,
 		// Stream progress and command output so the operator sees the
 		// install work rather than a silent pause.
 		Runner:     runner,

@@ -259,3 +259,33 @@ func TestNoWriteOrRemoveThroughTargetLinks(t *testing.T) {
 		t.Error("the live system's host key was removed through the image's link")
 	}
 }
+
+// An offline or image install fetches nothing from the mirror but records it
+// for the installed system's updates; an image also gets the mirror's key.
+func TestTargetReposRecordedWithoutFetching(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.TargetRepos = []string{"https://mirror.example/sunlight"}
+	if err := in.writeTargetRepos(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readTarget(t, in, "etc", "xbps.d", "10-sunlight.conf"); !strings.Contains(got, "repository=https://mirror.example/sunlight\n") {
+		t.Errorf("10-sunlight.conf:\n%s", got)
+	}
+
+	r = recorder{}
+	in = stagedInstaller(t, twoPartConfig(), &r)
+	in.opts.KeysDir = t.TempDir()
+	mkTarget(t, in, "etc")
+	if err := in.forgetImageIdentity(); err != nil {
+		t.Fatal(err)
+	}
+	in.cfg.Image = "/img/base.tar"
+	os.WriteFile(filepath.Join(mkTarget(t, in, "usr", "bin"), "grub-install"), nil, 0o755)
+	if err := in.unpackImage(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.flat(), "cp -a "+in.opts.KeysDir+"/. "+filepath.Join(in.opts.Root, "var", "db", "xbps", "keys")+"/") {
+		t.Errorf("keys not seeded for an image:\n%s", r.flat())
+	}
+}

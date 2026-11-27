@@ -67,6 +67,11 @@ type Options struct {
 	// Repo — the Sunlight mirror layered over Void's.
 	ExtraRepos []string
 
+	// TargetRepos are the mirrors recorded in the installed system's
+	// /etc/xbps.d for its own updates; empty means ExtraRepos. An offline
+	// or image install fetches nothing from them but records them still.
+	TargetRepos []string
+
 	// Passphrase unlocks the LUKS partitions. Required when the config
 	// has any encrypted partition; ignored otherwise.
 	Passphrase string
@@ -917,6 +922,15 @@ func (in *installer) unpackImage() error {
 	if err := in.forgetImageIdentity(); err != nil {
 		return err
 	}
+	// The mirror's key, which a package install seeds and an image may not
+	// carry: without it the installed system's first update from the
+	// mirror stopped at an unknown key.
+	if in.opts.KeysDir != "" && exists(in.opts.KeysDir) {
+		keys := filepath.Join(in.opts.Root, "var", "db", "xbps", "keys")
+		if err := storage.RunCommands([][]string{{"mkdir", "-p", keys}, {"cp", "-a", in.opts.KeysDir + "/.", keys + "/"}}, in.opts.Runner); err != nil {
+			return err
+		}
+	}
 	for _, dir := range []string{"usr/bin", "usr/sbin", "bin", "sbin"} {
 		if _, err := os.Stat(filepath.Join(in.opts.Root, dir, "grub-install")); err == nil {
 			return in.writeTargetRepos()
@@ -938,13 +952,17 @@ func (in *installer) writeTargetRepos() error {
 	// xbps-install, which reads only the target's xbps.d. Upgrading before
 	// the mirror was there resolved every package against Void alone — the
 	// very skew (dbus vs dbus-libs) this file exists to prevent.
-	if len(in.opts.ExtraRepos) > 0 {
+	mirrors := in.opts.TargetRepos
+	if len(mirrors) == 0 {
+		mirrors = in.opts.ExtraRepos
+	}
+	if len(mirrors) > 0 {
 		dir := filepath.Join(in.opts.Root, "etc", "xbps.d")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 		content := "# Written by slinstaller: the Sunlight mirror, searched ahead of Void.\n"
-		for _, r := range in.opts.ExtraRepos {
+		for _, r := range mirrors {
 			content += fmt.Sprintf("repository=%s\n", r)
 		}
 		path := filepath.Join(dir, "10-sunlight.conf")
