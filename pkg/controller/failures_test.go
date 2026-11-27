@@ -366,8 +366,8 @@ func TestWhichVolumeGrubMustUnlock(t *testing.T) {
 	// LVM-on-LUKS with /boot inside the group: GRUB has to open the group's
 	// encrypted physical volume, which is also on the root's path.
 	in := stagedInstaller(t, lvmConfig("/boot/efi", true), &r)
-	if got := in.bootCryptDevice(); got != "/dev/sda2" {
-		t.Errorf("bootCryptDevice = %q, want the encrypted physical volume", got)
+	if got := in.bootCryptDevices(); len(got) != 1 || got[0] != "/dev/sda2" {
+		t.Errorf("bootCryptDevices = %q, want the encrypted physical volume", got)
 	}
 	if in.rootVGName() != "vg0" {
 		t.Errorf("rootVGName = %q", in.rootVGName())
@@ -382,15 +382,26 @@ func TestWhichVolumeGrubMustUnlock(t *testing.T) {
 	// The same layout with /boot on its own unencrypted ESP: nothing for
 	// GRUB to unlock.
 	in = stagedInstaller(t, lvmConfig("/boot", true), &r)
-	if got := in.bootCryptDevice(); got != "" {
-		t.Errorf("bootCryptDevice with an unencrypted /boot = %q", got)
+	if got := in.bootCryptDevices(); len(got) != 0 {
+		t.Errorf("bootCryptDevices with an unencrypted /boot = %q", got)
 	}
 	// A layout with neither / nor /boot has no boot volume at all.
 	in = stagedInstaller(t, &config.Config{TargetMedia: []*config.Media{{Name: "sda", Type: "disk", Children: []*config.Media{
 		{Name: "sda1", FsType: "ext4", Mountpoint: "/home"},
 	}}}}, &r)
-	if got := in.bootCryptDevice(); got != "" || in.rootVGName() != "" {
-		t.Errorf("no root: bootCryptDevice = %q, rootVGName = %q", got, in.rootVGName())
+	if got := in.bootCryptDevices(); len(got) != 0 || in.rootVGName() != "" {
+		t.Errorf("no root: bootCryptDevices = %q, rootVGName = %q", got, in.rootVGName())
+	}
+	// A group on two encrypted physical volumes: /boot may lie on either,
+	// so GRUB must be able to open both (argon2 it cannot).
+	cfg := lvmConfig("/boot/efi", true)
+	disk := cfg.TargetMedia[0]
+	pv2 := *disk.Children[1]
+	pv2.Name = "sdb1"
+	cfg.TargetMedia = append(cfg.TargetMedia, &config.Media{Name: "sdb", Type: "disk", Children: []*config.Media{&pv2}})
+	in = stagedInstaller(t, cfg, &r)
+	if got := in.bootCryptDevices(); len(got) != 2 {
+		t.Errorf("two encrypted PVs: %q", got)
 	}
 }
 

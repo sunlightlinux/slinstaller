@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -413,7 +414,7 @@ func (in *installer) partition() error {
 	// The LUKS volume GRUB must open itself (an encrypted /boot) is formatted
 	// with a GRUB-readable key derivation; the rest keep cryptsetup's
 	// stronger argon2id default.
-	grubBoot := in.bootCryptDevice()
+	grubBoot := in.bootCryptDevices()
 	// encrypt sets up LUKS on the partitions (onArrays false) or on the
 	// arrays (true): an array has to exist before it can be encrypted, and
 	// a partition has to be encrypted before it joins anything above it.
@@ -425,7 +426,7 @@ func (in *installer) partition() error {
 			if in.opts.Passphrase == "" {
 				return fmt.Errorf("%s is encrypted but no passphrase was given", p.Device)
 			}
-			if err := luks.Format(p.Device, in.opts.Passphrase, in.output(), p.Device == grubBoot); err != nil {
+			if err := luks.Format(p.Device, in.opts.Passphrase, in.output(), slices.Contains(grubBoot, p.Device)); err != nil {
 				return err
 			}
 			if err := luks.Open(p.Device, p.MapName, in.opts.Passphrase, in.output()); err != nil {
@@ -1523,14 +1524,14 @@ func (in *installer) fillSpareESPs(esp string, noNVRAM bool) error {
 
 // bootOnEncrypted reports whether /boot lives on an encrypted device, so
 // GRUB itself must unlock it to read the kernel.
-func (in *installer) bootOnEncrypted() bool { return in.bootCryptDevice() != "" }
+func (in *installer) bootOnEncrypted() bool { return len(in.bootCryptDevices()) > 0 }
 
-// bootCryptDevice returns the raw partition of the LUKS volume GRUB must
-// open to read /boot, or "" when /boot is not encrypted. /boot is on its
+// bootCryptDevices returns the raw partitions of the LUKS volumes GRUB must
+// open to read /boot, none when /boot is not encrypted. /boot is on its
 // own mount when one exists (e.g. an unencrypted ESP at /boot), otherwise
 // it is part of the root filesystem; for LVM-on-LUKS it is the group's
-// encrypted physical volume.
-func (in *installer) bootCryptDevice() string {
+// encrypted physical volumes.
+func (in *installer) bootCryptDevices() []string {
 	var boot *storage.Partition
 	for i := range in.plan.Parts {
 		if in.plan.Parts[i].Mountpoint == "/boot" {
@@ -1545,19 +1546,24 @@ func (in *installer) bootCryptDevice() string {
 		}
 	}
 	if boot == nil {
-		return ""
+		return nil
 	}
 	if boot.Encrypted {
-		return boot.Device
+		return []string{boot.Device}
 	}
+	// Every encrypted physical volume of the group, not the first: /boot's
+	// extents may lie on any of them, and GRUB 2.12 opens no argon2
+	// keyslot — a second PV left on cryptsetup's default made a system
+	// that installed fine and did not boot.
+	var devs []string
 	if boot.LV {
 		for _, p := range in.plan.Parts {
 			if p.IsPV && p.Encrypted && p.VGName == boot.VGName {
-				return p.Device
+				devs = append(devs, p.Device)
 			}
 		}
 	}
-	return ""
+	return devs
 }
 
 // writeMdadmConf records the assembled arrays in the target's
