@@ -164,8 +164,9 @@ pass "shrink: a size below the data is refused, partition and data untouched"
 # --- 3a. A new partition named for one that exists is refused --------------
 # parted numbers a new partition itself (the lowest free number); a config
 # that names an existing one would have had mkfs format it. Read from the
-# real table, before anything is touched.
-disk="$(new_disk 2048)"; name="$(basename "$disk")"
+# real table, before anything is touched. 4 GiB: a created root is held to
+# its 2 GB minimum, as a normal install's is.
+disk="$(new_disk 4096)"; name="$(basename "$disk")"
 parted -s "$disk" mklabel gpt
 parted -s "$disk" mkpart EFI fat32 1MiB 257MiB
 parted -s "$disk" set 1 esp on
@@ -182,7 +183,7 @@ targetMedia:
   type: disk
   children:
   - { name: ${name}p1, type: part, fstype: vfat, mountpoint: /boot/efi, preserve: true }
-  - { name: ${name}p$n, type: part, fstype: ext4, mountpoint: /, create: true, start: 900M, size: 1000M }
+  - { name: ${name}p$n, type: part, fstype: ext4, mountpoint: /, create: true, start: 900M, size: 2000M }
 YAML
 done
 if echo "$disk" | "$BIN" --apply --through partition --root "$WORK/target" --log "$WORK/install.log" "$WORK/create2.yaml" >"$WORK/create2.out" 2>&1; then
