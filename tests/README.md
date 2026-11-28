@@ -3,15 +3,18 @@
 Integration and acceptance tests that need more than a Go unit test.
 
 The honest test for an installer is an install. Unit tests live beside
-the code they cover under `pkg/` and never touch a disk; the tests here
-exercise the real destructive path the only safe way — a VM. A run boots
-the live medium under QEMU with OVMF (UEFI firmware), points slinstaller
-at a scratch qcow2, and asserts the result boots to a login prompt.
+the code they cover under `pkg/` and `cmd/` and never touch a disk. What
+is here is `loop/`, which runs the partition and mount stages on loop
+devices.
 
-The install path is runnable end to end now; the VM harness that
-exercises it lives in [`demo/vm`](../demo/vm) (`build.sh` + `run.sh`,
-QEMU + OVMF against a scratch disk). Automated acceptance tests built on
-that harness land here.
+There is no automated VM test yet. The test of everything after the
+mount — GRUB, a real `xbps-install`, the first boot — is an install in a
+VM under UEFI firmware followed by booting the installed disk, and that is
+done by hand with [`demo/vm`](../demo/vm) (`build.sh` + `run.sh`, QEMU +
+OVMF against a scratch disk). No 2.x release has been verified that way;
+each CHANGELOG entry says how far its release was. An acceptance test
+built on that harness, booting the result to a login prompt, would land
+here.
 
 ## `loop/` — the storage stages on loop devices
 

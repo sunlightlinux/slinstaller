@@ -55,7 +55,9 @@ the repo.
 
 - `btrfs-progs` — btrfs · `xfsprogs` — xfs · `f2fs-tools` — f2fs
 - `cryptsetup` — LUKS (any `type: crypt`, or an encrypted LVM/`/boot`)
-- `lvm2` — LVM (`pvcreate`/`vgcreate`/`lvcreate`); worth shipping for every layout: without `pvs`, a disk holding an old physical volume is refused (its group might span another disk)
+- `lvm2` — LVM (`pvcreate`/`vgcreate`/`lvcreate`); worth shipping for every
+  layout: without `pvs`, a disk holding an old physical volume is refused
+  (its group might span another disk)
 - `mdadm` — RAID
 - for a Safe install's shrink (`resize`): `sfdisk` and `setsid` from
   `util-linux` (2.21 or later, for `-w`), `e2fsck`/`resize2fs` from
@@ -88,7 +90,9 @@ packages; the ISO carries its own copy too, for offline installs and as a
 first source:
 an xbps repository at **`/usr/share/slinstaller/repo`** holding the
 `slinit`, `slinit-services`, `sunlight-base` and `slpam` packages from
-slpkgs, with its index (`scripts/make-iso.sh` in sunlight-os builds it):
+slpkgs, with its index. Sunlight's own ISO build fills it, but that
+build script is not in a public repository; the commands below are the
+whole of what it has to do:
 
 ```sh
 mkdir -p <rootfs>/usr/share/slinstaller/repo
@@ -118,7 +122,8 @@ they come from the *target* packages, not the live ISO:
 The default target package set (`--packages`) is `sunlight-base,
 grub-x86_64-efi, slpam` (`slpam` is `pam_slinit.so`, which registers
 logins with slinit-logind). Besides the configured kernel and the
-config's own `packages`, slinstaller adds the filesystem/feature tools the layout
+config's own `packages`, slinstaller adds the filesystem/feature tools the
+layout
 needs (`btrfs-progs`, `xfsprogs`, `f2fs-tools`, `cryptsetup`, `lvm2`,
 `mdadm`) to what the target installs, so the installed system can fsck,
 mount, unlock and assemble its own storage at boot — plus `os-prober`
@@ -227,6 +232,18 @@ when the target has slinit and its boot service (`/usr/bin/init` points
 at it too) and the config names no `init=` of its own, and
 writes `/etc/machine-id`: slinit reads it as PID 1 before any service
 runs, and Void creates none.
+
+Two checks decide "the target is a slinit system", and they do not look
+in the same places. The bootloader stage (`init=`) wants
+`/usr/bin/slinit` and a `boot` service in any of `/usr/lib/slinit.d`,
+`/etc/slinit.d`, `/lib/slinit.d` or `/usr/local/lib/slinit.d`. The
+first-boot and network stages look only for `/usr/lib/slinit.d/boot`,
+where `slinit-services` installs it; on that answer hang the RNG seed,
+sshd and the daily update service enabled as slinit services, and bonds
+and VLANs set up at boot by slinit rather than from `/etc/rc.local`. A
+default install passes both. An image whose boot service is only in
+`/etc/slinit.d` gets `init=/usr/bin/slinit` but the runit setup: no seed,
+dhcpcd enabled under `/etc/runit/runsvdir/default`, no sshd.
 
 `--packages base-system,grub-x86_64-efi,glibc-locales` still installs a
 plain runit system, with no local repository and no mirror needed.

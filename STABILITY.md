@@ -20,8 +20,8 @@ that travels:
   clr-installer's config format, and intends to keep reading it: a
   config that installs on clr-installer should describe the same install
   here. Where slinstaller already honours a field, its meaning will not
-  be quietly changed once releases begin — a different meaning gets a
-  different field — so an unattended install does not change behaviour
+  be quietly changed — a different meaning gets a different field — so an
+unattended install does not change behaviour
   under a config that did not change. Fields slinstaller does not yet act
   on (and the Clear Linux specifics it maps or ignores) are documented as
   they are implemented.
@@ -43,11 +43,15 @@ then, assume anything undocumented here can change.
 
 ## Versioning
 
-slinstaller will use [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html)
-once releases begin, applied to the stable surfaces listed above — of
-which, today, clr-installer config compatibility is the only one.
+Release numbers follow [Semantic Versioning
+2.0.0](https://semver.org/spec/v2.0.0.html),
+applied to the stable surfaces listed above — of which, today,
+clr-installer config compatibility is the only one. A release that
+changes what an unchanged config does says so in its CHANGELOG entry
+(2.3.0's "Changes a config may notice" is the model).
 
 ## Supported versions
 
-Which versions receive fixes is covered separately, in
-[SECURITY.md](SECURITY.md).
+[SECURITY.md](SECURITY.md) says how to report a vulnerability. There is
+no list of supported versions yet: every release so far, v1.10.55 to
+v2.3.1, was cut from `main`, and a fix ships in the next one.
