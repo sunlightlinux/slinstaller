@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sunlightlinux/slinstaller/pkg/config"
 	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
@@ -80,5 +81,36 @@ func interactiveRefusedFirst(t *testing.T) {
 	wantRunErr(t, "interactive, another install running", err, "another slinstaller install is running")
 	if asked(errOut) {
 		t.Errorf("interactive, another install running: the questions were asked before the refusal:\n%s", errOut)
+	}
+}
+
+// The wizard's "Back to menu" re-runs everything with a fresh config: a
+// proxy the first pass set stayed in the environment, and the second pass,
+// its proxy cleared on screen, still fetched through it.
+func TestProxyEnvIsPerPass(t *testing.T) {
+	for _, k := range proxyVars {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+	t.Setenv("no_proxy", "localhost") // the operator's own, kept
+	base := saveProxyEnv()
+
+	first := &config.Config{HTTPSProxy: "http://bad:3128"}
+	applyProxyEnv(base, first.ProxyEnv())
+	if os.Getenv("HTTPS_PROXY") != "http://bad:3128" || os.Getenv("http_proxy") != "http://bad:3128" {
+		t.Fatalf("the config's proxy was not applied: %q", os.Environ())
+	}
+	applyProxyEnv(base, (&config.Config{}).ProxyEnv())
+	for _, k := range proxyVars {
+		v, set := os.LookupEnv(k)
+		if k == "no_proxy" {
+			if v != "localhost" {
+				t.Errorf("no_proxy = %q, want the operator's localhost back", v)
+			}
+			continue
+		}
+		if set {
+			t.Errorf("%s=%q left over from the previous pass", k, v)
+		}
 	}
 }

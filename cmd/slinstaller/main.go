@@ -382,6 +382,9 @@ func run(args []string) error {
 	// repoFlag preserves the original --repo so the full-screen "Back to
 	// installer" loop below can re-resolve it from a re-run wizard each time.
 	repoFlag := repo
+	// The proxy settings the installer started with, which each pass of the
+	// restart loop below starts from again.
+	proxyBase := saveProxyEnv()
 	var cfg *config.Config
 	var interactivePass string
 	var fullscreen bool
@@ -524,11 +527,9 @@ restart:
 
 	// The config's proxy is for everything this run fetches, the
 	// reachability check before the install included.
-	for _, kv := range cfg.ProxyEnv() {
-		k, v, _ := strings.Cut(kv, "=")
-		os.Setenv(k, v)
-		os.Setenv(strings.ToUpper(k), v)
-	}
+	// Over the environment the installer started with, each pass: after
+	// "Back to menu" a proxy the previous wizard set is not this one's.
+	applyProxyEnv(proxyBase, cfg.ProxyEnv())
 
 	// A swap sized "auto" is sized for this machine's memory.
 	cfg.ResolveAutoSwap(system.MemTotalBytes())
@@ -1234,6 +1235,39 @@ restart:
 		return powerAfter(action, cfg.PowerStateDelay)
 	}
 	return nil
+}
+
+// proxyVars are the environment variables a config's proxy sets.
+var proxyVars = []string{"http_proxy", "https_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
+
+// saveProxyEnv records proxyVars as they are now; nil marks one unset.
+func saveProxyEnv() map[string]*string {
+	saved := map[string]*string{}
+	for _, k := range proxyVars {
+		if v, ok := os.LookupEnv(k); ok {
+			saved[k] = &v
+		} else {
+			saved[k] = nil
+		}
+	}
+	return saved
+}
+
+// applyProxyEnv puts proxyVars back as saved, then sets a config's
+// ProxyEnv over them, each under its lower- and upper-case name.
+func applyProxyEnv(saved map[string]*string, env []string) {
+	for k, v := range saved {
+		if v == nil {
+			os.Unsetenv(k)
+		} else {
+			os.Setenv(k, *v)
+		}
+	}
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		os.Setenv(k, v)
+		os.Setenv(strings.ToUpper(k), v)
+	}
 }
 
 // powerSleep waits before a power action (a variable so tests need not).
