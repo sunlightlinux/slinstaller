@@ -92,7 +92,10 @@ func SeedRNG(root string) error {
 	if !IsSlinitSystem(root) {
 		return nil
 	}
-	dir := filepath.Join(root, seedDir)
+	dir, err := TargetPath(root, seedDir)
+	if err != nil {
+		return err
+	}
 	for _, name := range []string{"seed.credit", seedName} {
 		if st, err := os.Stat(filepath.Join(dir, name)); err == nil && st.Mode().IsRegular() && st.Size() > 0 {
 			return nil
@@ -459,9 +462,9 @@ func LocaleEnabled(root, lang string) bool {
 // their sudo on — with a password; passwordless is a separate choice.
 // The 0440 mode is what sudo requires of files in sudoers.d.
 func WheelSudo(root string) error {
-	dir := filepath.Join(root, "etc", "sudoers.d")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("system: %w", err)
+	dir, err := targetDir(root, "etc/sudoers.d", 0o755)
+	if err != nil {
+		return err
 	}
 	path := filepath.Join(dir, "wheel")
 	// Read-only once written: taken away first, so the stage can be run
@@ -509,9 +512,9 @@ waits-for: network
 // and, when on, enables it; off, the service is installed but not
 // enabled, so turning it on later is one slinitctl enable.
 func AutoUpdate(root string, on bool) error {
-	dir := filepath.Join(root, "etc", "slinit.d")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("system: %w", err)
+	dir, err := targetDir(root, "etc/slinit.d", 0o755)
+	if err != nil {
+		return err
 	}
 	if err := os.WriteFile(filepath.Join(dir, AutoUpdateServiceName), []byte(autoUpdateService), 0o644); err != nil {
 		return fmt.Errorf("system: write %s: %w", AutoUpdateServiceName, err)
@@ -546,15 +549,20 @@ func NetLinks(root, script string) error {
 	if script == "" {
 		return nil
 	}
-	path := filepath.Join(root, netLinksScript)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("system: %w", err)
+	dir, err := targetDir(root, filepath.Dir(netLinksScript), 0o755)
+	if err != nil {
+		return err
 	}
+	path := filepath.Join(dir, filepath.Base(netLinksScript))
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		return fmt.Errorf("system: write %s: %w", netLinksScript, err)
 	}
 	if !IsSlinitSystem(root) {
-		rc := filepath.Join(root, "etc", "rc.local")
+		etc, err := targetDir(root, "etc", 0o755)
+		if err != nil {
+			return err
+		}
+		rc := filepath.Join(etc, "rc.local")
 		if has(rc, netLinksScript+"\n") {
 			return nil
 		}
@@ -571,7 +579,7 @@ func NetLinks(root, script string) error {
 		}
 		return nil
 	}
-	svc := filepath.Join(root, "etc", "slinit.d", NetLinksServiceName)
+	svc := filepath.Join(dir, NetLinksServiceName)
 	if err := os.WriteFile(svc, []byte(netLinksService), 0o644); err != nil {
 		return fmt.Errorf("system: write %s: %w", NetLinksServiceName, err)
 	}
@@ -597,9 +605,9 @@ func LockRootCommands(root string, today time.Time) [][]string {
 // (a symlink that may not resolve from outside the installed system), the
 // chroot-free way to enable a Void service at install time.
 func EnableService(root, name string) error {
-	dir := filepath.Join(root, "etc", "runit", "runsvdir", "default")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("system: %w", err)
+	dir, err := targetDir(root, "etc/runit/runsvdir/default", 0o755)
+	if err != nil {
+		return err
 	}
 	link := filepath.Join(dir, name)
 	_ = os.Remove(link)
@@ -656,15 +664,15 @@ func IsSlinitSystem(root string) bool {
 // link.
 func EnableSlinitService(root, name string) error {
 	target := filepath.Join("/etc/slinit.d", name)
-	if _, err := os.Stat(filepath.Join(root, target)); err != nil {
+	if _, err := statInTarget(root, target); err != nil {
 		target = filepath.Join(SlinitServicesDir, name)
-		if _, err := os.Stat(filepath.Join(root, target)); err != nil {
+		if _, err := statInTarget(root, target); err != nil {
 			return fmt.Errorf("system: enable slinit service %s: %w", name, err)
 		}
 	}
-	dir := filepath.Join(root, "etc", "slinit.d", "boot.d")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("system: %w", err)
+	dir, err := targetDir(root, "etc/slinit.d/boot.d", 0o755)
+	if err != nil {
+		return err
 	}
 	link := filepath.Join(dir, name)
 	_ = os.Remove(link)
@@ -741,7 +749,11 @@ func (u User) WriteSSHKeys(root string) ([]string, error) {
 	if len(u.SSHKeys) == 0 {
 		return nil, nil
 	}
-	home := filepath.Join(root, "home", u.Login)
+	homes, err := TargetPath(root, "home")
+	if err != nil {
+		return nil, err
+	}
+	home := filepath.Join(homes, u.Login)
 	if fi, err := os.Lstat(home); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("system: %s is a symbolic link; not writing ssh keys through it", home)
 	}

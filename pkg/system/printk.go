@@ -13,8 +13,8 @@ import (
 // level) is made configurable here, the rest keep the common "4 1 7".
 // level is the console log level, 0 (emergency) to 7 (debug).
 func PrintkSysctl(root string, level int) error {
-	dir := filepath.Join(root, "etc", "sysctl.d")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := targetDir(root, "etc/sysctl.d", 0o755)
+	if err != nil {
 		return err
 	}
 	content := fmt.Sprintf("# console log verbosity set by slinstaller\nkernel.printk = %d 4 1 7\n", level)
