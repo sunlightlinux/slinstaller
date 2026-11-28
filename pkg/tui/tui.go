@@ -30,14 +30,24 @@ var rootFilesystems = []string{"ext4", "btrfs", "xfs", "f2fs"}
 // config to install, plus the LUKS passphrase when the root is encrypted
 // (empty otherwise). Prompts go to w; answers are read from in.
 func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
-	return RunText(in, w, false)
+	return RunText(in, w, TextOptions{})
 }
 
-// RunText is Run with --force-destructive: when force is false, a disk
-// whose wipe would break an array, pool or volume group that also uses
-// another disk is refused when it is picked, as the installer refuses it
-// after the questions.
-func RunText(in *bufio.Reader, w io.Writer, force bool) (*config.Config, string, error) {
+// TextOptions are the command-line flags the text flow's checks follow.
+type TextOptions struct {
+	// Force is --force-destructive: without it, a disk whose wipe would
+	// break an array, pool or volume group that also uses another disk is
+	// refused when it is picked, as the installer refuses it after the
+	// questions.
+	Force bool
+	// SkipSize is --skip-validation-size or --skip-validation-all: without
+	// it, a swap that leaves the root less than its minimum is asked
+	// again, as the installer's fit check refuses it after the questions.
+	SkipSize bool
+}
+
+// RunText is Run with the command line's options.
+func RunText(in *bufio.Reader, w io.Writer, opts TextOptions) (*config.Config, string, error) {
 	disks, err := listDisks(w)
 	if err != nil {
 		return nil, "", err
@@ -49,7 +59,7 @@ func RunText(in *bufio.Reader, w io.Writer, force bool) (*config.Config, string,
 			return nil, "", err
 		}
 		disk = disks[n-1]
-		if force {
+		if opts.Force {
 			break
 		}
 		devs, vgs := machineVolumes()
@@ -78,11 +88,31 @@ func RunText(in *bufio.Reader, w io.Writer, force bool) (*config.Config, string,
 	// Size and hostname are checked here, asked again until right: checked
 	// only once everything had been asked, a typo ended the flow. (An ended
 	// input gives the default, which is valid, so these loops end.)
+	// And that the swap leaves the root its minimum of the disk, as the
+	// installer's fit check wants: refused there, after the password.
+	validSwap := func(size string) error {
+		if err := config.ValidSwapSize(size); err != nil || opts.SkipSize {
+			return err
+		}
+		c := assemble(assembly{Disk: disk.Name, RootFS: fs, Encrypt: encrypt, Swap: swap, SwapSize: size})
+		plan, err := c.Plan()
+		if err != nil {
+			return nil // the installer's validation says what is wrong
+		}
+		rootMin, rootLabel := c.RootMinimum()
+		return plan.CheckFit(func(d string) (uint64, bool) { return disk.Size, d == disk.Path }, rootMin, rootLabel)
+	}
+	// (The default need not fit a small disk: an ended input ends the flow
+	// here, or the default was asked again for ever.)
 	if swap != "none" {
-		swapSize = promptDefault(in, w, "Swap size", "2G")
-		for err := config.ValidSwapSize(swapSize); err != nil; err = config.ValidSwapSize(swapSize) {
+		var rerr error
+		swapSize, rerr = promptDefaultErr(in, w, "Swap size", "2G")
+		for err := validSwap(swapSize); err != nil; err = validSwap(swapSize) {
+			if rerr != nil {
+				return nil, "", ErrNoInput
+			}
 			fmt.Fprintf(w, "  %v, try again\n", err)
-			swapSize = promptDefault(in, w, "Swap size", "2G")
+			swapSize, rerr = promptDefaultErr(in, w, "Swap size", "2G")
 		}
 	}
 
@@ -260,12 +290,19 @@ func cryptHash(pass string) (string, error) {
 }
 
 func promptDefault(in *bufio.Reader, w io.Writer, label, def string) string {
+	s, _ := promptDefaultErr(in, w, label, def)
+	return s
+}
+
+// promptDefaultErr is promptDefault that also says when the input failed
+// or ended.
+func promptDefaultErr(in *bufio.Reader, w io.Writer, label, def string) (string, error) {
 	fmt.Fprintf(w, "%s [%s]: ", label, def)
-	line, _ := in.ReadString('\n')
+	line, err := in.ReadString('\n')
 	if s := strings.TrimSpace(line); s != "" {
-		return s
+		return s, err
 	}
-	return def
+	return def, err
 }
 
 // PromptNewPassphrase reads a new LUKS passphrase, twice, until it is valid
