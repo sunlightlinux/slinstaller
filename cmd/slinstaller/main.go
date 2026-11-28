@@ -398,6 +398,10 @@ func run(args []string) error {
 		}
 	}()
 restart:
+	// Each pass starts from the environment as slinstaller found it: a
+	// proxy the last pass's config set would otherwise be the one the
+	// wizard's Test Network went through, its own proxy field empty.
+	applyProxyEnv(proxyBase, nil)
 	repo = repoFlag
 	switch len(rest) {
 	case 1:
