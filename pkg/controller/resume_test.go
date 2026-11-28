@@ -690,3 +690,32 @@ func TestResolvConfNotThroughALinkedEtc(t *testing.T) {
 		t.Errorf("the live /etc was changed: %q, %v", got, ents)
 	}
 }
+
+// A resume past the keyfile stage finds the keyfile where that stage put
+// it: inside the target, through an image's absolute /etc/cryptkeys link
+// as the installed system resolves it. Looked for by a plain join, the
+// link named the live system's directory, the keyfile was not found, and
+// the bootloader got no rd.luks.key (the passphrase asked for again).
+func TestResumeFindsTheKeyfileThroughALink(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	in.plan.Parts = nil
+	if err := in.mount(); err != nil {
+		t.Fatalf("first mount: %v", err)
+	}
+	live := t.TempDir() // the live system's directory of that name
+	inside := filepath.Join(in.opts.Root, live)
+	os.MkdirAll(inside, 0o700)
+	os.MkdirAll(filepath.Join(in.opts.Root, "etc"), 0o755)
+	if err := os.Symlink(live, filepath.Join(in.opts.Root, "etc", "cryptkeys")); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(inside, filepath.Base(keyfilePath)), make([]byte, 2048), 0o400)
+	in.opts.ResumeFrom, in.keyfile = "bootloader", ""
+	if err := in.mount(); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if in.keyfile != keyfilePath {
+		t.Errorf("resumed keyfile %q, want %q", in.keyfile, keyfilePath)
+	}
+}

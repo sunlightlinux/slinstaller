@@ -792,8 +792,12 @@ func (in *installer) mount() error {
 	}
 	// Resuming past the stage that made it, the keyfile the first attempt
 	// put in the target is the one the bootloader stage has to point at.
-	if in.opts.ResumeFrom != "" && exists(filepath.Join(in.opts.Root, keyfilePath)) {
-		in.keyfile = keyfilePath
+	// Looked for where setupKeyfile writes it: through the target's own
+	// links, not an image's absolute /etc/cryptkeys onto the live system.
+	if in.opts.ResumeFrom != "" {
+		if full, err := system.TargetPath(in.opts.Root, keyfilePath); err == nil && exists(full) {
+			in.keyfile = keyfilePath
+		}
 	}
 	return nil
 }
