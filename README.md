@@ -129,15 +129,17 @@ because each used to fail after the wipe or install a system that did not
 work:
 
 - **Disk names** are kernel device names (`sda`, `nvme0n1`, `dm-0`):
-  letters, digits and `. _ : + -`; to name a disk by serial or path use
+  letters, digits and `. _ : + -`, beginning with a letter, a digit or
+  `_`; to name a disk by serial or path use
   `match:`. No two devices of the layout may end up at one path (a disk
   `md0` beside an array `md0`).
 - **Partition names.** On a new table a disk's partitions are named 1..n,
   in order, on their own disk (`sda1`, `sda2`, …), and the partition that
   fills the disk is the last on it. On a Safe/`reusePartitions` install, a
   `create` partition is named with the number parted will give it (the
-  lowest free one); the dry run says so when it is not. A partition is
-  not both `create` (cut now) and `preserve` (kept).
+  lowest free one); the dry run says so when it is not. New partitions
+  are only added to a GPT disk. A partition is not both `create` (cut
+  now) and `preserve` (kept).
 - **Encryption.** `encrypted:` is read on `type: lvm` partitions and on
   raid arrays only; a plain partition is encrypted with `type: crypt`. A
   volume group's physical volumes are all encrypted or none. A keyfile

@@ -6,6 +6,8 @@ slinstaller is the Sunlight Linux system installer. It runs with **root privileg
 
 - **Disk / partition selection** — writing to the wrong device destroys data.
 - **Filesystem creation and mounting** — path traversal, mount-option injection.
+- **Files written into the target** — an image or a reused root whose links point out of it, onto the live system.
+- **Config values that reach a command** — disk, package and env names, kernel arguments, fstab and crypttab fields.
 - **Bootloader / EFI manipulation** — `efibootmgr`, ESP contents, boot entries.
 - **Package download and verification** — mirror integrity and signature checking.
 - **Credential handling during install** — root password, user accounts, disk-encryption passphrases.

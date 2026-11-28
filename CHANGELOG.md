@@ -10,6 +10,25 @@ change.
 
 ## [Unreleased]
 
+As in 2.2.0, most of what follows moves a failure from after the wipe to
+before it: sizes, names, minimums and the machine's own disks and volume
+groups are checked first, in the dry run and the interactive installers
+too. A Safe install (shrinking a partition to install beside it) no
+longer fails, or corrupts the kept system, half-way through a shrink.
+Several security fixes keep an image or a reused root that links out of
+itself from having files written onto the live system. The dry run now
+prints every command of the partition stage, and says what `--apply`
+will refuse.
+
+What is verified, and how far: the unit suite (with `-race`, 95.9%
+coverage); in a user namespace with real mounts and stand-in tools, a
+whole install of a plain, encrypted, LVM, LVM-on-LUKS, RAID 1,
+encrypted-`/home` and reuse layout; 15 fuzz targets that check
+properties (new: the partition commands, fstab and crypttab, the size
+grammar); and the `loop` job, which partitions, shrinks ext4, ntfs and
+btrfs with their data intact, and builds a partitioned RAID 1 on real
+loop devices. No install in a VM was made for this release.
+
 ### Changed
 
 - **No LUKS keyfile on an unencrypted root.** An encrypted `/home`, swap
@@ -17,6 +36,24 @@ change.
   plain root, beside the volume it opens, so the encryption kept nobody
   holding the disk out. Such a volume now asks for its passphrase at
   boot (`none` in crypttab). With an encrypted root nothing changes.
+
+### Changes a config may notice
+
+[STABILITY.md](STABILITY.md) allows a newer slinstaller to refuse a
+config that failed after the wipe or installed a system that could not
+boot; most of this release's refusals are of that kind. These are not, and change
+what an unchanged config installs, or refuse one that installed:
+
+- An encrypted `/home`, swap or `/boot` on a plain root asks for its
+  passphrase at boot (it was unlocked by a keyfile). An unattended boot
+  of such a system now waits at the prompt.
+- `dhcp: 1` (or `t`) on an interface with addresses is DHCP, as in
+  clr-installer; it was configured statically. `dhcp: yes` is refused.
+- A layout on a `targetMedia` entry that is not `type: disk` is refused;
+  it was skipped, and the system installed without it.
+- An account an image already has is given the config's password, full
+  name, shell and, for an administrator, the wheel group; it kept the
+  image's.
 
 ### Fixed
 
@@ -27,8 +64,9 @@ change.
 - **`swapFileSize` is made the size the config check read.** It went to
   `fallocate` as written, which refuses `2e9`, `1048576.5` and `0` (all
   accepted by the check) after the disk was wiped and the system
-  installed, and reads `1GB` as 10^9 bytes. It is given the bytes now,
-  and `0` is no swap file, as clr-installer documents it.
+  installed, and would have read `1GB` (accepted now, above) as 10^9
+  bytes. It is given the bytes now, and `0` is no swap file, as
+  clr-installer documents it.
 - **`dhcp` is read as clr-installer reads it.** `dhcp: 1` (or `t`) on an
   interface with addresses is DHCP in clr-installer and was configured
   statically here; a value that is not a boolean (`yes`), which
@@ -76,7 +114,14 @@ change.
   (there was no other way back to it); a list's filter takes a pasted
   name and Backspace removes a whole character (a pasted "Zürich" was
   ignored and Enter chose the list's first entry); Test Network Settings
-  goes through the proxy typed in the wizard.
+  goes through the proxy typed in the wizard; Esc on the menu asks
+  before leaving (one Esc too many lost every answer); Allow Insecure
+  Installation goes with the plain-http mirror it was ticked for, not
+  into the config unseen once the mirror was cleared; Installation Media
+  marks the disk Confirm will take before one is chosen; long lists
+  (disks, accounts, partitions, interfaces, the disk chooser) scroll with
+  the cursor instead of pushing the title and the install modes off a
+  24-line screen.
 - **The installed system's primary console is the live one's.** A
   `console=` repeated last on the live command line kept its first place,
   so `console=tty0 console=ttyS0,115200n8 console=tty0` installed a
@@ -111,13 +156,6 @@ change.
   `--block-device` defines is refused as such, not as a bad disk name.
 - A reuse partition marked both `create` and `preserve` is refused: it
   was cut, never formatted, and failed at the mount.
-- **Wizard:** Esc on the menu asks before leaving (one Esc too many lost
-  every answer); Allow Insecure Installation goes with the plain-http
-  mirror it was ticked for, not into the config unseen once the mirror
-  was cleared; Installation Media marks the disk Confirm will take before
-  one is chosen; long lists (disks, accounts, partitions, interfaces,
-  the disk chooser) scroll with the cursor instead of pushing the title
-  and the install modes off a 24-line screen.
 - **Security (an image or a reused root that links out of itself):** the
   repo keys, the RNG seed, the wheel sudoers rule, slinit services, SSH
   keys, the LUKS keyfile and the dracut and xbps drop-ins are written
@@ -142,8 +180,8 @@ change.
   a partition, of size 0, zram, in use or shared, instead of "Re-run with
   --apply"; a config URL is not fetched for a run its flags refuse.
 - **A Safe install's shrink:** a Ctrl+C on the terminal no longer kills
-  `resize2fs`, `ntfsresize` or `sfdisk` half-way (they run under
-  `setsid -w`), which left the kept system's filesystem corrupt; the free
+  `resize2fs`, `ntfsresize`, a btrfs resize or `sfdisk` half-way (they
+  run under `setsid -w`), which left the kept system's filesystem corrupt; the free
   region is read in bytes, so a partition starting at sector 63 does not
   make the new one overlap it; a non-GPT disk is refused before anything
   when partitions are to be created on it (the wizard's Safe Installation

@@ -99,7 +99,10 @@ An installer destroys data by design, so the destructive path is kept
 narrow and visible:
 
 - **Dry run by default.** `cmd/slinstaller` prints the plan and touches
-  nothing; `--apply` runs exactly that plan.
+  nothing; `--apply` runs exactly that plan. The plan is every command
+  of the partition stage, `cryptsetup`, `mdadm` and LVM's included, in
+  the order the stage runs them (`controller.PartitionCommands`); a test
+  checks the stage runs that list and nothing else.
 - **Gated apply.** `--apply` requires root and makes the operator retype
   the target disk path.
 - **Repartition is explicit.** A config that declares a `targetMedia`

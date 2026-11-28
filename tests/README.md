@@ -22,11 +22,18 @@ expected of them:
 
 - a plain install lays down the table, the ESP flag and the filesystems;
 - `--discover` describes that layout, preserving all of it;
-- `resize` shrinks a partition holding data and leaves the data, the
+- `resize` shrinks an ext4 partition holding data and leaves the data, the
   partition's start and identity, and its neighbours as they were; a size
   the data does not fit in is refused with nothing changed;
+- a `create` partition named for one that exists is refused with nothing
+  changed, and one named as parted numbers it is made;
+- an ntfs and a btrfs partition are shrunk the same way, data intact,
+  with a new root beside them (the ntfs case runs when `mkfs.ntfs` and
+  `ntfscp` are there);
 - a btrfs filesystem ends up with its subvolumes mounted where the config
-  says, with its mount options, on a disk wiped with `wipe: discard`.
+  says, with its mount options, on a disk wiped with `wipe: discard`;
+- a RAID 1 array over two disks is assembled and partitioned, with an ESP
+  on each disk (when `mdadm` is there and `/dev/md0` is free).
 
 It needs root and stops before the base system:
 
@@ -35,7 +42,9 @@ go build -o slinstaller ./cmd/slinstaller
 sudo tests/loop/run.sh ./slinstaller
 ```
 
-CI runs it on every push (the `loop` job).
+CI runs it on every push (the `loop` job). Every config the script
+writes must pass validation; `pkg/config/loopcases_test.go` checks that
+in the unit suite, so a new rule that breaks one fails there first.
 
 ## The other CI jobs
 
@@ -48,9 +57,11 @@ not here:
   (`cmd/slinstaller/apply_ns_test.go`), the mount stages
   (`pkg/storage/mount_ns_test.go`, `pkg/controller/mount_ns_test.go`), and
   an install through every stage with real mounts and recorded or stand-in
-  commands (`pkg/controller/e2e_ns_test.go`). They skip themselves where a
-  user namespace cannot mount; CI lifts the runner's restriction and fails
-  if they skipped anyway.
+  commands (`pkg/controller/e2e_ns_test.go`), for a plain, an encrypted,
+  an LVM, an LVM-on-LUKS, a RAID 1, an encrypted-`/home`-on-a-plain-root
+  and a reuse layout. They skip themselves where a user namespace cannot
+  mount; CI lifts the runner's restriction and fails if they skipped
+  anyway, or if fewer than four of them ran.
 - `fuzz` — every `Fuzz*` target, found with `go test -list`, for 20 s each.
 - `dry-run` — every `demo/*.yaml` and `demo/vm/config*.yaml`, and a
   `--template` config, must still plan.

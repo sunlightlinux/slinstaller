@@ -5,7 +5,7 @@ package by package. slinstaller reimplements clr-installer's mechanisms in
 its own code and reads its config format; it is not a copy, and it drops
 everything Clear Linux- or systemd-specific.
 
-_Snapshot: 2026-11-27 (v2.2.0). Update as the port proceeds._
+_Snapshot: 2026-11-28 (after v2.2.0). Update as the port proceeds._
 
 ## Legend
 
@@ -66,13 +66,15 @@ Installation, and `--log-level`.
 
 Verified on real block devices by the `loop` CI job: a plain install's table
 and filesystems, `--discover`, shrinking ext4, ntfs and btrfs with the data
-intact, and btrfs subvolumes with their mount options. Everything past the
+intact, btrfs subvolumes with their mount options, and a partitioned RAID 1
+array with an ESP on each disk. Everything past the
 partition and mount stages - the bootloader, a first boot, RAID with a disk
 removed, bonds and VLANs on the installed system - still wants a VM.
 A whole install, every stage, also runs in a user namespace with real
 mounts and recorded or stand-in commands
-(`pkg/controller/e2e_ns_test.go`); it checks the files the stages write,
-not that the result boots.
+(`pkg/controller/e2e_ns_test.go`), for plain, encrypted, LVM,
+LVM-on-LUKS, RAID 1, encrypted-`/home` and reuse layouts; it checks the
+files the stages write, not that the result boots.
 
 And the last of both lists: `--resume-from` any stage, partitioned RAID
 arrays, `kernel-remove`, `--json-yaml` and installer messages

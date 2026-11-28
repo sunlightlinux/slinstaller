@@ -31,8 +31,9 @@ the repo.
 
 **Always:**
 
-- `parted` — partitioning (no `sgdisk`/`gptfdisk` needed)
-- `util-linux` — `partprobe`, `blkid`, `lsblk`, `mkswap`, `fallocate`, and for a Safe install's shrink `sfdisk` and `setsid` (2.21 or later, for `-w`)
+- `parted` — partitioning, and `partprobe` (on Void it ships with
+  parted, not util-linux; no `sgdisk`/`gptfdisk` needed)
+- `util-linux` — `blkid`, `lsblk`, `wipefs`, `mkswap`, `fallocate`
 - `dosfstools` — `mkfs.vfat` for the ESP
 - `e2fsprogs` — `mkfs.ext4` (and fsck at boot on the target)
 - `xbps` — `xbps-install` fetches the base system
@@ -48,10 +49,17 @@ the repo.
 - `cryptsetup` — LUKS (any `type: crypt`, or an encrypted LVM/`/boot`)
 - `lvm2` — LVM (`pvcreate`/`vgcreate`/`lvcreate`)
 - `mdadm` — RAID
-- `ntfs-3g` — `ntfsresize`, to shrink an ntfs partition (`resize`)
+- for a Safe install's shrink (`resize`): `sfdisk` and `setsid` from
+  `util-linux` (2.21 or later, for `-w`), `e2fsck`/`resize2fs` from
+  `e2fsprogs` for ext2/3/4, `btrfs-progs` for btrfs, `ntfs-3g`
+  (`ntfsresize`) for ntfs
+- `sfdisk` (`util-linux`) — also for `partition-type`, `partition-uuid`
+  and `partition-name`
+- `wipe:` other than `superblock` — `blkdiscard` (`util-linux`) for
+  `zero` and `discard`, `shred` (`coreutils`) for `random`
 - `kexec-tools` — `kexec`, for `power-state: kexec`
-- `tar` (and `squashfs-tools` for a squashfs) — an `image` install;
-  `curl` too when the image is a URL
+- `tar` (`squashfs-tools`'s `unsquashfs` for a squashfs) — an `image`
+  install; `curl` too when the image is a URL
 
 If the ISO should handle every layout out of the box, include all of
 these. The installer's preflight names any that are missing.
