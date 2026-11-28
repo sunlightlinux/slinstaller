@@ -123,6 +123,7 @@ func applyChild(t *testing.T) {
 	base := os.Getenv(applyBaseEnv)
 	lockPath = filepath.Join(base, "install.lock")
 	diagnosticsDir = base
+	interactiveRefusedFirst(t)
 
 	if !system.IsUEFI() {
 		// Not booted under UEFI: a full install is refused, whatever else

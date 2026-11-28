@@ -46,3 +46,39 @@ targetMedia:
 		t.Errorf("--system-check passed what it said --apply refuses: %v\n%s", err, errOut)
 	}
 }
+
+// interactiveRefusedFirst runs in the user-namespace child (as root): what
+// the machine itself refuses - a BIOS boot, another install holding the
+// lock - is said before the interactive installer asks anything, not after
+// every answer (passwords included) has been typed.
+func interactiveRefusedFirst(t *testing.T) {
+	newApplyEnv(t) // stand-in tools: the text flow lists testDisk
+	asked := func(errOut string) bool { return strings.Contains(errOut, "Install to which disk") }
+
+	saved := isUEFI
+	isUEFI = func() bool { return false }
+	_, errOut, err := runWith(t, "1\n", "--text")
+	isUEFI = saved
+	wantRunErr(t, "interactive, BIOS boot", err, "not booted in UEFI mode")
+	if asked(errOut) {
+		t.Errorf("interactive, BIOS boot: the questions were asked before the refusal:\n%s", errOut)
+	}
+	// A staged run does not need UEFI: it is not refused for it.
+	isUEFI = func() bool { return false }
+	_, errOut, _ = runWith(t, "", "--text", "--through", "partition")
+	isUEFI = saved
+	if !asked(errOut) {
+		t.Errorf("interactive --through on a BIOS boot was refused:\n%s", errOut)
+	}
+
+	held, lerr := lockInstall()
+	if lerr != nil {
+		t.Fatalf("taking the lock: %v", lerr)
+	}
+	_, errOut, err = runWith(t, "1\n", "--text")
+	held.Close()
+	wantRunErr(t, "interactive, another install running", err, "another slinstaller install is running")
+	if asked(errOut) {
+		t.Errorf("interactive, another install running: the questions were asked before the refusal:\n%s", errOut)
+	}
+}

@@ -408,6 +408,18 @@ restart:
 		if arch != "" && !strings.HasPrefix(arch, hostXBPSArch()) {
 			return fmt.Errorf("--arch %s is not this machine's (%s): its packages cannot be configured here", arch, hostXBPSArch())
 		}
+		// So are a BIOS boot and another install running: facts of the
+		// machine, refused after every answer, passwords included, had
+		// been typed.
+		if through == "" && !isUEFI() {
+			return fmt.Errorf("the installer medium is not booted in UEFI mode (%s is absent); Sunlight Linux is UEFI-only - reboot it in UEFI mode",
+				"/sys/firmware/efi")
+		}
+		if lock == nil {
+			if lock, err = lockInstall(); err != nil {
+				return err
+			}
+		}
 		// Full-screen wizard on a real terminal; the plain prompt flow
 		// over a serial console or a pipe, where it would not render.
 		if !textUI && fullScreenCapable() {
@@ -872,7 +884,7 @@ restart:
 		// UEFI-only: a legacy/BIOS boot of the installer has no
 		// /sys/firmware/efi, so grub-install/efibootmgr would fail at the
 		// bootloader stage — after the disk is wiped. Fail here instead.
-		if !system.IsUEFI() {
+		if !isUEFI() {
 			return fmt.Errorf("the installer medium is not booted in UEFI mode (%s is absent); Sunlight Linux is UEFI-only - reboot it in UEFI mode",
 				"/sys/firmware/efi")
 		}
@@ -1420,6 +1432,9 @@ var stdinIsTerminal = func() bool { return isTerminal(os.Stdin) }
 
 // geteuid is os.Geteuid; a variable so tests reach the checks after it.
 var geteuid = os.Geteuid
+
+// isUEFI is system.IsUEFI; a variable so tests can boot the other way.
+var isUEFI = system.IsUEFI
 
 // hostXBPSArch is this machine's architecture as xbps names it.
 func hostXBPSArch() string { return xbpsArch(runtime.GOARCH) }
