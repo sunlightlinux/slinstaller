@@ -143,8 +143,15 @@ func TestDiskImageDryRunSaysItWillRefuse(t *testing.T) {
 	setListing(t, bin, `{"name":"`+testName+`","path":"`+testDisk+`","size":64000000000,"type":"disk","children":[
 		{"name":"`+testName+`p1","path":"`+testDisk+`p1","size":1000,"type":"part","mountpoint":"/mnt/data"}]}`)
 	_, errOut, err := runWith(t, "", path)
-	if err != nil || !strings.Contains(errOut, "it will refuse: "+testDisk+"p1 is mounted at /mnt/data") || strings.Contains(errOut, "Re-run with --apply") {
+	if err != nil || !strings.Contains(errOut, "it will refuse: target disk "+testDisk+" is in use: "+testDisk+"p1 is mounted at /mnt/data") || strings.Contains(errOut, "Re-run with --apply") {
 		t.Errorf("disk in use: %v\n%s", err, errOut)
+	}
+	// The other checks --apply makes of the target too: a disk that is not
+	// there was invited to an --apply that refused it.
+	setListing(t, bin, `{"name":"sdz","path":"/dev/sdz","size":64000000000,"type":"disk"}`)
+	_, errOut, err = runWith(t, "", path)
+	if err != nil || !strings.Contains(errOut, "it will refuse: target disk "+testDisk+" is not among the machine's block devices") || strings.Contains(errOut, "Re-run with --apply") {
+		t.Errorf("disk missing: %v\n%s", err, errOut)
 	}
 
 	setListing(t, bin, `{"name":"`+testName+`","path":"`+testDisk+`","size":64000000000,"type":"disk","children":[

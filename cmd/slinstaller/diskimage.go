@@ -127,11 +127,11 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply, forceDestructiv
 		// (Still exit 0, as there: a fact of this machine, not the config.)
 		if listErr == nil {
 			refuses := false
-			if d := blockdev.FindByPath(devs, disk); d != nil {
-				if why := d.InUse(); why != "" {
-					fmt.Fprintf(os.Stderr, "\n(it will refuse: %s)\n", why)
-					refuses = true
-				}
+			// The checks --apply makes of the target, all of them: a disk
+			// missing, a partition, size 0, zram, in use.
+			if err := checkTargetDisks([]string{disk}, devs); err != nil {
+				fmt.Fprintf(os.Stderr, "\n(it will refuse: %v)\n", err)
+				refuses = true
 			}
 			if shared := append(blockdev.Shared(devs, disk, []string{disk}, blockdev.VolumeGroups()), blockdev.SharedMembers(devs, []string{disk})...); len(shared) > 0 && !forceDestructive {
 				fmt.Fprintf(os.Stderr, "\n(it will refuse, unless --force-destructive: writing over %s would break other disks: %s)\n", disk, strings.Join(shared, "; "))
