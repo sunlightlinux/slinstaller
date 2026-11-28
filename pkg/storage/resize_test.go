@@ -250,3 +250,20 @@ func TestPlaceInFreeStartsInsideAnUnalignedRegion(t *testing.T) {
 		t.Errorf("free = %+v, want 101..500 (399 MiB)", free)
 	}
 }
+
+// The partition is cut down to the shrunk filesystem by sfdisk, run under
+// sh: the tool check saw only "sh", and a live system without sfdisk had
+// its filesystem shrunk before the install stopped at the partition.
+func TestRequiredToolsIncludeTheResizeSfdisk(t *testing.T) {
+	for _, fs := range []string{"ext4", "ntfs", "btrfs"} {
+		pl := resizePlan()
+		pl.Parts[1].Filesystem = fs
+		tools := " " + strings.Join(pl.RequiredTools(), " ") + " "
+		if !strings.Contains(tools, " sfdisk ") {
+			t.Errorf("%s: sfdisk missing from %s", fs, tools)
+		}
+	}
+	if tools := " " + strings.Join((&Plan{Disk: "/dev/sda", Parts: []Partition{{Number: 1, Device: "/dev/sda1", Filesystem: "ext4", Preserve: true}}}).RequiredTools(), " ") + " "; strings.Contains(tools, " sfdisk ") {
+		t.Errorf("sfdisk asked for with nothing to resize: %s", tools)
+	}
+}

@@ -524,7 +524,7 @@ func applyChild(t *testing.T) {
 		{Name: testName + "p2", Type: "part", FsType: "btrfs", Preserve: true, Resize: "40G"},
 		{Name: testName + "p3", Type: "part", FsType: "ext4", Mountpoint: "/", Create: true},
 	}}}}
-	e = newApplyEnv(t, "btrfs", "sh", "e2fsck", "resize2fs")
+	e = newApplyEnv(t, "btrfs", "sh", "sfdisk", "e2fsck", "resize2fs")
 	setListing(t, e.bin, reuseListing)
 	_, err = e.run(confirmed, shrinkCfg)
 	e.refused("shrinking a multi-device btrfs member", err, "has a fellow member on /dev/sdz1")
@@ -634,7 +634,7 @@ func applyChild(t *testing.T) {
 		{"name":"slitest0p1","path":"` + testDisk + `p1","size":536870912,"type":"part","fstype":"vfat"},
 		{"name":"slitest0p2","path":"` + testDisk + `p2","size":` + size + `,"type":"part","fstype":"` + fs + `"}]}`
 	}
-	shrinkTools := []string{"e2fsck", "resize2fs", "sh"}
+	shrinkTools := []string{"e2fsck", "resize2fs", "sh", "sfdisk"}
 	e = newApplyEnv(t, shrinkTools...)
 	setListing(t, e.bin, existing("ntfs", "107374182400"))
 	_, err = e.run(confirmed, shrink)
@@ -650,7 +650,7 @@ func applyChild(t *testing.T) {
 		{Name: testName + "p2", Type: "part", FsType: "ntfs", Preserve: true, Resize: "40G"},
 		{Name: testName + "p3", Type: "part", FsType: "ext4", Mountpoint: "/", Create: true},
 	}}}}
-	e = newApplyEnv(t, "sh")
+	e = newApplyEnv(t, "sh", "sfdisk")
 	setListing(t, e.bin, existing("ntfs", "107374182400"))
 	_, err = e.run(confirmed, ntfs)
 	e.refused("no ntfsresize", err, "missing tools on the live system: ntfsresize")
@@ -662,6 +662,12 @@ func applyChild(t *testing.T) {
 	setListing(t, e.bin, existing("ext4", "107374182400"))
 	_, err = e.run(confirmed, shrink)
 	e.refused("no resize tools", err, "missing tools on the live system: e2fsck, resize2fs")
+	// The partition is cut by sfdisk (under sh): checked too, before the
+	// filesystem is shrunk.
+	e = newApplyEnv(t, "e2fsck", "resize2fs", "sh")
+	setListing(t, e.bin, existing("ext4", "107374182400"))
+	_, err = e.run(confirmed, shrink)
+	e.refused("no sfdisk", err, "missing tools on the live system: sfdisk")
 	e = newApplyEnv(t, shrinkTools...)
 	setListing(t, e.bin, existing("ext4", "107374182400"))
 	errOut, err = e.run("no\n", shrink)

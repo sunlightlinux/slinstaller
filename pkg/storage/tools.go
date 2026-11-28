@@ -31,6 +31,15 @@ func (pl *Plan) RequiredTools() []string {
 	for _, disk := range pl.DiskList() {
 		extra = append(extra, pl.entryCommands(disk, !pl.Wipe)...)
 	}
+	// The resize cuts the partition with sfdisk, under sh (it reads
+	// stdin): sh alone was counted, and without sfdisk the filesystem was
+	// shrunk before the install stopped.
+	for _, p := range pl.Parts {
+		if p.ResizeMiB > 0 {
+			extra = append(extra, []string{"sfdisk"})
+			break
+		}
+	}
 	for _, c := range extra {
 		if !seen[c[0]] {
 			seen[c[0]] = true
