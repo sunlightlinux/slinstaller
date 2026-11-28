@@ -306,3 +306,18 @@ func TestResizeTrialsComeFirst(t *testing.T) {
 		t.Errorf("%d trials, want 2", n)
 	}
 }
+
+// The table parted names is said in a sentence that reads for each name
+// parted gives: "an loop partition table" did not.
+func TestTableNameReads(t *testing.T) {
+	for in, want := range map[string]string{
+		"msdos": "an msdos (MBR) partition table",
+		"loop":  "no partition table (a filesystem on the whole disk)",
+		"mac":   "a mac partition table",
+		"":      "no partition table parted could name",
+	} {
+		if got := tableName(in); got != want {
+			t.Errorf("tableName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

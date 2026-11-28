@@ -228,10 +228,16 @@ func partedTable(out string) string {
 }
 
 func tableName(t string) string {
-	if t == "" {
+	switch t {
+	case "":
 		return "no partition table parted could name"
+	case "loop":
+		// parted's name for a disk that is one filesystem, no table.
+		return "no partition table (a filesystem on the whole disk)"
+	case "msdos":
+		return "an msdos (MBR) partition table"
 	}
-	return "an " + t + " partition table"
+	return "a " + t + " partition table"
 }
 
 // existsNote says when the number the config named is an existing
