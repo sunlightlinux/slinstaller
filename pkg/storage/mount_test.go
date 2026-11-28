@@ -257,3 +257,26 @@ func TestReadRootFileCannotMount(t *testing.T) {
 		t.Errorf("ReadRootFile of a disk not there: %v", err)
 	}
 }
+
+// What a resume reads from a disk's root is that disk's own small file: a
+// link there (to /dev/zero, from here the live system's) is not followed,
+// and an endless file is not read to its end.
+func TestReadLookedAtFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "mark"), []byte("ok\n"), 0o644)
+	if got, err := readLookedAt(filepath.Join(dir, "mark")); err != nil || string(got) != "ok\n" {
+		t.Errorf("a plain file: %q, %v", got, err)
+	}
+	os.Symlink("/dev/zero", filepath.Join(dir, "zero"))
+	if _, err := readLookedAt(filepath.Join(dir, "zero")); err == nil {
+		t.Error("a link was followed")
+	}
+	if _, err := readLookedAt(filepath.Join(dir, "none")); !os.IsNotExist(err) {
+		t.Errorf("a file not there: %v, want not-exist", err)
+	}
+	big := filepath.Join(dir, "big")
+	os.WriteFile(big, make([]byte, maxLookedAt+10), 0o644)
+	if got, err := readLookedAt(big); err == nil || len(got) > maxLookedAt {
+		t.Errorf("an oversized file: %d bytes, %v", len(got), err)
+	}
+}

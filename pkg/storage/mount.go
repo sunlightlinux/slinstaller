@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 	"golang.org/x/sys/unix"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -335,13 +336,38 @@ func (m *Mounter) ReadRootFile(pl *Plan, rel string) ([]byte, error) {
 			// resume" for a target that cannot be looked at.
 			return nil, fmt.Errorf("storage: mount %s read-only on %s: %v", dev, m.root, err)
 		}
-		data, err := os.ReadFile(filepath.Join(m.root, rel))
+		data, err := readLookedAt(filepath.Join(m.root, rel))
 		if uerr := syscall.Unmount(m.root, 0); uerr != nil && err == nil {
 			err = fmt.Errorf("storage: unmount %s: %w", m.root, uerr)
 		}
 		return data, err
 	}
 	return nil, fmt.Errorf("storage: the plan has no root filesystem")
+}
+
+// maxLookedAt bounds what ReadRootFile reads: the file it is for, the
+// resume mark, is one line.
+const maxLookedAt = 64 << 10
+
+// readLookedAt reads a file of a disk being looked at: not through a link
+// at its name (an absolute one, to /dev/zero, is the live system's from
+// here, and was read until memory ran out) and no more than maxLookedAt.
+func readLookedAt(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil {
+		return nil, err
+	} else if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("storage: %s is not a file", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxLookedAt+1))
+	if err == nil && len(data) > maxLookedAt {
+		return data[:maxLookedAt], fmt.Errorf("storage: %s is larger than %d bytes", path, maxLookedAt)
+	}
+	return data, err
 }
 
 // lookOptions is the mount data for a read-only look at a filesystem of
