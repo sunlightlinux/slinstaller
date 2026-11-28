@@ -19,8 +19,9 @@ shared, not the code. Parsing is tolerant: the lsblk probe fields a real
 clr-installer config carries and the Clear Linux specifics it names load
 without error, and sizes are accepted in every form clr-installer writes.
 
-This is the same relationship slinit has to dinit — a Go reimplementation
-that stays compatible with the upstream's config, with its own code.
+Like slinit and dinit, it stays compatible with the upstream's config with
+code of its own; unlike that pair, the upstream's licence (GPL-3.0) also rules
+out deriving code from it.
 
 ## Front-ends produce, the core consumes
 
@@ -48,12 +49,22 @@ also shows the install's progress, but the install itself is the
 controller's (`tui.RunInstall` calls `controller.Install`). There is no
 graphical front-end.
 
-## The core is a port of clr-installer
+## The core covers clr-installer's feature set in its own code
 
-The core — the subsystems that actually install — is ported from
-[clr-installer](https://github.com/clearlinux/clr-installer), package by
-package, into `pkg/`. "Port" means the mechanisms and semantics are
-clr-installer's; the code and the scope are ours:
+The core — the subsystems that actually install — provides what
+[clr-installer](https://github.com/clearlinux/clr-installer) does as a disk
+installer, under `pkg/`. The mechanisms (parted, mkfs, cryptsetup, a
+chrooted bootstrap) and the config semantics follow clr-installer; the code,
+the structure and the scope are slinstaller's own.
+
+clr-installer is GPL-3.0 and slinstaller is Apache-2.0, so clr-installer
+is a design reference only, a rule the first commit (`b54aac8`) records: its
+code is not copied, translated or used as a module, and behaviour is taken
+from its documentation and example configs. [CLAUDE.md](../CLAUDE.md)
+states the rule as contributors apply it. Older commits and documents call
+the core "a port"; they mean the mechanisms and semantics, not the code.
+
+What that means in practice:
 
 - It is driven by `config.Config` (clr-installer's schema), reduced to a
   `storage.Plan`, not by clr-installer's `BlockDevice` model.
@@ -88,7 +99,8 @@ clr-installer's; the code and the scope are ours:
 - **`pkg/network`** — `dhcpcd` configuration and the connectivity check.
 - **`pkg/tui`** — the full-screen wizard and the plain prompt flow. Its
   bubbletea is a vendored copy, `third_party/bubbletea` (v1.2.4 without
-  its terminal query at start; see the README there), wired in with a
+  its terminal query at start; see `README.slinstaller.md` there), wired in
+with a
   `replace` in `go.mod`.
 
 What is still to port is tracked in [port-status.md](port-status.md).

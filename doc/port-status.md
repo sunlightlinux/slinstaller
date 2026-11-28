@@ -1,11 +1,17 @@
 # Port status
 
-Where slinstaller stands against [clr-installer](https://github.com/clearlinux/clr-installer),
-package by package. slinstaller reimplements clr-installer's mechanisms in
-its own code and reads its config format; it is not a copy, and it drops
-everything Clear Linux- or systemd-specific.
+Where slinstaller stands against
+[clr-installer](https://github.com/clearlinux/clr-installer)'s
+feature set, package by package. slinstaller reads clr-installer's config
+format and provides the same mechanisms in code of its own — clr-installer
+is GPL-3.0 and a design reference only (see
+[architecture.md](architecture.md#the-core-covers-clr-installers-feature-set-in-its-own-code))
+—
+and it drops everything Clear Linux- or systemd-specific. "Ported" below
+means the feature exists in slinstaller, not that code was carried over.
 
-_Snapshot: 2026-11-28 (after v2.2.0). Update as the port proceeds._
+_Snapshot: 2026-11-28, v2.3.1 (2.3.0 and 2.3.1 added no feature). Update as
+the port proceeds._
 
 ## Legend
 
@@ -31,7 +37,7 @@ _Snapshot: 2026-11-28 (after v2.2.0). Update as the port proceeds._
 | syscheck | 69 | pre-install checks | 🟡 | preflight: tools + disk exist + repo and mirror reachable + the package set dry-run against them. clr's CPU-feature checks ⛔ Clear |
 | massinstall | 244 | unattended from file | ✅ | the file front-end (`slinstaller config.yaml`) |
 | args/utils/progress | ~1255 | CLI/helpers | ✅ | own (flags, stdlib, VerboseRunner) |
-| tui | 6742 | full-screen UI | ✅ | `pkg/tui` — a full-screen wizard in clr's Required/Advanced layout (bubbletea), and a plain prompt flow for serial consoles and pipes. Adds Sunlight's own kernel sections (see the README) |
+| tui | 6742 | full-screen UI | ✅ | `pkg/tui` — a full-screen wizard in clr's Required/Advanced layout (bubbletea), and a plain prompt flow for serial consoles and pipes. Adds Sunlight's own kernel sections (see [config.md](config.md#kernel-settings)) |
 | gui | 1959 | GTK GUI | ⛔ | — |
 | isoutils | 757 | ISO generation | ⛔ | disk installer, not an image builder |
 | telemetry | 414 | Clear telemetry | ⛔ | — |
@@ -39,7 +45,8 @@ _Snapshot: 2026-11-28 (after v2.2.0). Update as the port proceeds._
 
 ## Beyond clr-installer
 
-slinstaller's own additions, as optional config keys (see the README): disks
+slinstaller's own additions, as optional config keys (see
+[config.md](config.md#beyond-clr-installers-format)): disks
 named by serial, WWN, model or stable path; fstab mount options and btrfs
 subvolumes; bootloader options (serial menu, removable-media path, no NVRAM,
 other systems); `write-files`, `power-state`, the http and no-proxy settings;
@@ -87,7 +94,8 @@ TCP.
 
 Not done, because it cannot be: shrinking xfs, which the filesystem does not
 allow. Everything else left out is another distribution's own (its package
-manager, its boot manager, its telemetry, its image builder) or a platform this installer does not
+manager, its boot manager, its telemetry, its image builder) or a platform
+this installer does not
 target (s390, BIOS/MBR, extlinux).
 
 ## What's left
@@ -117,4 +125,6 @@ discovery, a QEMU/OVMF demo.
   generation, telemetry and the Clear-specific parts of swupd.
 - **Ported is not the same as verified.** The unit suite covers the logic
   through recorded commands and stubbed sysfs; partitioning, mkfs, mounts and
-  the bootloader are only proven by an install in a VM under UEFI firmware.
+  the bootloader are only proven by an install in a VM under UEFI firmware,
+  and no 2.x release has had one (each release's CHANGELOG entry says how
+  far it was verified).

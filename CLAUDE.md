@@ -3,17 +3,18 @@
 Behavioral guidelines for LLM-assisted work on **slinstaller** — the system
 installer for Sunlight Linux (a UEFI-only distribution).
 
-> Derived from [forrestchang/andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills)
-> (MIT), based on [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876)
+> Derived from
+> [forrestchang/andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills)
+> (MIT), based on [Andrej Karpathy's
+> observations](https://x.com/karpathy/status/2015883857489522876)
 > on LLM coding pitfalls. Adapted for slinstaller: Go idioms, installer
 > correctness, and the fact that an installer **destroys data by design**.
 
-> **Status:** a new installer, written in **Go** as a port and adaptation of
-> [clr-installer](https://github.com/clearlinux/clr-installer). The core
-> subsystems are ported from clr-installer package by package and reduced to
-> what Sunlight Linux installs, and it reads clr-installer's config format so
-> an existing clr-installer `config.yaml` runs here — the same relationship
-> slinit has to dinit.
+> **Status:** a new installer, written in **Go**. It reads the config format
+> of [clr-installer](https://github.com/clearlinux/clr-installer), so an
+> existing clr-installer `config.yaml` describes the same install here, and
+> covers clr-installer's disk-installer feature set reduced to what Sunlight
+> Linux installs. Its code is its own: see the clean-room rule below.
 
 **Tradeoff:** These guidelines bias toward caution over speed. An installer
 runs as root and performs **irreversible** operations (partitioning, `mkfs`,
@@ -39,18 +40,21 @@ Before implementing:
   which is meant.
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
-- **Check upstream parity first.** For anything that looks like a feature
-  request, check how `clr-installer` already does it — it is the source the
-  core is ported from. Match its semantics unless there's a documented reason
-  to diverge.
+- **Check config compatibility first.** For anything that looks like a
+  feature request, check whether clr-installer's config format already has a
+  key for it, and what that key means *as clr-installer documents it*. A key
+  slinstaller reads must mean what it means there (STABILITY.md); a new
+  behaviour gets a new key. Settle that from clr-installer's documentation
+  and config examples first — and see the clean-room rule below.
 
 ## 2. Simplicity First
 
 **Minimum code that solves the problem. Nothing speculative.**
 
-- No features beyond what was asked. No BIOS/MBR, LVM, RAID, or ZFS paths
-  unless explicitly requested — Sunlight Linux targets UEFI + a straightforward
-  GPT layout.
+- No features beyond what was asked. No BIOS/MBR path, ever (UEFI-only), and
+  no ZFS, bcache or other storage the project has deferred, unless explicitly
+  requested. LUKS, LVM and software RAID exist as layers under the
+  filesystems; extend them, do not add parallel ones.
 - No abstractions for single-use code.
 - No "flexibility" (pluggable partitioners, filesystem strategy hierarchies)
   for a single supported layout. Add a second implementation when a second
@@ -126,21 +130,44 @@ Strong success criteria let you loop independently. Weak criteria
 - The Sunlight Linux system installer. Partitions the disk, installs the base
   system, sets up the bootloader, and configures first boot (including slinit
   as PID 1).
-- A new installer, written in Go as a port and adaptation of clr-installer.
+- A new installer, written in Go, compatible with clr-installer's config
+  format and written independently of its code.
 
 ### Invariants
 - **UEFI-only.** GPT + an EFI System Partition; boot entry via `efibootmgr`.
   No BIOS/MBR.
-- **Destructive operations are gated and VM-tested.** Confirmable, ideally
-  dry-runnable; never run against hardware during development.
+- **Destructive operations are gated.** Confirmable and dry-runnable; never
+  run against hardware during development. A VM install is the test for what
+  follows the mount — and no 2.x release has had one yet (see the CHANGELOG's
+  "What is verified" paragraphs), so do not claim a stage works on a real
+  machine on the strength of the unit or namespace tests.
 - **Installs slinit**, not systemd/OpenRC, as the init system of the target.
 - **Base system is Sunlight Linux** (the `slpkgs` set; `xbps` package
   tooling, inherited from the Void lineage).
 
+### The clean-room rule (licence)
+- **clr-installer is GPL-3.0; slinstaller is Apache-2.0.** clr-installer is a
+  *design reference only* — the first commit (`b54aac8`) states the rule.
+  Code written from GPL-3.0 source is a derivative work whatever it is renamed
+  to, so:
+  - **Never** copy, translate or paraphrase clr-installer's code, and do not
+    mirror its package structure, type names or function layout. Do not add
+    it, or any module of it, as a dependency.
+  - **Do** take behaviour from the outside first: its documentation, its
+    config schema and example configs, and what the program observably
+    does. That is what config compatibility needs.
+  - When only its source can say what a config key does, record the
+    behaviour in your own words (a test case, a doc line), close the source,
+    and write slinstaller's code from that record — never with the source
+    open beside it.
+- "Port" in older commits and docs means *the same mechanisms and config
+  semantics*, not translated code.
+
 ### Reference sources
-- **clr-installer** (Go): <https://github.com/clearlinux/clr-installer> — the
-  source the core is ported from; check it first for both *behavior* and
-  *structure*, and match its semantics unless there is a reason to diverge.
+- **clr-installer**: <https://github.com/clearlinux/clr-installer> (archived)
+  — the config format slinstaller reads and the feature set it measures
+  itself against ([doc/port-status.md](doc/port-status.md)); documentation
+  and configs only, under the rule above.
 - **slinit**: <https://github.com/sunlightlinux/slinit> — the init system the
   installer configures on the target, and the repository whose layout
   slinstaller follows.
