@@ -218,3 +218,35 @@ func TestResizeE2fsckCorrected(t *testing.T) {
 		}
 	}
 }
+
+// A free region that does not begin on a mebibyte — after a partition that
+// starts at sector 63, as a disk partitioned by an old Windows has — is
+// read in bytes and its start rounded up: parted's MiB print showed it as
+// "100MiB" (it is 100.03), the new partition was asked for at 100MiB, and
+// parted refused it as overlapping — after the shrink was already done.
+func TestPlaceInFreeStartsInsideAnUnalignedRegion(t *testing.T) {
+	saved := partedPrintFree
+	defer func() { partedPrintFree = saved }()
+	// parted -m unit B print free of an msdos image, partition 1 at 63s.
+	partedPrintFree = func(string) (string, error) {
+		return "BYT;\n/dev/sda:1073741824B:scsi:512:512:gpt:DISK:;\n" +
+			"1:32256B:104889855B:104857600B:ntfs::;\n" +
+			"1:104889856B:1073741823B:968851968B:free;\n", nil
+	}
+	pl := resizePlan()
+	if err := pl.PlaceInFree(); err != nil {
+		t.Fatal(err)
+	}
+	p := pl.Parts[2]
+	// The region is 100.03MiB..1024MiB: whole mebibytes inside it are
+	// 101..1024, less the slack.
+	if p.StartMiB != 101 || p.EndMiB > 1023 || p.EndMiB <= p.StartMiB {
+		t.Errorf("placed at %d..%d MiB; the free region starts at 100.03MiB", p.StartMiB, p.EndMiB)
+	}
+	// And a region ending short of a mebibyte (the next partition is
+	// unaligned) ends at the whole mebibyte below.
+	_, free := parsePartedFree("BYT;\n1:104889856B:524603391B:419713536B:free;\n")
+	if len(free) != 1 || free[0].StartMiB != 101 || free[0].EndMiB != 500 || free[0].SizeMiB != 399 {
+		t.Errorf("free = %+v, want 101..500 (399 MiB)", free)
+	}
+}

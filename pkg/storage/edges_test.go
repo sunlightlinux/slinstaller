@@ -22,9 +22,9 @@ func TestPartedPrintFreeRunsParted(t *testing.T) {
 	if err != nil || !strings.Contains(out, "fat32") {
 		t.Fatalf("partedPrintFree = %q, %v", out, err)
 	}
-	// Machine-readable, non-interactive, in MiB, with the free regions.
+	// Machine-readable, non-interactive, in bytes, with the free regions.
 	args, _ := os.ReadFile(filepath.Join(dir, "args"))
-	if got := strings.TrimSpace(string(args)); got != "-m -s /dev/sdz unit MiB print free" {
+	if got := strings.TrimSpace(string(args)); got != "-m -s /dev/sdz unit B print free" {
 		t.Errorf("parted called with %q", got)
 	}
 

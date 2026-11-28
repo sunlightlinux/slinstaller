@@ -20,9 +20,10 @@ type existingPart struct {
 	FsType, Flags    string
 }
 
-// parsePartedFree parses the machine-readable `parted -m ... unit MiB print
+// parsePartedFree parses the machine-readable `parted -m ... unit B print
 // free` output into the existing partitions and the free regions. It is
-// separate from the exec so the parsing is testable.
+// separate from the exec so the parsing is testable. (Output in MiB is
+// read too, rounded as parted printed it.)
 func parsePartedFree(out string) (parts []existingPart, free []FreeRegion) {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), ";"))
@@ -35,6 +36,21 @@ func parsePartedFree(out string) (parts []existingPart, free []FreeRegion) {
 		}
 		// A free-space row carries "free" in the filesystem field.
 		if f[4] == "free" {
+			// In bytes, only the whole mebibytes inside the region: its
+			// start rounded up, its end down. A region after a partition
+			// at sector 63 begins at 100.03MiB, which parted's MiB print
+			// shows as 100MiB - and a partition asked for there overlaps
+			// the one before, so parted refused it, after the resize.
+			if start, end, ok := freeBytes(f[1], f[2]); ok {
+				r := FreeRegion{StartMiB: (start + 1<<20 - 1) >> 20, EndMiB: (end + 1) >> 20}
+				if r.EndMiB > r.StartMiB {
+					r.SizeMiB = r.EndMiB - r.StartMiB
+				} else {
+					r.EndMiB = r.StartMiB
+				}
+				free = append(free, r)
+				continue
+			}
 			free = append(free, FreeRegion{
 				StartMiB: parseMiB(f[1]),
 				EndMiB:   parseMiB(f[2]),
@@ -57,9 +73,35 @@ func parsePartedFree(out string) (parts []existingPart, free []FreeRegion) {
 	return parts, free
 }
 
-// parseMiB parses parted's "512MiB" / "1.00MiB" into rounded MiB.
+// freeBytes reads a free region's first and last byte as parted prints
+// them in bytes ("104889856B"); ok is false for any other form.
+func freeBytes(first, last string) (start, end uint64, ok bool) {
+	parse := func(s string) (uint64, bool) {
+		s = strings.TrimSpace(s)
+		if !strings.HasSuffix(s, "B") || strings.HasSuffix(s, "iB") {
+			return 0, false
+		}
+		n, err := strconv.ParseUint(strings.TrimSuffix(s, "B"), 10, 64)
+		// No disk is 2^62 bytes; the bound keeps the rounding from wrapping.
+		return n, err == nil && n < 1<<62
+	}
+	start, ok1 := parse(first)
+	end, ok2 := parse(last)
+	return start, end, ok1 && ok2 && end >= start
+}
+
+// parseMiB parses parted's "512MiB" / "1.00MiB" into rounded MiB, or a
+// byte count ("536870912B") into the nearest MiB.
 func parseMiB(s string) uint64 {
-	s = strings.TrimSuffix(strings.TrimSpace(s), "MiB")
+	s = strings.TrimSpace(s)
+	if strings.HasSuffix(s, "B") && !strings.HasSuffix(s, "iB") {
+		n, err := strconv.ParseUint(strings.TrimSuffix(s, "B"), 10, 64)
+		if err != nil || n >= 1<<62 {
+			return 0
+		}
+		return (n + 1<<19) >> 20
+	}
+	s = strings.TrimSuffix(s, "MiB")
 	v, err := strconv.ParseFloat(s, 64)
 	// NaN and Inf parse as numbers too; no disk is 2^53 MiB.
 	if err != nil || !(v >= 0 && v < 1<<53) {
@@ -69,9 +111,10 @@ func parseMiB(s string) uint64 {
 }
 
 // partedPrintFree runs parted and returns its machine-readable table with
-// free space. A variable so tests can stub it.
+// free space, in bytes: parted's MiB print rounds to what it shows. A
+// variable so tests can stub it.
 var partedPrintFree = func(disk string) (string, error) {
-	out, err := exec.Command("parted", "-m", "-s", disk, "unit", "MiB", "print", "free").Output()
+	out, err := exec.Command("parted", "-m", "-s", disk, "unit", "B", "print", "free").Output()
 	if err != nil {
 		return "", fmt.Errorf("parted print free %s: %w", disk, WithStderr(err))
 	}
