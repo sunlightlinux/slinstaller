@@ -1,0 +1,3 @@
+go test fuzz v1
+[]byte("70000100010A001")
+string("0")

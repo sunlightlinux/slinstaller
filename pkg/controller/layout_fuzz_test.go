@@ -330,6 +330,11 @@ func checkCommands(t *testing.T, pl *storage.Plan, cmds [][]string, strict bool)
 				t.Errorf("%q: an empty argument", cmd)
 			}
 		}
+		// A shrink runs under setsid -w (a session of its own, out of the
+		// terminal's Ctrl+C): the command is what it runs.
+		if len(cmd) > 2 && cmd[0] == "setsid" && cmd[1] == "-w" {
+			cmd = cmd[2:]
+		}
 		last := cmd[len(cmd)-1]
 		switch tool := cmd[0]; {
 		case tool == "parted":
