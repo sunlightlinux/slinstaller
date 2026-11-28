@@ -132,8 +132,10 @@ change.
   a swap the disk cannot hold when it is typed. "Back to menu" no longer
   keeps the previous pass's proxy.
 - `--system-check` fails what its plan says `--apply` refuses (it said
-  "passed" after "it will refuse"); the disk-image dry run says "it will
-  refuse" too; a config URL is not fetched for a run its flags refuse.
+  "passed" after "it will refuse"); the dry runs (the install's and the
+  disk-image one) say "it will refuse" for a target disk that is missing,
+  a partition, of size 0, zram, in use or shared, instead of "Re-run with
+  --apply"; a config URL is not fetched for a run its flags refuse.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 - A target with no `sshd` service (no `openssh` in its packages) is
