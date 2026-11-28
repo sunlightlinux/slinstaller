@@ -10,6 +10,19 @@ change.
 
 ## [Unreleased]
 
+### Security
+
+- **Built and tested with a Go that has the TLS and HTTP fixes.** `go.mod`
+  names `toolchain go1.27.4`, so CI (which reads its Go from `go.mod`)
+  and a default `go build` no longer use Go 1.25.0, whose standard
+  library has 35 vulnerabilities `govulncheck` finds reachable from
+  slinstaller, among them certificate validation in `crypto/x509` and TLS
+  handshake handling in `crypto/tls` on the path that fetches configs,
+  images and the mirror. `golang.org/x/sys` is updated to v0.44.0
+  (GO-2026-5024, Windows-only, never called). Nothing changes for a
+  build with an older local Go and `GOTOOLCHAIN=local`; see
+  doc/packaging.md.
+
 ## [2.3.0] - 2026-11-28
 
 As in 2.2.0, most of what follows moves a failure from after the wipe to

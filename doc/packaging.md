@@ -22,6 +22,14 @@ CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=<version>" \
 `-X main.version=` stamps `slinstaller --version`. It builds for the ISO's
 architecture (set `GOARCH` to cross-build).
 
+Build it with a current Go: `go.mod` names `toolchain go1.27.4`, and the
+binary carries the standard library of whatever Go compiled it. slinstaller
+fetches configs, images and the mirror over TLS, so a Go with known
+`net/http`, `crypto/tls` or `crypto/x509` holes ships them: `govulncheck`
+counts 35 reachable ones in Go 1.25.0, the `go` line, and none in 1.27.4.
+The `go` line stays a floor for building, not a recommendation. Check a
+built binary with `govulncheck -mode=binary slinstaller`.
+
 ## 2. Tools the live ISO must carry
 
 slinstaller shells out to these on the live system; the install fails in
