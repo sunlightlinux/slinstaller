@@ -1192,7 +1192,10 @@ func (in *installer) writeTargetRepos() error {
 		mirrors = in.opts.ExtraRepos
 	}
 	if len(mirrors) > 0 {
-		dir := filepath.Join(in.opts.Root, "etc", "xbps.d")
+		dir, err := system.TargetPath(in.opts.Root, "etc/xbps.d")
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
@@ -1365,7 +1368,15 @@ const keyfilePath = "/etc/cryptkeys/slinstaller.key"
 // GRUB-locked storage; on an unencrypted /boot it must not ride in the
 // initramfs, so it stays on the root for the post-boot runit service alone.
 func (in *installer) setupKeyfile(enc []storage.Partition) error {
-	full := filepath.Join(in.opts.Root, keyfilePath)
+	// Its directory as the installed system resolves it: an image's
+	// /etc/cryptkeys that is an absolute link named a live-system
+	// directory from here, and the key to every volume was written there
+	// (and not into the target, whose crypttab then opened nothing).
+	keyDir, err := system.TargetPath(in.opts.Root, filepath.Dir(keyfilePath))
+	if err != nil {
+		return err
+	}
+	full := filepath.Join(keyDir, filepath.Base(keyfilePath))
 	// Resuming, the first attempt's keyfile is already in the target and,
 	// mostly, in the volumes' key slots: a second key would only use up
 	// another slot. But that attempt may have failed between two volumes,
@@ -1385,8 +1396,12 @@ func (in *installer) setupKeyfile(enc []storage.Partition) error {
 		if _, err := rand.Read(key); err != nil {
 			return fmt.Errorf("generate keyfile: %w", err)
 		}
-		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
-			return fmt.Errorf("mkdir %s: %w", filepath.Dir(full), err)
+		if err := os.MkdirAll(keyDir, 0o700); err != nil {
+			return fmt.Errorf("mkdir %s: %w", keyDir, err)
+		}
+		// An existing directory (an image's) keeps its mode otherwise.
+		if err := os.Chmod(keyDir, 0o700); err != nil {
+			return fmt.Errorf("chmod %s: %w", keyDir, err)
 		}
 		_ = os.Remove(full) // read-only once written
 		if err := writeSynced(full, key, 0o400); err != nil {
@@ -1402,7 +1417,10 @@ func (in *installer) setupKeyfile(enc []storage.Partition) error {
 	if in.bootOnEncrypted() {
 		// Embed the keyfile in the initramfs dracut builds later, so it can
 		// open the root without re-prompting after GRUB.
-		dir := filepath.Join(in.opts.Root, "etc", "dracut.conf.d")
+		dir, err := system.TargetPath(in.opts.Root, "etc/dracut.conf.d")
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}

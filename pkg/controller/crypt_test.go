@@ -361,3 +361,36 @@ func TestEncryptedBootAndSwapOnPlainRoot(t *testing.T) {
 		}
 	}
 }
+
+// The keyfile goes where the installed system's crypttab finds it, never
+// through an image's absolute /etc/cryptkeys link onto the live system,
+// and its directory is private whoever made it.
+func TestKeyfileNotWrittenThroughALink(t *testing.T) {
+	dir := fakeCryptsetup(t)
+	var r recorder
+	home := &config.Media{Name: "sda3", Type: "crypt", FsType: "ext4", Mountpoint: "/home"}
+	in, _ := cryptInstaller(t, cryptConfig("/boot", home), &r)
+	live := t.TempDir()
+	os.Chmod(live, 0o755)
+	inside := filepath.Join(in.opts.Root, live)
+	os.MkdirAll(inside, 0o755)
+	if err := os.Symlink(live, filepath.Join(in.opts.Root, "etc", "cryptkeys")); err != nil {
+		t.Fatal(err)
+	}
+	if err := in.crypttab(); err != nil {
+		t.Fatalf("crypttab: %v", err)
+	}
+	if ents, _ := os.ReadDir(live); len(ents) > 0 {
+		t.Errorf("the keyfile was written into the live system: %v", ents)
+	}
+	key := filepath.Join(inside, filepath.Base(keyfilePath))
+	if st, err := os.Stat(key); err != nil || st.Size() != 2048 {
+		t.Errorf("keyfile where the installed system looks: %v", err)
+	}
+	if st, _ := os.Stat(inside); st.Mode().Perm() != 0o700 {
+		t.Errorf("keyfile directory mode %v, want 0700", st.Mode().Perm())
+	}
+	if args := readFile(t, filepath.Join(dir, "args")); !strings.Contains(args, "luksAddKey /dev/sda3 "+key) {
+		t.Errorf("the key slot was not given the keyfile in the target:\n%s", args)
+	}
+}
