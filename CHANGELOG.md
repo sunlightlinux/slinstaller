@@ -106,7 +106,9 @@ change.
   and crypttab: a disk name must be a kernel name (`sda;reboot` reached a
   resize's `sh -c` unquoted); a reuse install's fstab fields are checked
   as a wiping install's are; two devices of a layout at one path (a disk
-  `md0` beside an array `md0`, an LV declared twice) are refused.
+  `md0` beside an array `md0`, an LV declared twice) are refused. A
+  disk named through a `${alias}` no `block-devices` entry or
+  `--block-device` defines is refused as such, not as a bad disk name.
 - A reuse partition marked both `create` and `preserve` is refused: it
   was cut, never formatted, and failed at the mount.
 - **Wizard:** Esc on the menu asks before leaving (one Esc too many lost
@@ -156,8 +158,8 @@ change.
   holds a swap partition and a swap file to: a smaller one was taken at
   the prompt and refused only after the last question, ending the flow.
 - A `--resume` does not print the partition stage as its plan, nor the
-  `wipefs` and teardown said to run before it: it runs none of them. `--skip-validation-all`'s help no longer says it skips all
-  validation.
+  `wipefs` and teardown said to run before it: it runs none of them.
+- `--skip-validation-all`'s help no longer says it skips all validation.
 
 ## [2.2.0] - 2026-11-27
 

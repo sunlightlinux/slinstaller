@@ -77,8 +77,10 @@ order `--apply` runs them; what the live system still holds on those
 disks (arrays, volume groups, old signatures) is listed after it, as
 what is released first. What `--apply` would refuse on this machine (a
 target disk missing, a partition, of size 0 or zram, a disk in use, one
-shared with a disk the install leaves, a volume group name already taken) is said as "it will refuse"; the dry run still exits
-0 — that is a fact of the machine, not of the config — while
+shared with a disk the install leaves, a volume group name already
+taken, a Safe install's new partition on a disk that is not GPT or that
+parted would number otherwise) is said as "it will refuse"; the dry run
+still exits 0 — that is a fact of the machine, not of the config — while
 `--system-check` exits non-zero for it.
 
 Useful flags: `--repo`/`--keys`/`--arch`/`--packages` for the base
