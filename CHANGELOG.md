@@ -39,6 +39,12 @@ loop devices. No install in a VM was made for this release.
 
 ### Changes a config may notice
 
+- A pre-install hook that formats or wipes a partition a reuse install
+  keeps (changing its filesystem type or UUID) is now refused at the
+  partition stage: the target no longer matches what was confirmed.
+- On a live system without lvm2, wiping a disk that holds an LVM
+  physical volume is refused (install lvm2, or `--force-destructive`):
+  without `pvs` nothing can tell whether its group spans another disk.
 [STABILITY.md](STABILITY.md) allows a newer slinstaller to refuse a
 config that failed after the wipe or installed a system that could not
 boot; most of this release's refusals are of that kind. These are not, and change

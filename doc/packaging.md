@@ -47,7 +47,7 @@ the repo.
 
 - `btrfs-progs` — btrfs · `xfsprogs` — xfs · `f2fs-tools` — f2fs
 - `cryptsetup` — LUKS (any `type: crypt`, or an encrypted LVM/`/boot`)
-- `lvm2` — LVM (`pvcreate`/`vgcreate`/`lvcreate`)
+- `lvm2` — LVM (`pvcreate`/`vgcreate`/`lvcreate`); worth shipping for every layout: without `pvs`, a disk holding an old physical volume is refused (its group might span another disk)
 - `mdadm` — RAID
 - for a Safe install's shrink (`resize`): `sfdisk` and `setsid` from
   `util-linux` (2.21 or later, for `-w`), `e2fsck`/`resize2fs` from
