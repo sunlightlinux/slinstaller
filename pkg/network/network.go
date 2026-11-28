@@ -65,6 +65,9 @@ func verify(url string, timeout time.Duration) error {
 }
 
 func verifyWith(client *http.Client, url string) error {
+	// Each check has its own transport (the environment's proxy read
+	// afresh); its connection is not left idle for 90 s after.
+	defer client.CloseIdleConnections()
 	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("network: cannot reach %s: %w", url, err)

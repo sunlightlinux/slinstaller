@@ -865,8 +865,9 @@ restart:
 
 	// Preflight: a full install needs these on the live system. Check
 	// before confirming, so a missing tool fails here rather than partway
-	// through partitioning. (Staged --through runs skip this — the
-	// operator steering them knows the environment.)
+	// through partitioning. (A staged --through run checks only the
+	// partition stage's tools, when it partitions — the operator steering
+	// it knows the rest of the environment.)
 	encrypted := false
 	for _, p := range plan.Parts {
 		if p.Encrypted {

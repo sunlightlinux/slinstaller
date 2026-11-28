@@ -25,7 +25,9 @@ func NewTransport() *http.Transport {
 // http_proxy for http (a value without a scheme is http://), none for
 // localhost or a loopback address, nor for a host NO_PROXY/no_proxy names
 // ("*", a domain and its subdomains, with an optional leading "." or
-// "*.", an address or CIDR block, each with an optional port).
+// "*.", an address or CIDR block, each with an optional port). One
+// difference from Go: ".example" also matches the bare "example" (Go
+// takes only its subdomains), so that host goes direct.
 func EnvProxy(req *http.Request) (*neturl.URL, error) {
 	var proxy string
 	switch req.URL.Scheme {
