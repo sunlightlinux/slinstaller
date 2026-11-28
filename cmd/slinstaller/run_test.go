@@ -240,8 +240,8 @@ func TestDryRun(t *testing.T) {
 	// A target the machine does not have, or a listing that fails: the plan
 	// is still shown.
 	setListing(t, bin, "")
-	if _, _, err = runWith(t, "", path); err != nil {
-		t.Errorf("dry run for an absent disk: %v", err)
+	if _, errOut, err = runWith(t, "", path); err != nil || !strings.Contains(errOut, "it will refuse: target disk "+testDisk+" is not among") || strings.Contains(errOut, "Re-run with --apply") {
+		t.Errorf("dry run for an absent disk: %v\n%s", err, errOut)
 	}
 	os.Remove(filepath.Join(bin, "lsblk.json"))
 	if _, _, err = runWith(t, "", path); err != nil {

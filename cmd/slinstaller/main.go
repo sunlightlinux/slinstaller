@@ -1525,6 +1525,22 @@ func printRelease(plan *storage.Plan, force bool) (refuses bool) {
 	if err != nil {
 		return false
 	}
+	// The target checks --apply makes first: a disk that is not there, a
+	// partition, size 0, zram. The dry run invited an --apply that refused
+	// them. (A disk in use is said below, with what the teardown would
+	// release.)
+	for _, disk := range plan.DiskList() {
+		if d := blockdev.FindByPath(devs, disk); d != nil && d.InUse() != "" {
+			continue
+		}
+		if err := checkTargetDisks([]string{disk}, devs); err != nil {
+			fmt.Fprintf(os.Stderr, "\n(it will refuse: %v)\n", err)
+			refuses = true
+		}
+	}
+	if refuses {
+		return true
+	}
 	// A reuse install releases nothing, but a disk in use is refused all
 	// the same (checkTargetDisks): said here too, rather than "Re-run with
 	// --apply" over a config --apply refuses.
