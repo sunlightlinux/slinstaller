@@ -484,7 +484,7 @@ func TestReleaseRechecksTheListing(t *testing.T) {
 				{Name: "sdz1", Path: "/dev/sdz1", Type: "part", FsType: "linux_raid_member", UUID: "u"}}},
 		}, nil
 	}
-	wantErr(t, in.releaseDisks(), "the disks changed since they were checked")
+	wantErr(t, in.releaseDisks(), "the target changed since it was confirmed")
 	if len(r.cmds) != 0 {
 		t.Errorf("ran before refusing: %s", r.flat())
 	}

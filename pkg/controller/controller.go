@@ -114,6 +114,13 @@ type Options struct {
 	// blockdev.List; tests substitute their own.
 	Devices func() ([]blockdev.Device, error)
 
+	// Confirmed is the listing the disk checks ran on, before the operator
+	// confirmed: the partition stage refuses when a disk at one of the
+	// plan's paths is no longer that disk (swapped while the prompt
+	// waited), or a partition a reuse install shrinks, formats or keeps is
+	// no longer the one shown. nil skips the comparison.
+	Confirmed []blockdev.Device
+
 	// LogFile, if set, is a file on the live system holding the install's
 	// log. A full run copies it to /root/slinstaller.log on the target
 	// before unmounting, as clr-installer archives its log into the
@@ -400,6 +407,15 @@ func (in *installer) partition() error {
 	// A Safe install's new partitions must be the devices it then formats;
 	// checked before anything — a resize included — touches the disk.
 	if !in.plan.Wipe {
+		// The disk and partitions confirmed first: a wiping install
+		// compares them on releaseDisks' listing, the one it acts on.
+		devs, err := in.listDevices()
+		if err != nil {
+			return err
+		}
+		if changed := in.sinceConfirmed(devs); len(changed) > 0 {
+			return changedError(changed)
+		}
 		if err := in.plan.CheckCreateNumbers(); err != nil {
 			return err
 		}
@@ -681,11 +697,7 @@ func (in *installer) releaseDisks() error {
 	if !in.plan.Wipe {
 		return nil
 	}
-	list := in.opts.Devices
-	if list == nil {
-		list = blockdev.List
-	}
-	devs, err := list()
+	devs, err := in.listDevices()
 	if err != nil {
 		return err
 	}
@@ -702,7 +714,7 @@ func (in *installer) releaseDisks() error {
 	// listing, the one the teardown acts on: between the two, a disk
 	// plugged in while a prompt waited can have let udev assemble an array
 	// spanning a target and it, or mount something on a target.
-	var changed []string
+	changed := in.sinceConfirmed(devs)
 	for _, d := range disks {
 		if why := d.InUse(); why != "" {
 			changed = append(changed, d.Path+" is in use: "+why)
@@ -715,7 +727,7 @@ func (in *installer) releaseDisks() error {
 		changed = append(changed, blockdev.SharedMembers(devs, names)...)
 	}
 	if len(changed) > 0 {
-		return fmt.Errorf("the disks changed since they were checked; nothing was touched:\n  %s", strings.Join(changed, "\n  "))
+		return changedError(changed)
 	}
 	// All at once: an array or volume spanning the disks is released once.
 	if err := storage.RunCommands(blockdev.TeardownAll(disks), in.opts.Runner); err != nil {
@@ -723,6 +735,62 @@ func (in *installer) releaseDisks() error {
 	}
 	in.settle()
 	return nil
+}
+
+// listDevices is the machine's block devices now (Options.Devices).
+func (in *installer) listDevices() ([]blockdev.Device, error) {
+	if in.opts.Devices != nil {
+		return in.opts.Devices()
+	}
+	return blockdev.List()
+}
+
+// sinceConfirmed says what of the plan's disks, in devs, is not what the
+// operator confirmed (Options.Confirmed): a disk at the same path with
+// another serial, WWN, model or size — another disk, plugged in under the
+// name while the prompt waited — and, for a reuse install, a partition it
+// shrinks, formats or keeps that is gone or holds something else now. The
+// checks before the confirmation and the teardown after it went by path
+// alone, and the other disk was partitioned (or its partition shrunk)
+// with no question asked about it.
+func (in *installer) sinceConfirmed(devs []blockdev.Device) []string {
+	if in.opts.Confirmed == nil {
+		return nil
+	}
+	var out []string
+	for _, disk := range in.plan.DiskList() {
+		a, b := blockdev.FindByPath(in.opts.Confirmed, disk), blockdev.FindByPath(devs, disk)
+		if a == nil {
+			continue // not listed then either: a loop device or an image
+		}
+		if b == nil || a.Serial != b.Serial || a.WWN != b.WWN || a.Model != b.Model || a.Size != b.Size {
+			out = append(out, disk+" is not the disk that was confirmed (its serial, WWN, model or size differ - swapped?)")
+		}
+	}
+	if in.plan.Wipe {
+		return out
+	}
+	for _, p := range in.plan.Parts {
+		if p.LV || p.Raid || p.Create {
+			continue
+		}
+		a, b := blockdev.FindByPath(in.opts.Confirmed, p.Device), blockdev.FindByPath(devs, p.Device)
+		switch {
+		case a == nil:
+			// Refused before the confirmation (it has to exist); nothing
+			// to compare it with.
+		case b == nil:
+			out = append(out, p.Device+" is gone")
+		case a.Type != b.Type || a.Size != b.Size || a.FsType != b.FsType || a.UUID != b.UUID:
+			out = append(out, fmt.Sprintf("%s is not the partition that was confirmed (it was %s %s, %d bytes; it is %s %s, %d bytes)",
+				p.Device, orNone(a.FsType), a.UUID, a.Size, orNone(b.FsType), b.UUID, b.Size))
+		}
+	}
+	return out
+}
+
+func changedError(changed []string) error {
+	return fmt.Errorf("the target changed since it was confirmed; nothing was touched:\n  %s", strings.Join(changed, "\n  "))
 }
 
 func (in *installer) settle() {

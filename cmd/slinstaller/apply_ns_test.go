@@ -243,6 +243,7 @@ func applyChild(t *testing.T) {
 	}
 
 	applyDiskImage(t, confirmed)
+	applyAdversarial(t, confirmed)
 
 	// An installer message is shown before the operator confirms.
 	msgs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

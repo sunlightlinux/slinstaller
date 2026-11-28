@@ -1007,6 +1007,10 @@ restart:
 		if err := checkTargetDisks(plan.DiskList(), devs); err != nil {
 			return err
 		}
+		// What these checks saw is what the operator confirms: the
+		// partition stage refuses a disk or partition that is not that
+		// any more (swapped while the prompt waited).
+		opts.Confirmed = devs
 
 		if plan.Wipe {
 			// Wiping a disk that shares a RAID array or volume group with a
