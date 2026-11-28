@@ -757,3 +757,22 @@ func TestNetworkWithoutSshdService(t *testing.T) {
 		t.Errorf("the update service was not enabled: %v", err)
 	}
 }
+
+// dracut.conf.d linked absolutely inside an image (to /usr/lib/dracut/...)
+// is followed inside the target, as the keyfile's drop-in is: joined
+// plainly, the module drop-in was refused or written onto the live system.
+func TestDracutModuleThroughALink(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	real := mkTarget(t, in, "usr", "lib", "dracut", "dracut.conf.d")
+	mkTarget(t, in, "etc")
+	if err := os.Symlink("/usr/lib/dracut/dracut.conf.d", filepath.Join(in.opts.Root, "etc", "dracut.conf.d")); err != nil {
+		t.Fatal(err)
+	}
+	if err := in.forceDracutModule("mdraid"); err != nil {
+		t.Fatalf("forceDracutModule: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(real, "10-slinstaller-mdraid.conf")); err != nil {
+		t.Errorf("the drop-in is not where the installed system's dracut reads: %v", err)
+	}
+}

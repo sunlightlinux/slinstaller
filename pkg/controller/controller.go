@@ -1904,7 +1904,12 @@ func (in *installer) writeMdadmConf() error {
 // cannot infer in the chroot (it inspects the live system, not the target),
 // such as mdraid for a root on RAID.
 func (in *installer) forceDracutModule(module string) error {
-	dir := filepath.Join(in.opts.Root, "etc", "dracut.conf.d")
+	// Resolved as the keyfile's drop-in is: through an absolute link in the
+	// target, to where the installed system's dracut reads.
+	dir, err := system.TargetPath(in.opts.Root, "etc/dracut.conf.d")
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
