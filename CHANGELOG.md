@@ -10,6 +10,8 @@ change.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-28
+
 As in 2.2.0, most of what follows moves a failure from after the wipe to
 before it: sizes, names, minimums and the machine's own disks and volume
 groups are checked first, in the dry run and the interactive installers
