@@ -19,29 +19,31 @@ import (
 )
 
 // bundleEntry is one row of the Select Additional Bundles checklist: a short
-// name, a description, and the xbps packages it adds when ticked. Clear's
-// bundle names do not map to Sunlight, so this is a small curated set of
-// common extras.
+// name, a description, the xbps packages it adds when ticked, and the slinit
+// services it enables (a package installs its service without enabling it,
+// so a bundle that says "started at boot" has to). Clear's bundle names do
+// not map to Sunlight, so this is a small curated set of common extras.
 type bundleEntry struct {
-	name  string
-	desc  string
-	packs []string
+	name     string
+	desc     string
+	packs    []string
+	services []string
 }
 
 var bundleOptions = []bundleEntry{
-	{"vim", "Vi IMproved - improved text editor", []string{"vim"}},
-	{"nano", "Nano - simple text editor", []string{"nano"}},
-	{"git", "Git - version control", []string{"git"}},
-	{"curl", "curl - command-line data transfer", []string{"curl"}},
-	{"wget", "wget - file downloader", []string{"wget"}},
-	{"htop", "htop - interactive process viewer", []string{"htop"}},
-	{"tmux", "tmux - terminal multiplexer", []string{"tmux"}},
-	{"rsync", "rsync - fast file copy and sync", []string{"rsync"}},
-	{"man-pages", "Manual pages and reader", []string{"man-pages", "mdocml"}},
-	{"bash-completion", "Bash tab-completion", []string{"bash-completion"}},
-	{"openssh", "OpenSSH client and server", []string{"openssh"}},
-	{"sudo", "sudo - run commands as another user", []string{"sudo"}},
-	{"docker", "Docker Engine and containerd, started at boot", []string{"docker", "containerd"}},
+	{"vim", "Vi IMproved - improved text editor", []string{"vim"}, nil},
+	{"nano", "Nano - simple text editor", []string{"nano"}, nil},
+	{"git", "Git - version control", []string{"git"}, nil},
+	{"curl", "curl - command-line data transfer", []string{"curl"}, nil},
+	{"wget", "wget - file downloader", []string{"wget"}, nil},
+	{"htop", "htop - interactive process viewer", []string{"htop"}, nil},
+	{"tmux", "tmux - terminal multiplexer", []string{"tmux"}, nil},
+	{"rsync", "rsync - fast file copy and sync", []string{"rsync"}, nil},
+	{"man-pages", "Manual pages and reader", []string{"man-pages", "mdocml"}, nil},
+	{"bash-completion", "Bash tab-completion", []string{"bash-completion"}, nil},
+	{"openssh", "OpenSSH client and server", []string{"openssh"}, nil},
+	{"sudo", "sudo - run commands as another user", []string{"sudo"}, nil},
+	{"docker", "Docker Engine and containerd, started at boot", []string{"docker", "containerd"}, []string{"docker"}},
 }
 
 // updateMiniForm drives the two-field forms: Kernel Command Line (Add then
@@ -215,6 +217,7 @@ func (m model) updateBundles(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.bundleChecked[m.bundleCursor] = !m.bundleChecked[m.bundleCursor]
 	case "enter":
 		m.packages = m.bundlesToPackages()
+		m.services = m.bundlesToServices()
 		m.view = viewHub
 	}
 	return m, nil
@@ -223,13 +226,26 @@ func (m model) updateBundles(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // bundlesToPackages is the space-separated package list for the ticked
 // bundles, de-duplicated and sorted.
 func (m model) bundlesToPackages() string {
+	return m.tickedBundles(func(b bundleEntry) []string { return b.packs })
+}
+
+// bundlesToServices is the same for the services the ticked bundles
+// enable. containerd is not among docker's: docker's service depends on
+// it, so it starts with docker.
+func (m model) bundlesToServices() string {
+	return m.tickedBundles(func(b bundleEntry) []string { return b.services })
+}
+
+// tickedBundles joins what of picks from each ticked bundle, de-duplicated
+// and sorted, with spaces.
+func (m model) tickedBundles(of func(bundleEntry) []string) string {
 	seen := map[string]bool{}
 	var out []string
 	for i, on := range m.bundleChecked {
 		if !on {
 			continue
 		}
-		for _, p := range bundleOptions[i].packs {
+		for _, p := range of(bundleOptions[i]) {
 			if !seen[p] {
 				seen[p] = true
 				out = append(out, p)

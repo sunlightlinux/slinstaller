@@ -7,6 +7,7 @@ import (
 	"github.com/sunlightlinux/slinstaller/pkg/lvm"
 	"github.com/sunlightlinux/slinstaller/pkg/mdadm"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
+	"gopkg.in/yaml.v3"
 )
 
 func flatCmds(cmds [][]string) string {
@@ -331,6 +332,33 @@ func TestPackageNamesValidation(t *testing.T) {
 	}
 }
 
+// services: names slinit services to enable, each becoming a link in the
+// target's /etc/slinit.d/boot.d: a name with a "/" or ".." would make the
+// link elsewhere, and slinit itself refuses an empty name or one starting
+// with "." or "@". Refused before any disk is touched.
+func TestServicesKey(t *testing.T) {
+	var c Config
+	if err := yaml.Unmarshal([]byte("services: [docker, sshd, getty@tty2]\n"), &c); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(c.Services, " ") != "docker sshd getty@tty2" {
+		t.Fatalf("services = %q", c.Services)
+	}
+	c2 := btrfsConfig()
+	c2.Services = c.Services
+	if err := c2.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	for _, bad := range []string{"", ".", "..", ".hidden", "@x", "a/b", "../../etc/passwd", "/docker",
+		"docker ", "two words", "tab\there", "nl\n", "ctl\x01"} {
+		c := btrfsConfig()
+		c.Services = []string{"docker", bad}
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "is not a slinit service name") {
+			t.Errorf("services %q: %v", bad, err)
+		}
+	}
+}
+
 // skipValidationAll turns the layout checks off, not the ones on what
 // becomes a command's argument: a package "-r" made xbps-install install
 // into the live system's root, an env name "-i" was an option to env(1).
@@ -340,6 +368,7 @@ func TestSkipValidationAllKeepsArgumentChecks(t *testing.T) {
 		"kernel":        func(c *Config) { c.Kernel = "--repository=http://x" },
 		"kernel-remove": func(c *Config) { c.KernelRemove = []string{"-f"} },
 		"env":           func(c *Config) { c.Environment = map[string]string{"-i": "v"} },
+		"services":      func(c *Config) { c.Services = []string{"../x"} },
 	} {
 		c := btrfsConfig()
 		c.Kernel = "linux6.12"

@@ -15,6 +15,19 @@ change.
 - A `govulncheck` CI job: a known vulnerability reachable from the code,
   in the Go `go.mod` names or in a module, fails it. It is what would
   have caught 2.3.0 being built with Go 1.25.0.
+- **`services:` enables slinit services in the target.** Sunlight's
+  packages now carry their own slinit service (moby ships
+  `/usr/lib/slinit.d/docker`) and slinit-services' boot no longer waits
+  for docker by name, so an installed daemon starts at boot only when it is
+  linked into `/etc/slinit.d/boot.d`. `services: [docker]` makes that link,
+  as sshd's is made. A name with a `/`, a leading `.` or `@` or a space is
+  refused before the disk is touched (it would put the link somewhere
+  else), also under `skipValidationAll`; a service the target has no file
+  for is a warning and the install goes on; a target that boots runit
+  ignores the key with a warning. The full-screen installer's docker
+  bundle, which says "started at boot", now enables docker this way:
+  without it the label would no longer have been true. containerd starts
+  through docker's dependency and is not named.
 
 ## [2.3.1] - 2026-11-28
 

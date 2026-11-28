@@ -49,7 +49,8 @@ slinstaller's own additions, as optional config keys (see
 [config.md](config.md#beyond-clr-installers-format)): disks
 named by serial, WWN, model or stable path; fstab mount options and btrfs
 subvolumes; bootloader options (serial menu, removable-media path, no NVRAM,
-other systems); `write-files`, `power-state`, the http and no-proxy settings;
+other systems); `write-files`, `power-state`, `services` (slinit services
+enabled in the target), the http and no-proxy settings;
 swap sized from memory, RAID hot spares, whole-disk wipe modes. On the
 command line: `--system-check`, a diagnostics archive on failure, an
 install lock, and shell completions (`--completion bash|fish`).

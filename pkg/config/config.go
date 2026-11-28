@@ -88,6 +88,14 @@ type Config struct {
 	// a Sunlight config names real packages here.
 	Packages []string `yaml:"packages,omitempty"`
 
+	// Services are slinit services to enable in the target, linked into
+	// /etc/slinit.d/boot.d as `slinitctl enable` would: a daemon whose
+	// package installs its service without enabling it (docker) then
+	// starts at boot. A name the target has no service for is a warning,
+	// and the key is ignored, with a warning, on a target that boots
+	// runit.
+	Services []string `yaml:"services,omitempty"`
+
 	// Offline installs without fetching from a remote repository: the base
 	// system must come from a local repository on the live medium
 	// (clr-installer's offline). The network-readiness precheck is skipped
@@ -2195,13 +2203,23 @@ func problems(probs []string) error {
 	}
 }
 
+// validServiceName reports whether n is a name a service can be enabled
+// by offline: slinit's own rules (not empty, no leading "." or "@") and,
+// since the name becomes a link in /etc/slinit.d/boot.d, no "/" (so no
+// "." or ".." either) and no whitespace or control character.
+func validServiceName(n string) bool {
+	return n != "" && n[0] != '.' && n[0] != '@' && !strings.Contains(n, "/") &&
+		strings.IndexFunc(n, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0
+}
+
 // checkArgs is the part of Validate, kept under skipValidationAll, on the
 // config values that become arguments of a command: a package xbps-install
 // is handed (one beginning with "-" is an option to it: packages: [-r, /]
 // installed into the live system's root), and the env's names, substituted
 // into the hooks as $name and passed to env(1) as name=value (an empty name
 // replaced every "$" in the hooks; one beginning with "-" is an option to
-// env).
+// env), and the services, each the name of a link made in the target's
+// /etc/slinit.d/boot.d (one with a "/" or ".." would be made elsewhere).
 func (c *Config) checkArgs() []string {
 	var probs []string
 	add := func(format string, a ...any) { probs = append(probs, fmt.Sprintf(format, a...)) }
@@ -2218,6 +2236,11 @@ func (c *Config) checkArgs() []string {
 	for _, k := range c.KernelRemove {
 		if k == "" || notPackage(k) {
 			add("kernel-remove: %q is not a package name", k)
+		}
+	}
+	for _, n := range c.Services {
+		if !validServiceName(n) {
+			add("services: %q is not a slinit service name (empty, with a /, a leading . or @, a space or a control character)", n)
 		}
 	}
 	var envNames []string

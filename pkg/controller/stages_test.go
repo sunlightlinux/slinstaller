@@ -758,6 +758,97 @@ func TestNetworkWithoutSshdService(t *testing.T) {
 	}
 }
 
+// services: enables each named slinit service in the target, beside
+// sshd. One the target has no service for is a warning, as sshd is (the
+// bootloader is already in place); the others are enabled all the same.
+func TestNetworkEnablesConfigServices(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.Services = []string{"docker", "no-such-daemon", "local-svc"}
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	var log bytes.Buffer
+	in.opts.Log = &log
+	dir := mkTarget(t, in, "usr", "lib", "slinit.d")
+	for _, svc := range []string{"boot", "sshd", "docker"} {
+		if err := os.WriteFile(filepath.Join(dir, svc), []byte("type = process\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The administrator's service in /etc/slinit.d counts, as for sshd.
+	if err := os.WriteFile(filepath.Join(mkTarget(t, in, "etc", "slinit.d"), "local-svc"), []byte("type = process\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := in.network(); err != nil {
+		t.Fatalf("network: %v", err)
+	}
+	bootd := filepath.Join(in.opts.Root, "etc", "slinit.d", "boot.d")
+	for name, want := range map[string]string{
+		"sshd":      "/usr/lib/slinit.d/sshd",
+		"docker":    "/usr/lib/slinit.d/docker",
+		"local-svc": "/etc/slinit.d/local-svc",
+	} {
+		if got, err := os.Readlink(filepath.Join(bootd, name)); err != nil || got != want {
+			t.Errorf("boot.d/%s -> %q, %v; want %s", name, got, err, want)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(bootd, "no-such-daemon")); err == nil {
+		t.Error("a link to a service that does not exist was made")
+	}
+	if !strings.Contains(log.String(), "warning: the target has no no-such-daemon service") {
+		t.Errorf("no warning for the missing service in the log:\n%s", log.String())
+	}
+	if _, err := os.Lstat(filepath.Join(bootd, system.AutoUpdateServiceName)); err != nil {
+		t.Errorf("the update service was not enabled: %v", err)
+	}
+}
+
+// A service that is there but cannot be enabled is an error, not a
+// warning: only a missing service file is passed over.
+func TestNetworkConfigServiceLinkFails(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.Services = []string{"docker"}
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	dir := mkTarget(t, in, "usr", "lib", "slinit.d")
+	for _, svc := range []string{"boot", "sshd", "docker"} {
+		os.WriteFile(filepath.Join(dir, svc), nil, 0o644)
+	}
+	if err := in.network(); err != nil {
+		t.Fatalf("network: %v", err)
+	}
+	// boot.d/docker a non-empty directory: the link cannot replace it.
+	if err := os.Remove(filepath.Join(in.opts.Root, "etc", "slinit.d", "boot.d", "docker")); err != nil {
+		t.Fatal(err)
+	}
+	mkTarget(t, in, "etc", "slinit.d", "boot.d", "docker", "x")
+	if err := in.network(); err == nil || !strings.Contains(err.Error(), "enable slinit service docker") {
+		t.Errorf("network with boot.d/docker unlinkable: %v", err)
+	}
+}
+
+// services: names slinit services; a runit target boots none of them. The
+// key is passed over with a warning, and the install goes on.
+func TestNetworkServicesOnARunitTarget(t *testing.T) {
+	cfg := twoPartConfig()
+	cfg.Services = []string{"docker"}
+	var r recorder
+	in := stagedInstaller(t, cfg, &r)
+	var log bytes.Buffer
+	in.opts.Log = &log
+	if err := in.network(); err != nil {
+		t.Fatalf("network: %v", err)
+	}
+	if !strings.Contains(log.String(), "does not boot slinit; services (docker) are not enabled") {
+		t.Errorf("no warning for services on a runit target:\n%s", log.String())
+	}
+	if _, err := os.Lstat(filepath.Join(in.opts.Root, "etc", "slinit.d")); err == nil {
+		t.Error("slinit service links made on a runit target")
+	}
+	if _, err := os.Readlink(filepath.Join(in.opts.Root, "etc", "runit", "runsvdir", "default", "dhcpcd")); err != nil {
+		t.Errorf("runit's dhcpcd not enabled: %v", err)
+	}
+}
+
 // dracut.conf.d linked absolutely inside an image (to /usr/lib/dracut/...)
 // is followed inside the target, as the keyfile's drop-in is: joined
 // plainly, the module drop-in was refused or written onto the live system.

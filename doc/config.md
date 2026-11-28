@@ -144,6 +144,7 @@ noProxy: localhost,10.0.0.0/8
 power-state: poweroff     # reboot, poweroff, halt or kexec when the install ends
 write-files:
 - { path: /etc/motd, content: "Welcome.\n", permissions: "0644" }
+services: [docker]        # slinit services enabled in the target
 ```
 
 - **`match`** names the disk by what does not change between boots. Exactly
@@ -153,6 +154,15 @@ write-files:
 - **`spare: true`** on a `type: raid` partition makes it a hot spare.
 - **`wipe`** other than `superblock` goes over the whole disk and takes as
   long as the disk is large.
+- **`services`** enables slinit services in the target, as `slinitctl
+  enable` would: each gets a link in `/etc/slinit.d/boot.d`, so it starts at
+  boot. A package installs its service without enabling it (docker's
+  package ships `/usr/lib/slinit.d/docker`, and nothing starts it), so a
+  daemon to run at boot is named here as well as in `packages`. A name is a
+  plain service name — no `/`, no leading `.` or `@`, no spaces — or the
+  config is refused before any disk is touched. A service the target has no
+  file for is a warning, not a failure; on a target that boots runit the
+  key is ignored, with a warning. sshd is enabled without being named.
 
 **Installing from an image.** `image: base.tar.zst` (or `--image`) unpacks a
 root filesystem image — a tar archive or a squashfs — instead of installing

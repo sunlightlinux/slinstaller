@@ -2344,7 +2344,23 @@ func (in *installer) network() error {
 		} else if err != nil {
 			return err
 		}
+		// The config's services, so a daemon whose package does not
+		// enable it (docker) starts at boot. One the target lacks is a
+		// warning, as sshd is: the bootloader is already in place.
+		for _, name := range in.cfg.Services {
+			if err := system.EnableSlinitService(in.opts.Root, name); errors.Is(err, fs.ErrNotExist) {
+				if in.opts.Log != nil {
+					fmt.Fprintf(in.opts.Log, "warning: the target has no %s service; it is not enabled\n", name)
+				}
+			} else if err != nil {
+				return err
+			}
+		}
 		return system.AutoUpdate(in.opts.Root, in.cfg.AutoUpdates())
+	}
+	// services: names slinit services; a runit target has none of them.
+	if len(in.cfg.Services) > 0 && in.opts.Log != nil {
+		fmt.Fprintf(in.opts.Log, "warning: the target does not boot slinit; services (%s) are not enabled\n", strings.Join(in.cfg.Services, ", "))
 	}
 	return system.EnableService(in.opts.Root, "dhcpcd")
 }

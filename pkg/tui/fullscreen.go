@@ -145,6 +145,7 @@ func (m model) buildConfig() (*config.Config, error) {
 		cfg.ConsoleLogLevel = &lv
 	}
 	cfg.Packages = splitList(m.packages)
+	cfg.Services = splitList(m.services)
 	for _, ni := range m.netIfaces {
 		if !ni.Static {
 			continue
@@ -340,6 +341,7 @@ type model struct {
 	crashkernel string   // kdump memory reservation (crashkernel=); "" = kdump off
 	panicSecs   string   // seconds to auto-reboot after a panic (panic=); "" = not set
 	packages    string   // extra xbps packages (shown as "bundles")
+	services    string   // slinit services the ticked bundles enable
 
 	// Network interfaces, listed in the clr-style sub-page. Each is DHCP by
 	// default; a static one carries its CIDR address, gateway and DNS.

@@ -509,6 +509,38 @@ func TestBundles(t *testing.T) {
 	}
 }
 
+// The docker bundle says "started at boot": its package installs the
+// service without enabling it, so the bundle enables it through services:.
+// containerd starts through docker's dependency, and a bundle without a
+// service enables nothing.
+func TestDockerBundleEnablesItsService(t *testing.T) {
+	m := openSectionInTab(withSize(newModel(twoTestDisks())), 1, secBundles)
+	m = send(m, spaceKey) // vim: packages only
+	for bundleOptions[m.bundleCursor].name != "docker" {
+		m = send(m, down)
+	}
+	m = send(m, spaceKey)
+	done := send(m, enter)
+	if done.packages != "containerd docker vim" || done.services != "docker" {
+		t.Errorf("packages = %q, services = %q", done.packages, done.services)
+	}
+	cfg, err := done.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(cfg.Services, " ") != "docker" {
+		t.Errorf("config services = %q, want [docker]", cfg.Services)
+	}
+	// Unticking docker takes its service out again.
+	got := send(send(m, spaceKey), enter)
+	if got.services != "" || got.packages != "vim" {
+		t.Errorf("after unticking docker: packages %q, services %q", got.packages, got.services)
+	}
+	if cfg, _ := got.buildConfig(); cfg.Services != nil {
+		t.Errorf("config services with no service bundle = %q", cfg.Services)
+	}
+}
+
 func TestMirrorForm(t *testing.T) {
 	m := openSectionInTab(withSize(newModel(twoTestDisks())), 1, secMirror)
 	if m.view != viewMiniForm || !strings.Contains(viewOf(m), "Mirror URL:") {
