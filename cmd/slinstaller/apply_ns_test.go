@@ -668,6 +668,15 @@ func applyChild(t *testing.T) {
 	setListing(t, e.bin, existing("ext4", "107374182400"))
 	_, err = e.run(confirmed, shrink)
 	e.refused("no sfdisk", err, "missing tools on the live system: sfdisk")
+	// A staged run that partitions checks them too: it shrank the filesystem
+	// and then stopped without sfdisk.
+	e = newApplyEnv(t, "e2fsck", "resize2fs", "sh", "setsid")
+	setListing(t, e.bin, existing("ext4", "107374182400"))
+	_, err = e.run(confirmed, shrink, "--through", "partition")
+	e.refused("no sfdisk, staged", err, "missing tools on the live system: sfdisk")
+	if e.ran("resize2fs") != "" {
+		t.Errorf("a staged run without sfdisk shrank the filesystem:\n%s", e.ran("resize2fs"))
+	}
 	e = newApplyEnv(t, shrinkTools...)
 	setListing(t, e.bin, existing("ext4", "107374182400"))
 	errOut, err = e.run("no\n", shrink)

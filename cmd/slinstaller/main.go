@@ -885,6 +885,15 @@ restart:
 		}
 	}
 
+	// A staged run that partitions needs the partition stage's tools as a
+	// full one does: without sfdisk or setsid, a staged Safe install shrank
+	// the other system's filesystem and then stopped.
+	if through != "" && through != "pre-install" && !resume {
+		if missing := storage.MissingTools(partitionTools(plan, encrypted)); len(missing) > 0 {
+			return fmt.Errorf("missing tools on the live system: %s - install them and retry",
+				strings.Join(missing, ", "))
+		}
+	}
 	if through == "" {
 		// UEFI-only: a legacy/BIOS boot of the installer has no
 		// /sys/firmware/efi, so grub-install/efibootmgr would fail at the
@@ -913,7 +922,7 @@ restart:
 			}
 		}
 
-		required := append(plan.RequiredTools(), "chroot")
+		required := append(partitionTools(plan, encrypted), "chroot")
 		if cfg.PowerAction() == "kexec" {
 			required = append(required, "kexec")
 		}
@@ -921,15 +930,6 @@ restart:
 			required = append(required, controller.ImageTools(cfg.Image)...)
 		} else {
 			required = append(required, "xbps-install")
-		}
-		if encrypted {
-			required = append(required, "cryptsetup")
-		}
-		if lvm.Used(plan) {
-			required = append(required, "pvcreate", "vgcreate", "lvcreate")
-		}
-		if mdadm.Used(plan) {
-			required = append(required, "mdadm")
 		}
 		if missing := storage.MissingTools(required); len(missing) > 0 {
 			return fmt.Errorf("missing tools on the live system: %s - install them and retry",
@@ -1327,6 +1327,23 @@ func installStoppable(cfg *config.Config, opts controller.Options) error {
 	}()
 	opts.Stop = stop
 	return controller.Install(cfg, opts)
+}
+
+// partitionTools are the commands the partition stage runs on the live
+// system for this plan: the disk's own (RequiredTools), and cryptsetup,
+// LVM and mdadm where the layout has them.
+func partitionTools(plan *storage.Plan, encrypted bool) []string {
+	tools := plan.RequiredTools()
+	if encrypted {
+		tools = append(tools, "cryptsetup")
+	}
+	if lvm.Used(plan) {
+		tools = append(tools, "pvcreate", "vgcreate", "lvcreate")
+	}
+	if mdadm.Used(plan) {
+		tools = append(tools, "mdadm")
+	}
+	return tools
 }
 
 // checkTargetDisks confirms each target disk exists and is a whole disk
