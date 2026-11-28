@@ -75,7 +75,11 @@ The plan is every command the partition stage runs — `parted`,
 `cryptsetup`, `mdadm`, `pvcreate`/`vgcreate`/`lvcreate`, `mkfs` — in the
 order `--apply` runs them; what the live system still holds on those
 disks (arrays, volume groups, old signatures) is listed after it, as
-what is released first.
+what is released first. What `--apply` would refuse on this machine (a
+disk in use, one shared with a disk the install leaves, a volume group
+name already taken) is said as "it will refuse"; the dry run still exits
+0 — that is a fact of the machine, not of the config — while
+`--system-check` exits non-zero for it.
 
 Useful flags: `--repo`/`--keys`/`--arch`/`--packages` for the base
 install, `--root` for the target mount tree, and `--through <stage>` to run

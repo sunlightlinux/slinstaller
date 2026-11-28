@@ -126,6 +126,14 @@ change.
   The install runs under umask 022 (an inherited 0 made `/var/db/xbps`
   world-writable on the installed system), and command output on the
   terminal is masked as in the log.
+- **Interactive installs refuse early.** A BIOS boot and a held install
+  lock are refused before the first question, not after the passphrase;
+  the text flow refuses a disk shared with another when it is picked and
+  a swap the disk cannot hold when it is typed. "Back to menu" no longer
+  keeps the previous pass's proxy.
+- `--system-check` fails what its plan says `--apply` refuses (it said
+  "passed" after "it will refuse"); the disk-image dry run says "it will
+  refuse" too; a config URL is not fetched for a run its flags refuse.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 - A target with no `sshd` service (no `openssh` in its packages) is
