@@ -30,6 +30,15 @@ counts 35 reachable ones in Go 1.25.0, the `go` line, and none in 1.27.4.
 The `go` line stays a floor for building, not a recommendation. Check a
 built binary with `govulncheck -mode=binary slinstaller`.
 
+Sunlight packages it the same way: the
+[`slinstaller` template](https://github.com/sunlightlinux/slpkgs/blob/21a8fc38ba87061cb9328e69643749ba6e5f66a6/srcpkgs/slinstaller/template)
+on slpkgs' `next` branch (2.3.1_1 at that commit) builds
+`./cmd/slinstaller` from the release tarball with `CGO_ENABLED=0` and
+`-X main.version`, compiled by the tree's Go (1.27.4 there), and
+`depends` on the "Always" packages of section 2 plus `ca-certificates`.
+Installing that package is the alternative to dropping a hand-built
+binary onto the ISO.
+
 ## 2. Tools the live ISO must carry
 
 slinstaller shells out to these on the live system; the install fails in
