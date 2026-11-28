@@ -136,6 +136,15 @@ change.
   disk-image one) say "it will refuse" for a target disk that is missing,
   a partition, of size 0, zram, in use or shared, instead of "Re-run with
   --apply"; a config URL is not fetched for a run its flags refuse.
+- **A Safe install's shrink:** a Ctrl+C on the terminal no longer kills
+  `resize2fs`, `ntfsresize` or `sfdisk` half-way (they run under
+  `setsid -w`), which left the kept system's filesystem corrupt; the free
+  region is read in bytes, so a partition starting at sector 63 does not
+  make the new one overlap it; a non-GPT disk is refused before anything
+  when partitions are to be created on it; `sfdisk` and `setsid` are
+  among the tools checked first; created partitions are held to the size
+  minimums. Each of these used to fail after the other system was
+  shrunk.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 - A target with no `sshd` service (no `openssh` in its packages) is

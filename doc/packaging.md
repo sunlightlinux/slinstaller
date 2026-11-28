@@ -32,7 +32,7 @@ the repo.
 **Always:**
 
 - `parted` — partitioning (no `sgdisk`/`gptfdisk` needed)
-- `util-linux` — `partprobe`, `blkid`, `lsblk`, `mkswap`, `fallocate`
+- `util-linux` — `partprobe`, `blkid`, `lsblk`, `mkswap`, `fallocate`, and for a Safe install's shrink `sfdisk` and `setsid` (2.21 or later, for `-w`)
 - `dosfstools` — `mkfs.vfat` for the ESP
 - `e2fsprogs` — `mkfs.ext4` (and fsck at boot on the target)
 - `xbps` — `xbps-install` fetches the base system
