@@ -477,3 +477,23 @@ func TestVGNameClashesFollowsPVLinks(t *testing.T) {
 		t.Errorf("clashes %q, want only %q", got, want)
 	}
 }
+
+// A firmware RAID member shows no UUID: another disk carrying the same
+// kind of metadata is taken for a fellow member; mdadm's own members are
+// judged by their UUID, as before.
+func TestSharedMembersFirmwareRaid(t *testing.T) {
+	devs := []Device{
+		{Name: "sda", Path: "/dev/sda", Type: "disk", FsType: "isw_raid_member"},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", FsType: "isw_raid_member"},
+		{Name: "sdc", Path: "/dev/sdc", Type: "disk", FsType: "linux_raid_member"},
+	}
+	if got := SharedMembers(devs, []string{"/dev/sda"}); len(got) != 1 || !strings.Contains(got[0], "firmware RAID array with /dev/sdb") {
+		t.Errorf("isw member beside another: %q", got)
+	}
+	if got := SharedMembers(devs, []string{"/dev/sda", "/dev/sdb"}); len(got) != 0 {
+		t.Errorf("both members wiped: %q", got)
+	}
+	if got := SharedMembers(devs, []string{"/dev/sdc"}); len(got) != 0 {
+		t.Errorf("a linux_raid_member with no UUID: %q", got)
+	}
+}

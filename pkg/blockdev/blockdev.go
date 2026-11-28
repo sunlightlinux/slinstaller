@@ -535,7 +535,33 @@ func SharedMembers(devs []Device, targets []string) []string {
 			out = append(out, fmt.Sprintf("%s (%s %s) has a fellow member on %s (or a dd clone of it is there)", e.dev.Path, e.dev.FsType, e.dev.UUID, strings.Join(others, ", ")))
 		}
 	}
+	// A firmware RAID member (Intel RST, DDF, ...) carries no UUID lsblk
+	// shows, and an array the live system has not assembled has no holder
+	// for Shared to see: one of another disk's kind is taken for a fellow
+	// member, as the array's own disks cannot be told from here.
+	for _, e := range all {
+		if !e.inside || !firmwareRaid(e.dev.FsType) || said[e.dev.Path] {
+			continue
+		}
+		var others []string
+		for _, o := range all {
+			if !o.inside && !insidePaths[o.dev.Path] && o.dev.FsType == e.dev.FsType && !slices.Contains(others, o.dev.Path) {
+				others = append(others, o.dev.Path)
+			}
+		}
+		if len(others) > 0 {
+			said[e.dev.Path] = true
+			out = append(out, fmt.Sprintf("%s (%s) may be one disk of a firmware RAID array with %s", e.dev.Path, e.dev.FsType, strings.Join(others, ", ")))
+		}
+	}
 	return out
+}
+
+// firmwareRaid reports whether a signature is a firmware (BIOS) RAID
+// member's: isw_raid_member, ddf_raid_member and the other *_raid_member
+// blkid names, not mdadm's own linux_raid_member.
+func firmwareRaid(fs string) bool {
+	return strings.HasSuffix(fs, "_raid_member") && fs != "linux_raid_member"
 }
 
 // VGNameClashes lists the volume groups among names (the ones an install

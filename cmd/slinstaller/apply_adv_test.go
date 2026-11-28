@@ -16,6 +16,33 @@ func applyAdversarial(t *testing.T, confirmed string) {
 	swappedUnderPrompt(t, confirmed)
 	reuseNamesTheDisk(t)
 	noPvsToAsk(t, confirmed)
+	firmwareRaidMember(t, confirmed)
+}
+
+// firmwareRaidMember: the target is one disk of an Intel RST (or DDF)
+// array the live system has not assembled. Its metadata is on the whole
+// disk and carries no UUID lsblk shows, so neither Shared (no holder) nor
+// SharedMembers (no UUID) saw the array, and the wipe erased one member
+// of an array whose other disk the confirmation never named.
+func firmwareRaidMember(t *testing.T, confirmed string) {
+	listing := `{"name":"slitest0","path":"` + testDisk + `","size":128000000000,"type":"disk","fstype":"isw_raid_member"},
+		{"name":"sdz","path":"/dev/sdz","size":128000000000,"type":"disk","fstype":"isw_raid_member"}`
+	e := newApplyEnv(t)
+	setListing(t, e.bin, listing)
+	_, err := e.run(confirmed, plainConfig())
+	e.refused("wipe: a firmware RAID member", err, "would break other disks")
+	e.untouched("wipe: a firmware RAID member")
+	e = newApplyEnv(t)
+	setListing(t, e.bin, listing)
+	if _, err = e.run(confirmed, plainConfig(), "--force-destructive", "--through", "partition"); err != nil {
+		t.Errorf("wipe: a firmware RAID member, forced: %v", err)
+	}
+	// The array's other disks not on the machine: nothing else to break.
+	e = newApplyEnv(t)
+	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":128000000000,"type":"disk","fstype":"isw_raid_member"}`)
+	if _, err = e.run(confirmed, plainConfig(), "--through", "partition"); err != nil {
+		t.Errorf("wipe: a lone firmware RAID member: %v", err)
+	}
 }
 
 // noPvsToAsk: a physical volume on a target, with no pvs on the live
