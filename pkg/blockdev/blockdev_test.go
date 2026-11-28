@@ -497,3 +497,23 @@ func TestSharedMembersFirmwareRaid(t *testing.T) {
 		t.Errorf("a linux_raid_member with no UUID: %q", got)
 	}
 }
+
+// Without pvs, the PVs among what targets destroy are listed (and only
+// those), with what to do about it: lvm2 is needed on the live system only
+// for an LVM layout, so a reinstall over an old LVM disk meets this.
+func TestUnknownGroups(t *testing.T) {
+	devs := []Device{
+		{Name: "sda", Path: "/dev/sda", Type: "disk", Children: []Device{
+			{Name: "sda1", Path: "/dev/sda1", Type: "part", FsType: "vfat"},
+			{Name: "sda2", Path: "/dev/sda2", Type: "part", FsType: "LVM2_member"}}},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", Children: []Device{
+			{Name: "sdb1", Path: "/dev/sdb1", Type: "part", FsType: "LVM2_member"}}},
+	}
+	got := UnknownGroups(devs, []string{"/dev/sda"})
+	if len(got) != 1 || !strings.HasPrefix(got[0], "/dev/sda2 ") || !strings.Contains(got[0], "install lvm2") {
+		t.Errorf("wiping sda: %q", got)
+	}
+	if got := UnknownGroups(devs, []string{"/dev/sda1"}); len(got) != 0 {
+		t.Errorf("formatting the ESP: %q", got)
+	}
+}

@@ -459,7 +459,7 @@ func UnknownGroups(devs []Device, targets []string) []string {
 		walk(d, false)
 	}
 	for i, pv := range out {
-		out[i] = pv + " is an LVM physical volume, and there is no pvs on the live system (or it failed) to tell whether its volume group has volumes on other disks"
+		out[i] = pv + " is an LVM physical volume, and there is no pvs on the live system (or it failed) to tell whether its volume group has volumes on other disks - install lvm2 on the live system for pvs to tell"
 	}
 	return out
 }
