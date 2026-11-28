@@ -1292,7 +1292,7 @@ func (m model) installProblem() string {
 	// refused there, it ended the program, pointing at a config key the
 	// wizard does not show.
 	if err == nil && plan.Wipe {
-		devs, vgs := machineVolumes()
+		devs, vgs, known := machineVolumes()
 		if groups := plan.VGNames(); len(groups) > 0 {
 			if clash := blockdev.VGNameClashes(devs, vgs, groups, plan.DiskList()); len(clash) > 0 {
 				err = fmt.Errorf("%s - give the LVM partition another Volume group name in Installation Media", strings.Join(clash, "; "))
@@ -1307,6 +1307,9 @@ func (m model) installProblem() string {
 				shared = append(shared, blockdev.Shared(devs, disk, plan.DiskList(), vgs)...)
 			}
 			shared = append(shared, blockdev.SharedMembers(devs, plan.DiskList())...)
+			if !known {
+				shared = append(shared, blockdev.UnknownGroups(devs, plan.DiskList())...)
+			}
 			if len(shared) > 0 {
 				err = fmt.Errorf("wiping %s would break other disks: %s - choose another disk in Installation Media, or start the installer with --force-destructive",
 					strings.Join(plan.DiskList(), ", "), strings.Join(shared, "; "))
@@ -1333,9 +1336,10 @@ func (m model) installProblem() string {
 // machineVolumes is the machine's block devices and LVM volume groups, for
 // the wizard's check of the volume group names. A variable so a test can
 // give its own.
-var machineVolumes = func() ([]blockdev.Device, map[string][]string) {
+var machineVolumes = func() ([]blockdev.Device, map[string][]string, bool) {
 	devs, _ := blockdev.List()
-	return devs, blockdev.VolumeGroups()
+	vgs, known := blockdev.VolumeGroupsKnown()
+	return devs, vgs, known
 }
 
 // problemLines breaks a validation message into popup lines of a width

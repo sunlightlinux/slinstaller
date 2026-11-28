@@ -22,7 +22,7 @@ func TestPromptRefusesASharedDisk(t *testing.T) {
 	fakeLsblk(t, twoDisks)
 	old := machineVolumes
 	t.Cleanup(func() { machineVolumes = old })
-	machineVolumes = func() ([]blockdev.Device, map[string][]string) {
+	machineVolumes = func() ([]blockdev.Device, map[string][]string, bool) {
 		devs := []blockdev.Device{
 			{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 64e9, Children: []blockdev.Device{
 				{Name: "sda2", Path: "/dev/sda2", Type: "part", FsType: "LVM2_member"}}},
@@ -30,7 +30,7 @@ func TestPromptRefusesASharedDisk(t *testing.T) {
 				{Name: "sdb1", Path: "/dev/sdb1", Type: "part", FsType: "LVM2_member"}}},
 			{Name: "nvme0n1", Path: "/dev/nvme0n1", Type: "disk", Size: 64e9},
 		}
-		return devs, map[string][]string{"data": {"/dev/sda2", "/dev/sdb1"}}
+		return devs, map[string][]string{"data": {"/dev/sda2", "/dev/sdb1"}}, true
 	}
 	rest := []string{"", "n", "none", "", "", "correct horse", "correct horse", "y"}
 
@@ -62,7 +62,7 @@ func TestPromptSwapMustFitTheDisk(t *testing.T) {
 	fakeLsblk(t, twoDisks) // 64 GB disks
 	old := machineVolumes
 	t.Cleanup(func() { machineVolumes = old })
-	machineVolumes = func() ([]blockdev.Device, map[string][]string) { return nil, nil }
+	machineVolumes = func() ([]blockdev.Device, map[string][]string, bool) { return nil, nil, true }
 	tail := []string{"", "", "correct horse", "correct horse", "y"}
 	for _, swap := range []string{"partition", "file"} {
 		var out bytes.Buffer
@@ -92,7 +92,7 @@ func TestPromptSwapFitEndsWithTheInput(t *testing.T) {
 	fakeLsblk(t, `{"name":"vda","path":"/dev/vda","size":3500000000,"type":"disk"}`)
 	old := machineVolumes
 	t.Cleanup(func() { machineVolumes = old })
-	machineVolumes = func() ([]blockdev.Device, map[string][]string) { return nil, nil }
+	machineVolumes = func() ([]blockdev.Device, map[string][]string, bool) { return nil, nil, true }
 	done := make(chan error, 1)
 	go func() {
 		_, _, err := RunText(answers("1", "", "n", "partition"), io.Discard, TextOptions{})
@@ -105,5 +105,36 @@ func TestPromptSwapFitEndsWithTheInput(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the swap size was asked again for ever after the input ended")
+	}
+}
+
+// A disk holding an LVM physical volume, picked with no pvs on the live
+// system to say what its group spans, is refused when it is picked, as
+// the installer refuses it after the questions (unless
+// --force-destructive).
+func TestPromptRefusesAPVWithNoPvs(t *testing.T) {
+	if _, err := cryptHash("probe-password"); err != nil {
+		t.Skipf("no openssl to hash the password with: %v", err)
+	}
+	fakeLsblk(t, twoDisks)
+	old := machineVolumes
+	t.Cleanup(func() { machineVolumes = old })
+	machineVolumes = func() ([]blockdev.Device, map[string][]string, bool) {
+		devs := []blockdev.Device{
+			{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 64e9},
+			{Name: "sdb", Path: "/dev/sdb", Type: "disk", Size: 64e9, Children: []blockdev.Device{
+				{Name: "sdb1", Path: "/dev/sdb1", Type: "part", FsType: "LVM2_member"}}},
+			{Name: "nvme0n1", Path: "/dev/nvme0n1", Type: "disk", Size: 64e9},
+		}
+		return devs, nil, false
+	}
+	rest := []string{"", "n", "none", "", "", "correct horse", "correct horse", "y"}
+	var out bytes.Buffer
+	cfg, _, err := RunText(answers(append([]string{"1", "2"}, rest...)...), &out, TextOptions{})
+	if err != nil {
+		t.Fatalf("Run: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "no pvs") || cfg.TargetMedia[0].Name != "nvme0n1" {
+		t.Errorf("the PV disk was taken (%s):\n%s", cfg.TargetMedia[0].Name, out.String())
 	}
 }

@@ -656,10 +656,10 @@ func TestMediaDialogMarksTheDefaultDisk(t *testing.T) {
 func TestInstallProblemVGNameClash(t *testing.T) {
 	old := machineVolumes
 	t.Cleanup(func() { machineVolumes = old })
-	machineVolumes = func() ([]blockdev.Device, map[string][]string) {
+	machineVolumes = func() ([]blockdev.Device, map[string][]string, bool) {
 		devs := twoTestDisks()
 		devs[1].Children = []blockdev.Device{{Name: "sdb1", Path: "/dev/sdb1", Type: "part"}}
-		return devs, map[string][]string{"vg0": {"/dev/sdb1"}}
+		return devs, map[string][]string{"vg0": {"/dev/sdb1"}}, true
 	}
 	m := readyModel()
 	m.parts = []partEntry{
@@ -683,12 +683,12 @@ func TestInstallProblemVGNameClash(t *testing.T) {
 func TestInstallProblemSharedDisk(t *testing.T) {
 	old := machineVolumes
 	t.Cleanup(func() { machineVolumes = old })
-	machineVolumes = func() ([]blockdev.Device, map[string][]string) {
+	machineVolumes = func() ([]blockdev.Device, map[string][]string, bool) {
 		devs := twoTestDisks()
 		devs[0].Type, devs[1].Type = "disk", "disk"
 		devs[0].Children = []blockdev.Device{{Name: "sda2", Path: "/dev/sda2", Type: "part", FsType: "LVM2_member"}}
 		devs[1].Children = []blockdev.Device{{Name: "sdb1", Path: "/dev/sdb1", Type: "part", FsType: "LVM2_member"}}
-		return devs, map[string][]string{"data": {"/dev/sda2", "/dev/sdb1"}}
+		return devs, map[string][]string{"data": {"/dev/sda2", "/dev/sdb1"}}, true
 	}
 	m := readyModel()
 	if p := m.installProblem(); !strings.Contains(p, "would break other disks") || !strings.Contains(p, "--force-destructive") {
@@ -726,5 +726,29 @@ func TestSafeInstallRootMeetsTheMinimum(t *testing.T) {
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("%d MiB free: root %s does not validate: %v", free, m.parts[1].Size, err)
 		}
+	}
+}
+
+// A physical volume on the disk the wizard wipes, with no pvs on the live
+// system (lvm2 is needed only for an LVM layout) to say what its group
+// spans: the installer refuses it after the wizard unless
+// --force-destructive, ending the program with every answer lost. The
+// wizard says so at Install, as it does for a group it knows is shared.
+func TestInstallProblemPVWithNoPvs(t *testing.T) {
+	old := machineVolumes
+	t.Cleanup(func() { machineVolumes = old })
+	machineVolumes = func() ([]blockdev.Device, map[string][]string, bool) {
+		devs := twoTestDisks()
+		devs[0].Type, devs[1].Type = "disk", "disk"
+		devs[0].Children = []blockdev.Device{{Name: "sda2", Path: "/dev/sda2", Type: "part", FsType: "LVM2_member"}}
+		return devs, nil, false
+	}
+	m := readyModel()
+	if p := m.installProblem(); !strings.Contains(p, "no pvs") || !strings.Contains(p, "--force-destructive") {
+		t.Errorf("problem %q", p)
+	}
+	m.force = true
+	if p := m.installProblem(); p != "" {
+		t.Errorf("with --force-destructive: %q", p)
 	}
 }

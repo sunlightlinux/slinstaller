@@ -62,9 +62,13 @@ func RunText(in *bufio.Reader, w io.Writer, opts TextOptions) (*config.Config, s
 		if opts.Force {
 			break
 		}
-		devs, vgs := machineVolumes()
+		devs, vgs, known := machineVolumes()
 		shared := blockdev.Shared(devs, disk.Path, []string{disk.Path}, vgs)
 		shared = append(shared, blockdev.SharedMembers(devs, []string{disk.Path})...)
+		if !known {
+			// As the installer refuses it after the questions.
+			shared = append(shared, blockdev.UnknownGroups(devs, []string{disk.Path})...)
+		}
 		if len(shared) == 0 {
 			break
 		}
