@@ -417,11 +417,51 @@ func Shared(devs []Device, disk string, wiped []string, vgs map[string][]string)
 // volumes, from pvs. Without LVM tools, or with no LVM, it is empty: there
 // is then no group a wipe could break.
 func VolumeGroups() map[string][]string {
+	vgs, _ := VolumeGroupsKnown()
+	return vgs
+}
+
+// VolumeGroupsKnown is VolumeGroups, and whether pvs answered at all.
+// Without it (no LVM tools on the live system, or pvs failing) the groups
+// are not known — which is not the same as there being none: a physical
+// volume on a disk is in its group whatever the live system has installed
+// (see UnknownGroups).
+func VolumeGroupsKnown() (map[string][]string, bool) {
 	out, err := exec.Command("pvs", "--noheadings", "--separator", ":", "-o", "pv_name,vg_name").Output()
 	if err != nil {
-		return nil
+		return nil, false
 	}
-	return parseVolumeGroups(string(out))
+	return parseVolumeGroups(string(out)), true
+}
+
+// UnknownGroups lists the LVM physical volumes among the devices targets
+// destroy (each target and what is under it), for when pvs could not say
+// which groups they are in. lsblk's UUID for a PV is its own, so
+// SharedMembers does not see a group either; taken for none, a PV whose
+// group also has one on another disk was erased, and that group broken.
+func UnknownGroups(devs []Device, targets []string) []string {
+	isTarget := map[string]bool{}
+	for _, t := range targets {
+		isTarget[t] = true
+	}
+	var out []string
+	var walk func(d Device, inside bool)
+	walk = func(d Device, inside bool) {
+		inside = inside || isTarget[d.Path]
+		if inside && d.FsType == "LVM2_member" && !slices.Contains(out, d.Path) {
+			out = append(out, d.Path)
+		}
+		for _, c := range d.Children {
+			walk(c, inside)
+		}
+	}
+	for _, d := range devs {
+		walk(d, false)
+	}
+	for i, pv := range out {
+		out[i] = pv + " is an LVM physical volume, and there is no pvs on the live system (or it failed) to tell whether its volume group has volumes on other disks"
+	}
+	return out
 }
 
 func parseVolumeGroups(s string) map[string][]string {

@@ -133,7 +133,7 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply, forceDestructiv
 				fmt.Fprintf(os.Stderr, "\n(it will refuse: %v)\n", err)
 				refuses = true
 			}
-			if shared := append(blockdev.Shared(devs, disk, []string{disk}, blockdev.VolumeGroups()), blockdev.SharedMembers(devs, []string{disk})...); len(shared) > 0 && !forceDestructive {
+			if shared := wouldBreak(devs, disk); len(shared) > 0 && !forceDestructive {
 				fmt.Fprintf(os.Stderr, "\n(it will refuse, unless --force-destructive: writing over %s would break other disks: %s)\n", disk, strings.Join(shared, "; "))
 				refuses = true
 			}
@@ -162,7 +162,7 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply, forceDestructiv
 	if err := checkTargetDisks([]string{disk}, devs); err != nil {
 		return err
 	}
-	if shared := append(blockdev.Shared(devs, disk, []string{disk}, blockdev.VolumeGroups()), blockdev.SharedMembers(devs, []string{disk})...); len(shared) > 0 && !forceDestructive {
+	if shared := wouldBreak(devs, disk); len(shared) > 0 && !forceDestructive {
 		return fmt.Errorf("writing over %s would break other disks:\n  %s\npass --force-destructive to write it anyway",
 			disk, strings.Join(shared, "\n  "))
 	}
@@ -194,7 +194,7 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply, forceDestructiv
 	if err := checkTargetDisks([]string{disk}, now); err != nil {
 		return fmt.Errorf("since the confirmation: %w; nothing was written", err)
 	}
-	if shared := append(blockdev.Shared(now, disk, []string{disk}, blockdev.VolumeGroups()), blockdev.SharedMembers(now, []string{disk})...); len(shared) > 0 && !forceDestructive {
+	if shared := wouldBreak(now, disk); len(shared) > 0 && !forceDestructive {
 		return fmt.Errorf("since the confirmation, writing over %s would break other disks:\n  %s\nnothing was written", disk, strings.Join(shared, "\n  "))
 	}
 	cmds = diskImageCommands(now, image, disk, cfg.AllowInsecureHTTP)
@@ -206,6 +206,18 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply, forceDestructiv
 		return powerAfter(action, cfg.PowerStateDelay)
 	}
 	return nil
+}
+
+// wouldBreak is what writing over disk breaks on other disks: an array or
+// volume group it shares with one (Shared, SharedMembers), or a physical
+// volume whose group pvs could not be asked about (UnknownGroups).
+func wouldBreak(devs []blockdev.Device, disk string) []string {
+	vgs, known := blockdev.VolumeGroupsKnown()
+	out := append(blockdev.Shared(devs, disk, []string{disk}, vgs), blockdev.SharedMembers(devs, []string{disk})...)
+	if !known {
+		out = append(out, blockdev.UnknownGroups(devs, []string{disk})...)
+	}
+	return out
 }
 
 // sameDisk refuses when disk, between two listings, is no longer the same

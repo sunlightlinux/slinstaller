@@ -1015,12 +1015,15 @@ restart:
 		if plan.Wipe {
 			// Wiping a disk that shares a RAID array or volume group with a
 			// disk the install does not wipe breaks that one too.
-			vgs := blockdev.VolumeGroups()
+			vgs, vgsKnown := blockdev.VolumeGroupsKnown()
 			var shared []string
 			for _, disk := range plan.DiskList() {
 				shared = append(shared, blockdev.Shared(devs, disk, plan.DiskList(), vgs)...)
 			}
 			shared = append(shared, blockdev.SharedMembers(devs, plan.DiskList())...)
+			if !vgsKnown {
+				shared = append(shared, blockdev.UnknownGroups(devs, plan.DiskList())...)
+			}
 			if len(shared) > 0 && !forceDestructive {
 				return fmt.Errorf("wiping %s would break other disks:\n  %s\npass --force-destructive to wipe it anyway",
 					strings.Join(plan.DiskList(), ", "), strings.Join(shared, "\n  "))
@@ -1065,7 +1068,11 @@ restart:
 			shared := blockdev.SharedMembers(devs, formatted)
 			// And an LVM physical volume whose group has others (lsblk's
 			// UUID for a PV is its own; pvs knows the groups).
-			for vg, pvs := range blockdev.VolumeGroups() {
+			vgs, vgsKnown := blockdev.VolumeGroupsKnown()
+			if !vgsKnown {
+				shared = append(shared, blockdev.UnknownGroups(devs, formatted)...)
+			}
+			for vg, pvs := range vgs {
 				// The PVs this install does not format or shrink: only
 				// those are harmed (a group wholly reformatted is not).
 				others := slices.DeleteFunc(slices.Clone(pvs), func(x string) bool { return slices.Contains(formatted, x) })
@@ -1604,12 +1611,15 @@ func printRelease(plan *storage.Plan, force bool) (refuses bool) {
 	}
 	// What --apply refuses before the confirmation, said here: the dry run
 	// otherwise invited an --apply that then refused.
-	vgs := blockdev.VolumeGroups()
+	vgs, vgsKnown := blockdev.VolumeGroupsKnown()
 	var shared []string
 	for _, disk := range plan.DiskList() {
 		shared = append(shared, blockdev.Shared(devs, disk, plan.DiskList(), vgs)...)
 	}
 	shared = append(shared, blockdev.SharedMembers(devs, plan.DiskList())...)
+	if !vgsKnown {
+		shared = append(shared, blockdev.UnknownGroups(devs, plan.DiskList())...)
+	}
 	if len(shared) > 0 && !force {
 		fmt.Fprintf(os.Stderr, "  (it will refuse, unless --force-destructive: wiping would break other disks: %s)\n", strings.Join(shared, "; "))
 		refuses = true

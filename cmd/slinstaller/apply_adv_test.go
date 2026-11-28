@@ -15,6 +15,63 @@ import (
 func applyAdversarial(t *testing.T, confirmed string) {
 	swappedUnderPrompt(t, confirmed)
 	reuseNamesTheDisk(t)
+	noPvsToAsk(t, confirmed)
+}
+
+// noPvsToAsk: a physical volume on a target, with no pvs on the live
+// system to say which group it is in. lsblk's UUID for a PV is its own,
+// so SharedMembers cannot see the group either; the group was taken for
+// none ("without LVM tools there is no group a wipe could break") and the
+// PV erased, breaking a volume group whose other PV is on another disk.
+// Not knowing is refused, as knowing it is shared is: unless forced.
+func noPvsToAsk(t *testing.T, confirmed string) {
+	pvListing := `{"name":"slitest0","path":"` + testDisk + `","size":128000000000,"type":"disk","children":[
+		{"name":"slitest0p1","path":"` + testDisk + `p1","size":536870912,"type":"part","fstype":"vfat"},
+		{"name":"slitest0p2","path":"` + testDisk + `p2","size":107374182400,"type":"part","fstype":"LVM2_member","uuid":"pv1"}]},
+		{"name":"sdz","path":"/dev/sdz","size":1000000000000,"type":"disk","children":[
+		{"name":"sdz1","path":"/dev/sdz1","size":1000000000000,"type":"part","fstype":"LVM2_member","uuid":"pv2"}]}`
+	noPvs := func(e *applyEnv) { os.Remove(filepath.Join(e.bin, "pvs")) }
+
+	e := newApplyEnv(t)
+	noPvs(e)
+	setListing(t, e.bin, pvListing)
+	_, err := e.run(confirmed, plainConfig())
+	e.refused("wipe: a PV and no pvs", err, "no pvs")
+	e.untouched("wipe: a PV and no pvs")
+	// Forced, it goes on (the operator said so).
+	e = newApplyEnv(t)
+	noPvs(e)
+	setListing(t, e.bin, pvListing)
+	if _, err = e.run(confirmed, plainConfig(), "--force-destructive", "--through", "partition"); err != nil {
+		t.Errorf("wipe: a PV and no pvs, forced: %v", err)
+	}
+	// No PV on the target: nothing to ask pvs about.
+	e = newApplyEnv(t)
+	noPvs(e)
+	setListing(t, e.bin, strings.ReplaceAll(pvListing, `"LVM2_member","uuid":"pv1"`, `"ext4"`))
+	if _, err = e.run(confirmed, plainConfig(), "--through", "partition"); err != nil {
+		t.Errorf("wipe: no PV on the target, no pvs: %v", err)
+	}
+
+	formatPV := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{
+		{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Name: testName + "p2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+	}}}}
+	e = newApplyEnv(t)
+	noPvs(e)
+	setListing(t, e.bin, pvListing)
+	_, err = e.run(confirmed, formatPV)
+	e.refused("reuse: formatting a PV with no pvs", err, "no pvs")
+	e.untouched("reuse: formatting a PV with no pvs")
+
+	img := filepath.Join(e.base, "disk.raw")
+	os.WriteFile(img, nil, 0o644)
+	e = newApplyEnv(t, "sh", "dd", "cat")
+	noPvs(e)
+	setListing(t, e.bin, pvListing)
+	_, err = e.run(confirmed, &config.Config{DiskImage: img, TargetMedia: []*config.Media{{Name: testName, Type: "disk"}}})
+	e.refused("disk image over a PV with no pvs", err, "no pvs")
+	e.untouched("disk image over a PV with no pvs")
 }
 
 // reuseNamesTheDisk: a reuse install's confirmation says which disk it is
