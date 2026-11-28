@@ -1101,6 +1101,12 @@ restart:
 		if through != "" {
 			return fmt.Errorf("--system-check checks a full install; drop --through")
 		}
+		// What the plan above said --apply refuses (a Safe install's new
+		// partition numbered otherwise by parted is found only by the
+		// partition stage): not "passed" under it.
+		if refuses {
+			return fmt.Errorf("system check failed: --apply would refuse this - see \"it will refuse\" above")
+		}
 		fmt.Fprintln(os.Stderr, "\nSystem check passed: this machine can install this config. Nothing was changed.")
 		return nil
 	}
