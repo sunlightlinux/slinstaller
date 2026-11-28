@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -692,5 +693,34 @@ func TestInstallProblemSharedDisk(t *testing.T) {
 	m.force = true
 	if p := m.installProblem(); p != "" {
 		t.Errorf("with --force-destructive: %q", p)
+	}
+}
+
+// The root a Safe install cuts in free space is a MiB short of the region
+// (the slack at its end), and a MiB is not a decimal GB: a region of 1907
+// MiB passed "at least the 2 GB minimum" and gave a 1906 MiB root, which
+// the install's own check of a created root's size then refused.
+func TestSafeInstallRootMeetsTheMinimum(t *testing.T) {
+	for _, free := range []uint64{1907, 1908, 1909, 1910} {
+		fakeParted(t, fmt.Sprintf(`BYT;
+/dev/sdb:64000MiB:scsi:512:512:gpt:Test:;
+1:1.00MiB:513MiB:512MiB:fat32::boot, esp;
+2:513MiB:%dMiB:%dMiB:ext4::;
+1:%dMiB:64000MiB:%dMiB:free;`, 64000-free, 64000-free-513, 64000-free, free), 0)
+		m := mediaDialog()
+		m.mediaMode, m.diskIdx = 2, 1
+		m.mediaCursor = m.mediaEncIndex() + 1
+		m = send(m, enter)
+		if !m.safeInstall {
+			if free >= 1909 { // 1908 MiB of root is 2.0007 GB
+				t.Errorf("%d MiB free: no Safe layout (popup %d)", free, m.popup)
+			}
+			continue // refused, or offered a shrink: no root this small
+		}
+		cfg := planOf(t, m.parts)
+		cfg.TargetMedia[0].Name, cfg.ReusePartitions = "sdb", true
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%d MiB free: root %s does not validate: %v", free, m.parts[1].Size, err)
+		}
 	}
 }

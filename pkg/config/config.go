@@ -1584,10 +1584,14 @@ func (c *Config) Validate() error {
 	// checkMin flags a fixed partition/volume size below a floor, unless size
 	// validation is turned off. A missing size, 0 or "rest" (fill) is not a
 	// fixed size and is left to the disk-fit check at install time.
+	// created is set while a reuse install's Create partition is checked:
+	// that one is cut to its size now, like a normal install's.
+	created := false
 	checkMin := func(where, sizeStr string, min uint64, minLabel, what string) {
 		// Sizes are meaningless in a reuse install (the partitions already
-		// exist), and off when size validation is skipped.
-		if c.SkipValidationSize || c.ReusePartitions {
+		// exist), except for one it creates, and off when size validation
+		// is skipped.
+		if c.SkipValidationSize || (c.ReusePartitions && !created) {
 			return
 		}
 		s := strings.TrimSpace(sizeStr)
@@ -1799,8 +1803,24 @@ func (c *Config) Validate() error {
 					checkFS(where, ch.FsType, ch.Mountpoint)
 				}
 				checkMount(where, ch.FsType, ch.Mountpoint, ch.MountOptions, ch.Subvolumes, ch.Preserve)
-				if ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi") {
+				esp := ch.FsType == "vfat" && (ch.Mountpoint == "/boot" || ch.Mountpoint == "/boot/efi")
+				if esp {
 					esps++
+				}
+				// A partition cut now is cut to its size: a root too small
+				// for the install type or its swap file shrank the other
+				// system and then failed in the base install.
+				if ch.Create {
+					created = true
+					checkMin(where, ch.Size, storage.MinPartitionSize, "1 MiB", "size")
+					checkFSMin(where, ch.FsType, ch.Size, false)
+					if ch.Mountpoint == "/" {
+						checkMin(where, ch.Size, rootMin, rootMinLabel, "root size")
+					}
+					if esp {
+						checkMin(where, ch.Size, storage.MinESPSize, "100 MB", "ESP size")
+					}
+					created = false
 				}
 				continue
 			}

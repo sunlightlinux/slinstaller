@@ -119,3 +119,46 @@ func TestCreateAndPreserveIsRefused(t *testing.T) {
 		t.Errorf("create with preserve: %v", err)
 	}
 }
+
+// A partition a Safe install creates is cut to the size the config gives
+// it, so that size is checked as a normal install's is: the minimums were
+// skipped for every reusePartitions child, and a desktop root of 5G (or
+// one too small for its swap file) shrank the other system and then ran
+// out of room in the base install.
+func TestCreatedPartitionSizesAreChecked(t *testing.T) {
+	for name, tc := range map[string]struct {
+		change func(c *Config)
+		want   string
+	}{
+		"desktop root": {func(c *Config) {
+			c.InstallType = "desktop"
+			c.TargetMedia[0].Children[2].Size = "5G"
+		}, `root size "5G" is below the 20 GB minimum`},
+		"swap file": {func(c *Config) {
+			c.SwapFileSize = "4G"
+			c.TargetMedia[0].Children[2].Size = "3G"
+		}, `root size "3G" is below the 2 GB plus the 4G swap file minimum`},
+		"new ESP": {func(c *Config) {
+			c.TargetMedia[0].Children[0] = &Media{Name: "sda4", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Create: true, Start: "100000M", Size: "10M"}
+		}, `ESP size "10M" is below the 100 MB minimum`},
+	} {
+		c := resizeConfig()
+		tc.change(c)
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// What is kept is not sized by the config, and a created root with no
+	// size takes the free region; size validation off is off here too.
+	c := resizeConfig()
+	c.InstallType = "desktop"
+	c.TargetMedia[0].Children[1].Size = "1M"
+	if err := c.Validate(); err != nil {
+		t.Errorf("kept and fill: %v", err)
+	}
+	c.TargetMedia[0].Children[2].Size = "5G"
+	c.SkipValidationSize = true
+	if err := c.Validate(); err != nil {
+		t.Errorf("skipValidationSize: %v", err)
+	}
+}

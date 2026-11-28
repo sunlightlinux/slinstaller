@@ -309,8 +309,11 @@ func (m model) confirmSafe() (tea.Model, tea.Cmd) {
 			"A Safe install adds Sunlight beside an existing system,",
 			"so it needs one. Use Destructive for a fresh install.")
 	}
-	minMiB := storage.MinRootSize >> 20
-	region, ok, err := storage.LargestFree(disk, minMiB)
+	// The root is the region less a MiB of slack, and has to hold the
+	// minimum (a decimal 2 GB, not a whole number of MiB): checked as the
+	// install checks a created root's size.
+	minMiB := safeRootMiB()
+	region, ok, err := storage.LargestFree(disk, minMiB+1)
 	if err != nil {
 		return fail("Could not read free space: " + err.Error())
 	}
@@ -321,7 +324,7 @@ func (m model) confirmSafe() (tea.Model, tea.Cmd) {
 			return m.openShrinkPopup(esp, cand)
 		}
 		return fail(
-			fmt.Sprintf("No unallocated region of at least %d MiB was found.", minMiB),
+			fmt.Sprintf("No unallocated region of at least %d MiB was found.", minMiB+1),
 			"No partition on the disk can be shrunk to make room either",
 			"(ext4, ntfs or btrfs, not mounted). Use Destructive, or",
 			"free some space first.")
@@ -346,6 +349,11 @@ func (m model) confirmSafe() (tea.Model, tea.Cmd) {
 	m.safeInstall = true
 	m.view = viewHub
 	return m, nil
+}
+
+// safeRootMiB is the smallest root a Safe install cuts, in whole MiB.
+func safeRootMiB() uint64 {
+	return (storage.MinRootSize + 1<<20 - 1) >> 20
 }
 
 // shrinkCandidate picks the partition on disk that a Safe install could
@@ -424,8 +432,8 @@ func (m model) updateShrinkPopup(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case size >= p.Size:
 			m.popupErr = "that would not shrink it: it is " + gib(p.Size) + " now"
 			return m, nil
-		case p.Size-size < storage.MinRootSize:
-			m.popupErr = fmt.Sprintf("that frees too little: Sunlight needs at least %d MiB", storage.MinRootSize>>20)
+		case p.Size>>20-size>>20 < safeRootMiB()+1: // the room, less the slack
+			m.popupErr = fmt.Sprintf("that frees too little: Sunlight needs at least %d MiB", safeRootMiB()+1)
 			return m, nil
 		}
 		disk := m.disks[m.diskIdx]
