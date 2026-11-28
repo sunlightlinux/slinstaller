@@ -208,6 +208,10 @@ func TestMediaSafeInstall(t *testing.T) {
 	popupSays(safe(), "no EFI System Partition to share")
 	fakeParted(t, "BYT;\n1:1.00MiB:513MiB:512MiB:fat32::boot, esp;\n1:513MiB:613MiB:100MiB:free;", 0)
 	popupSays(safe(), "No unallocated region of at least")
+	// An msdos disk is said at once, not after every question (the install
+	// refuses to add partitions to it).
+	fakeParted(t, strings.Replace(partedWithRoom, ":gpt:", ":msdos:", 1), 0)
+	popupSays(safe(), "Safe install adds partitions only to a GPT disk")
 	fakeParted(t, partedWithRoom, 1)
 	popupSays(safe(), "Could not read the disk")
 	fakeParted(t, partedWithRoom, 2)

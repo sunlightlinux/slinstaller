@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os/exec"
@@ -121,6 +122,10 @@ var partedPrintFree = func(disk string) (string, error) {
 	return string(out), nil
 }
 
+// ErrNotGPT is ExistingESP's answer for a disk whose partition table is not
+// GPT, which a Safe install cannot add partitions to.
+var ErrNotGPT = errors.New("a Safe install adds partitions only to a GPT disk")
+
 // FreeRegions returns the disk's unallocated regions, largest first.
 func FreeRegions(disk string) ([]FreeRegion, error) {
 	out, err := partedPrintFree(disk)
@@ -154,6 +159,12 @@ func ExistingESP(disk string) (device string, ok bool, err error) {
 	out, perr := partedPrintFree(disk)
 	if perr != nil {
 		return "", false, perr
+	}
+	// A Safe install adds partitions only to a GPT disk (CheckCreateNumbers
+	// refuses the rest at the install): said here, while the wizard can
+	// still offer Destructive, rather than after every question.
+	if t := partedTable(out); t != "" && t != "gpt" {
+		return "", false, fmt.Errorf("%w: %s has %s", ErrNotGPT, disk, tableName(t))
 	}
 	parts, _ := parsePartedFree(out)
 	for _, p := range parts {

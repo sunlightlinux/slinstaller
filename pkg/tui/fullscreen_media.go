@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -300,6 +301,12 @@ func (m model) confirmSafe() (tea.Model, tea.Cmd) {
 	}
 
 	esp, ok, err := storage.ExistingESP(disk)
+	if errors.Is(err, storage.ErrNotGPT) {
+		return fail(
+			"This disk does not have a GPT partition table, and a",
+			"Safe install adds partitions only to a GPT disk.",
+			"Use Destructive for a fresh install on it.")
+	}
 	if err != nil {
 		return fail("Could not read the disk: " + err.Error())
 	}
