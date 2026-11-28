@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
-	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
 // --apply only runs as root, and what it guards is the moment before a disk
@@ -125,14 +124,18 @@ func applyChild(t *testing.T) {
 	diagnosticsDir = base
 	interactiveRefusedFirst(t)
 
-	if !system.IsUEFI() {
-		// Not booted under UEFI: a full install is refused, whatever else
-		// is right, and the rest of these cases cannot run.
+	// The firmware is stood in for, so these cases run on a machine not
+	// booted under UEFI too (they returned here on one, testing nothing
+	// more): not UEFI, a full install is refused whatever else is right.
+	savedUEFI := isUEFI
+	defer func() { isUEFI = savedUEFI }()
+	isUEFI = func() bool { return false }
+	{
 		e := newApplyEnv(t)
 		_, err := e.run(confirmed, plainConfig())
 		e.refused("not UEFI", err, "not booted in UEFI mode")
-		return
 	}
+	isUEFI = func() bool { return true }
 
 	// The operator declines, or types something else: nothing happens.
 	e := newApplyEnv(t)

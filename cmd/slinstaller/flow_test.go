@@ -9,16 +9,17 @@ import (
 	"testing"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
-	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
 // --system-check of a Safe install whose new partition parted would number
 // differently: the plan says "it will refuse", and the check must not then
 // say it passed (--apply stops at the partition stage, after the confirm).
 func TestSystemCheckRefusesACreateNumber(t *testing.T) {
-	if !system.IsUEFI() {
-		t.Skip("the system check stops at the firmware on this machine")
-	}
+	// The firmware is stood in for: skipped on a machine not booted under
+	// UEFI (CI's), the test checked nothing there.
+	savedUEFI := isUEFI
+	isUEFI = func() bool { return true }
+	defer func() { isUEFI = savedUEFI }()
 	dir := t.TempDir()
 	bin := onlyTools(t, dir, baseTools...)
 	os.WriteFile(filepath.Join(bin, "parted"), []byte(`#!/bin/sh

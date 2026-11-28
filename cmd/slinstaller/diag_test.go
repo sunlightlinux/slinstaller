@@ -200,9 +200,11 @@ func TestPowerCommand(t *testing.T) {
 // From an image nothing is fetched: the checks ask for the tool that
 // unpacks it and for the image itself, not for xbps or a repository.
 func TestSystemCheckForAnImageInstall(t *testing.T) {
-	if !system.IsUEFI() {
-		t.Skip("the system check stops at the firmware on this machine")
-	}
+	// The firmware is stood in for: skipped on a machine not booted under
+	// UEFI, the test checked nothing there.
+	savedUEFI := isUEFI
+	isUEFI = func() bool { return true }
+	defer func() { isUEFI = savedUEFI }()
 	dir := t.TempDir()
 	tools := append([]string{"tar"}, baseTools...)
 	for i, tool := range tools {
