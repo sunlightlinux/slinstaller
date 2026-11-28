@@ -8,7 +8,7 @@ boot under [slinit](https://github.com/sunlightlinux/slinit).
 | Project | Details |
 |---|---|
 | **Latest release** | v2.3.1 (2026-11-28), a git tag — see [CHANGELOG.md](CHANGELOG.md). Unreleased on `main`: a `govulncheck` CI job |
-| **Verified so far** | Unit suite (95% coverage floor), fuzzing, whole installs in a user namespace with stand-in tools, and the partition and mount stages on real loop devices — see [Testing](#testing). **No 2.x release has been installed in a VM and booted.** The installs recorded as booting date from October 2026, before 2.0.0; the one whose init is recorded (f815a96) came up under runit, and none booting slinit as PID 1 is recorded |
+| **Verified so far** | Unit suite (95% coverage floor), fuzzing, whole installs in a user namespace with stand-in tools, and the partition and mount stages on real loop devices — see [Testing](#testing). Manual installs, booted afterwards: in a VM under UEFI, done routinely, including with 2.3.x; and on bare metal, an Intel NUC7i5BNH installed from a USB stick with v2.1.0 on 2026-11-21, which boots slinit as PID 1. These are the maintainer's runs, not recorded per release in this repository; the CHANGELOG entries for 2.1.1, 2.2.0 and 2.3.0 say no VM install was made before each was cut |
 | **Stability** | [STABILITY.md](STABILITY.md) — early bootstrap: flags, output and Go packages may change; the one contract is reading clr-installer's config format |
 | **Requires** | Go 1.25+ to build (`go.mod` names `toolchain go1.27.4`, the one CI builds and tests with); to run: root, UEFI firmware, and the tools listed in [doc/packaging.md](doc/packaging.md) |
 | **License** | [Apache 2.0](LICENSE) |
@@ -178,7 +178,7 @@ sudo tests/loop/run.sh ./slinstaller     # partition and mount stages on loop de
 | Fuzzing | 15 targets that check properties, 20 s each in CI | `Fuzz*` in `pkg/`, `cmd/` |
 | Loop devices | Partitioning, `--discover`, shrinking ext4/ntfs/btrfs with data intact, btrfs subvolumes, a partitioned RAID 1 | [tests/loop](tests/loop) |
 | Dry run | Every demo config, and a `--template` config, still plans | CI `dry-run` job |
-| VM install | GRUB, a real `xbps-install`, the first boot — the only test of what follows the mount. Manual, not in CI; not run for any 2.x release | [demo/vm](demo/vm) |
+| VM install | GRUB, a real `xbps-install`, the first boot — the only test of what follows the mount. Manual, not in CI; run routinely by the maintainer, including with 2.3.x, but not recorded per release | [demo/vm](demo/vm) |
 
 [tests/README.md](tests/README.md) describes each CI job.
 

@@ -126,5 +126,5 @@ discovery, a QEMU/OVMF demo.
 - **Ported is not the same as verified.** The unit suite covers the logic
   through recorded commands and stubbed sysfs; partitioning, mkfs, mounts and
   the bootloader are only proven by an install in a VM under UEFI firmware,
-  and no 2.x release has had one (each release's CHANGELOG entry says how
-  far it was verified).
+  which is done by hand and not recorded per release (each release's
+  CHANGELOG entry says how far it was verified before the cut).

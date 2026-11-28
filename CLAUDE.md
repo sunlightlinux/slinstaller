@@ -138,9 +138,10 @@ Strong success criteria let you loop independently. Weak criteria
   No BIOS/MBR.
 - **Destructive operations are gated.** Confirmable and dry-runnable; never
   run against hardware during development. A VM install is the test for what
-  follows the mount — and no 2.x release has had one yet (see the CHANGELOG's
-  "What is verified" paragraphs), so do not claim a stage works on a real
-  machine on the strength of the unit or namespace tests.
+  follows the mount. VM installs are run by hand and are not recorded per
+  release (the CHANGELOG's "What is verified" paragraphs say what was done
+  before each cut), so do not claim a stage works on a real machine on the
+  strength of the unit or namespace tests.
 - **Installs slinit**, not systemd/OpenRC, as the init system of the target.
 - **Base system is Sunlight Linux** (the `slpkgs` set; `xbps` package
   tooling, inherited from the Void lineage).
