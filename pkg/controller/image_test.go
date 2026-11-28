@@ -340,3 +340,39 @@ func TestImageKeysNotWrittenThroughAKeyLink(t *testing.T) {
 		t.Errorf("key in the target = %q", got)
 	}
 }
+
+// An image whose /var/lib/seedrng or /etc/ssh is an absolute link keeps
+// its seed and host keys inside the target, where the installed system
+// (and now SeedRNG, which leaves a seed it finds there alone) resolves the
+// link: they are forgotten there, and the live system's are not touched.
+// Skipped as "outside the target", every machine from the image shared
+// the image's seed and host keys.
+func TestForgetImageIdentityThroughLinks(t *testing.T) {
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	root := in.opts.Root
+	liveSeed, liveSSH := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(liveSeed, "seed.no-credit"), []byte("live seed"), 0o400)
+	os.WriteFile(filepath.Join(liveSSH, "ssh_host_ed25519_key"), []byte("live key"), 0o600)
+	mkTarget(t, in, "etc")
+	mkTarget(t, in, "var", "lib")
+	os.MkdirAll(filepath.Join(root, liveSeed), 0o700)
+	os.MkdirAll(filepath.Join(root, liveSSH), 0o755)
+	os.WriteFile(filepath.Join(root, liveSeed, "seed.no-credit"), []byte("image seed"), 0o400)
+	os.WriteFile(filepath.Join(root, liveSSH, "ssh_host_ed25519_key"), []byte("image key"), 0o600)
+	os.Symlink(liveSeed, filepath.Join(root, "var", "lib", "seedrng"))
+	os.Symlink(liveSSH, filepath.Join(root, "etc", "ssh"))
+	if err := in.forgetImageIdentity(); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{filepath.Join(liveSeed, "seed.no-credit"), filepath.Join(liveSSH, "ssh_host_ed25519_key")} {
+		if !exists(f) {
+			t.Errorf("the live system's %s was removed", f)
+		}
+	}
+	for _, f := range []string{filepath.Join(root, liveSeed, "seed.no-credit"), filepath.Join(root, liveSSH, "ssh_host_ed25519_key")} {
+		if exists(f) {
+			t.Errorf("the image's %s was kept", f)
+		}
+	}
+}

@@ -1100,9 +1100,21 @@ func (in *installer) forgetImageIdentity() error {
 	root := in.opts.Root
 	files := []string{"etc/machine-id", "var/lib/dbus/machine-id",
 		"var/lib/seedrng/seed.credit", "var/lib/seedrng/seed.no-credit"}
-	keys, _ := filepath.Glob(filepath.Join(root, "etc", "ssh", "ssh_host_*"))
+	// Each directory as the installed system resolves it (system.TargetPath):
+	// an absolute /var/lib/seedrng or /etc/ssh link keeps the image's seed
+	// and keys inside the target, where SeedRNG and ssh-keygen -A find
+	// them and keep them.
+	sshDir, err := system.TargetPath(root, "etc/ssh")
+	if err != nil {
+		return fmt.Errorf("image: %w", err)
+	}
+	keys, _ := filepath.Glob(filepath.Join(sshDir, "ssh_host_*"))
 	for _, f := range files {
-		keys = append(keys, filepath.Join(root, f))
+		dir, err := system.TargetPath(root, filepath.Dir(f))
+		if err != nil {
+			return fmt.Errorf("image: %w", err)
+		}
+		keys = append(keys, filepath.Join(dir, filepath.Base(f)))
 	}
 	for _, f := range keys {
 		// Lstat, not Stat: a link (dbus's machine-id often is one) is
