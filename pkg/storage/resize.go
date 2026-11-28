@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 // Resizable reports whether a partition holding this filesystem can be
@@ -159,6 +160,15 @@ func (pl *Plan) CheckCreateNumbers() error {
 		if err != nil {
 			return err
 		}
+		// The partitions are cut as on GPT (mkpart with a name, which msdos
+		// takes for primary/logical, and the lowest free number, which
+		// msdos's logical partitions do not take): on another table the
+		// first mkpart failed, after the resize had shrunk the other
+		// system's partition.
+		if table := partedTable(out); table != "gpt" {
+			return fmt.Errorf("storage: %s is to be created, but %s has %s; a Safe install adds partitions only to a GPT disk - nothing was changed",
+				creates[0].Device, disk, tableName(table))
+		}
 		parts, _ := parsePartedFree(out)
 		used := map[int]bool{}
 		for _, p := range parts {
@@ -177,6 +187,25 @@ func (pl *Plan) CheckCreateNumbers() error {
 		}
 	}
 	return nil
+}
+
+// partedTable is the partition table type on parted's disk line ("gpt",
+// "msdos", "loop"), or "" when the output has none.
+func partedTable(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Split(strings.TrimSuffix(strings.TrimSpace(line), ";"), ":")
+		if len(f) >= 6 && strings.HasPrefix(f[0], "/") {
+			return f[5]
+		}
+	}
+	return ""
+}
+
+func tableName(t string) string {
+	if t == "" {
+		return "no partition table parted could name"
+	}
+	return "an " + t + " partition table"
 }
 
 // existsNote says when the number the config named is an existing

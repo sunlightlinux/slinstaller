@@ -337,7 +337,7 @@ func TestPartitionResizesThenCreates(t *testing.T) {
 		{Name: "sda3", Type: "part", FsType: "ext4", Mountpoint: "/", Create: true},
 	}}}}
 	// parted, asked what is free once the shrink is done.
-	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"
+	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "/dev/sda:100000MiB:scsi:512:512:gpt:DISK:;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"
 echo "2:513MiB:41473MiB:40960MiB:ext4::;"; echo "1:41473MiB:102400MiB:60927MiB:free;"`})
 	var r recorder
 	if err := Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices}); err != nil {
@@ -365,7 +365,7 @@ echo "2:513MiB:41473MiB:40960MiB:ext4::;"; echo "1:41473MiB:102400MiB:60927MiB:f
 		t.Errorf("a failed shrink went on: %v\n%s", err, r.flat())
 	}
 	// No room after all: reported, with nothing created.
-	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"
+	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "/dev/sda:100000MiB:scsi:512:512:gpt:DISK:;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"
 echo "2:513MiB:102400MiB:101887MiB:ext4::;"`})
 	r = recorder{}
 	err = Install(cfg, Options{Through: "partition", Runner: r.run, Devices: noDevices})
@@ -383,7 +383,7 @@ func TestCreateMustBeWhatPartedNumbers(t *testing.T) {
 		{Name: "sda1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
 		{Type: "part", FsType: "ext4", Mountpoint: "/", Create: true, Start: "102400M", Size: "50G"},
 	}}}}
-	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"
+	fakeBin(t, map[string]string{"parted": `echo "BYT;"; echo "/dev/sda:100000MiB:scsi:512:512:gpt:DISK:;"; echo "1:1MiB:513MiB:512MiB:fat32::boot, esp;"
 echo "2:513MiB:60000MiB:59487MiB:ntfs::msftdata;"; echo "3:60000MiB:60500MiB:500MiB:ntfs::;"
 echo "4:60500MiB:100000MiB:39500MiB:ext4::;"; echo "1:100000MiB:300000MiB:200000MiB:free;"`})
 	var r recorder

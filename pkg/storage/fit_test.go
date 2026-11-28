@@ -288,3 +288,32 @@ func TestCheckFitFillEncryptedXFS(t *testing.T) {
 		t.Errorf("316 MiB for a filling encrypted xfs: %v", err)
 	}
 }
+
+// A Safe install cuts its partitions with GPT's parted syntax (a partition
+// name where msdos wants primary/logical) and numbers them as GPT does. On
+// an msdos disk mkpart failed - after the resize had shrunk the other
+// system - so a disk without a GPT table is refused before anything.
+func TestCheckCreateNumbersRefusesANonGPTDisk(t *testing.T) {
+	saved := partedPrintFree
+	defer func() { partedPrintFree = saved }()
+	partedPrintFree = func(string) (string, error) {
+		return "BYT;\n/dev/sda:100000MiB:scsi:512:512:msdos:DISK:;\n" +
+			"1:1MiB:513MiB:512MiB:fat32::boot, esp;\n" +
+			"2:513MiB:20000MiB:19487MiB:ntfs::;\n" +
+			"1:20000MiB:100000MiB:80000MiB:free;\n", nil
+	}
+	pl := &Plan{Disk: "/dev/sda", Parts: []Partition{
+		{Number: 1, Device: "/dev/sda1", Preserve: true},
+		{Number: 2, Device: "/dev/sda2", Preserve: true, ResizeMiB: 10000},
+		{Number: 3, Device: "/dev/sda3", Create: true},
+	}}
+	err := pl.CheckCreateNumbers()
+	if err == nil || !strings.Contains(err.Error(), "msdos") || !strings.Contains(err.Error(), "is to be created") {
+		t.Errorf("msdos disk: %v", err)
+	}
+	// Nothing to create: an msdos disk is reused as it is.
+	pl.Parts = pl.Parts[:2]
+	if err := pl.CheckCreateNumbers(); err != nil {
+		t.Errorf("nothing created: %v", err)
+	}
+}
