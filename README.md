@@ -1,65 +1,59 @@
 # slinstaller
 
-The system installer for **Sunlight Linux**, a UEFI-only Linux distribution.
-Written in **Go** as a port and adaptation of
-[clr-installer](https://github.com/clearlinux/clr-installer): the core
-subsystems are reimplemented (not copied) and reduced to what Sunlight
-installs, and it reads clr-installer's config format, so an existing
-clr-installer `config.yaml` runs here. This is the same relationship
-[slinit](https://github.com/sunlightlinux/slinit) has to dinit.
+**The system installer for Sunlight Linux, written in Go.** It runs as
+root from a UEFI-booted live medium, partitions the target disk, installs
+the base system with xbps, sets up GRUB for UEFI and configures a first
+boot under [slinit](https://github.com/sunlightlinux/slinit).
 
-A full install runs end to end under UEFI: it partitions and formats the
-disk, lays down the base system, installs GRUB, and configures first boot.
+| Project | Details |
+|---|---|
+| **Latest release** | v2.3.1 (2026-11-28), a git tag — see [CHANGELOG.md](CHANGELOG.md). Unreleased on `main`: a `govulncheck` CI job |
+| **Verified so far** | Unit suite (95% coverage floor), fuzzing, whole installs in a user namespace with stand-in tools, and the partition and mount stages on real loop devices — see [Testing](#testing). **No 2.x release has been installed in a VM and booted.** The installs recorded as booting date from October 2026, before 2.0.0; the one whose init is recorded (f815a96) came up under runit, and none booting slinit as PID 1 is recorded |
+| **Stability** | [STABILITY.md](STABILITY.md) — early bootstrap: flags, output and Go packages may change; the one contract is reading clr-installer's config format |
+| **Requires** | Go 1.25+ to build (`go.mod` names `toolchain go1.27.4`, the one CI builds and tests with); to run: root, UEFI firmware, and the tools listed in [doc/packaging.md](doc/packaging.md) |
+| **License** | [Apache 2.0](LICENSE) |
 
-> **Interim:** the base system still comes mostly from **Void's**
-> official repo; only Sunlight's own packages do not. A default install asks
-> for `sunlight-base` (Void's `base-system` with runit taken out and slinit
-> and its boot services put in), `grub-x86_64-efi` and `slpam`, and boots
-> **slinit**. xbps searches, in order, the live medium's own repository
-> (`--local-repo`, default `/usr/share/slinstaller/repo`), the signed
-> Sunlight mirror (`--extra-repo`), then Void (`--repo`), and takes each
-> package from the first that has it (so the mirror's copies of Void
-> packages win too). With neither a local repository nor the mirror,
-> preflight refuses a default install. `--packages base-system,grub-x86_64-efi,glibc-locales` still
-> installs a plain runit system. See [doc/packaging.md](doc/packaging.md).
+slinstaller reads the config format of
+[clr-installer](https://github.com/clearlinux/clr-installer), Clear Linux's
+installer, so an existing clr-installer `config.yaml` describes the same
+install here, and its wizard follows clr-installer's layout. clr-installer
+is GPL-3.0 and slinstaller is Apache-2.0, so clr-installer is a design
+reference only: the config schema and the behaviour are implemented, its
+code is not used. The base system comes from the Void lineage (xbps,
+Void's repository) with Sunlight's own packages — `sunlight-base`,
+slinit, `slpam` — from the live medium's repository or the signed Sunlight
+mirror; see [doc/packaging.md](doc/packaging.md) for the order in which
+xbps searches them.
 
-## What it installs
+**Deliberately out of scope:** BIOS/MBR booting, systemd, and Clear Linux's
+own parts (swupd, bundles, telemetry); a graphical front-end and ISO
+generation; zfs, bcache, erofs, iSCSI,
+multipath and NVMe over TCP (by decision, for later); and shrinking xfs,
+which the filesystem does not allow.
 
-The install runs as an ordered sequence; each step is its own package:
+> **New here?** Read [doc/config.md](doc/config.md): the config format,
+> the rules a config is checked against before any disk is touched, and
+> the keys slinstaller adds to clr-installer's. Building a live ISO? Read
+> [doc/packaging.md](doc/packaging.md).
 
-```
-pre-install hooks → partition → mount → bind /proc,/sys,/dev
-  → base system (xbps) → fstab → swap file → bootloader (GRUB-EFI)
-  → first-boot config → network → save config → post-install hooks
-```
-
-| Area | What it does |
-|------|--------------|
-| **Disk** | GPT, an EFI System Partition, partitions by `parted`; `mkfs.*` / `mkswap`; the last partition can fill the disk |
-| **Encryption** | LUKS on any partition typed `crypt`, or with `encrypted: true` on a `type: lvm` partition or a RAID array (cryptsetup, crypttab, `rd.luks` cmdline, initramfs rebuild) |
-| **LVM, RAID** | volume groups and logical volumes (`lvm2`), software RAID arrays (`mdadm`) — see [Servers](#beyond-clr-installers-format) |
-| **Swap** | a swap partition, or a swap file (`swapFileSize`) |
-| **Base system** | `xbps-install` from a repository, with the signing keys and a chrooted reconfigure |
-| **Bootloader** | GRUB for UEFI (`grub-install` + `grub-mkconfig`), kernel arguments from the config |
-| **Kernel settings** | command-line profiles, console log level, CPU governor and P-State mode, kdump reservation — see [Kernel settings](#kernel-settings) |
-| **First boot** | hostname, timezone, console keymap, locale, user accounts (with `wheel` sudo for admins and SSH keys) |
-| **Network** | `dhcpcd` (DHCP by default; static interfaces become `/etc/dhcpcd.conf` stanzas) |
-| **Hooks** | pre/post-install commands, chrooted or not, with `$chrootDir`/`$chrooted` |
-
-With no config file it runs interactively: a full-screen wizard on a real
-terminal, or a plain prompt flow over a serial console or a pipe (`--text`
-forces the latter). Deliberately out of scope: BIOS/MBR, systemd, Clear Linux
-specifics.
-
-## Using it
-
-slinstaller runs **as root from a live medium**, against the machine's
-disk. It is destructive, so it defaults to a dry run and makes you confirm.
+## Build
 
 ```bash
-# Build
 go build -o slinstaller ./cmd/slinstaller
+```
 
+For a live medium, build it static and stamped (`CGO_ENABLED=0`,
+`-X main.version=`); [doc/packaging.md](doc/packaging.md) has the line and
+what the ISO must carry.
+
+## Quick start
+
+slinstaller is destructive, so it defaults to a dry run and makes you
+confirm. A minimal config is at the top of
+[doc/config.md](doc/config.md); [`demo/`](demo) and [`demo/vm/`](demo/vm)
+hold worked ones (LUKS, LVM, LVM on LUKS, RAID 1, reuse).
+
+```bash
 # See the disks
 ./slinstaller --list-disks
 
@@ -93,355 +87,112 @@ for them (see [`completions/`](completions)).
 
 > ⚠️ Partitioning, formatting and bootloader installs are **irreversible**.
 > Try changes in a VM (QEMU + OVMF) against a scratch image — see
-> [`demo/vm`](demo/vm), a reproducible harness that boots a live ISO and
-> installs end to end. Never on a disk with data you care about.
+> [`demo/vm`](demo/vm), a harness that boots a Void live ISO under OVMF,
+> hands in the binary over a 9p share, installs to a scratch disk and
+> boots the result. Never on a disk with data you care about.
 
-## The config
+## What it does
 
-The config is clr-installer's format. A minimal UEFI install:
+The install runs as an ordered sequence of stages; `--through` stops after
+any of them, and `--resume-from` restarts an unfinished install from
+`base-install` or a later stage:
 
-```yaml
-targetMedia:
-- name: sda
-  type: disk
-  children:
-  - { name: sda1, type: part,  fstype: vfat, mountpoint: /boot, size: 512M }
-  - { name: sda2, type: part,  fstype: swap, size: 2G }
-  - { name: sda3, type: part,  fstype: ext4, mountpoint: / }   # no size = fill
-hostname: sunlight
-keyboard: us
-language: en_US.UTF-8
-users:
-- login: me
-  password: "$6$...crypt hash..."   # never a plaintext password
-  admin: true                        # wheel + sudo
+```
+pre-install hooks → partition → mount → bind /proc,/sys,/dev
+  → base system (xbps) → fstab → swap file → bootloader (GRUB-EFI)
+  → first-boot config → network → save config → post-install hooks
 ```
 
-Mark a partition `type: crypt` to encrypt it. `Validate` reports every
-problem at once before any disk is touched. See [`demo/uefi-basic.yaml`](demo/uefi-basic.yaml)
-and [`doc/architecture.md`](doc/architecture.md).
+| Area | What it does |
+|------|--------------|
+| **Disk** | GPT, an EFI System Partition, partitions by `parted`; `mkfs.*` / `mkswap`; the last partition can fill the disk |
+| **Encryption** | LUKS on any partition typed `crypt`, or with `encrypted: true` on a `type: lvm` partition or a RAID array (cryptsetup, crypttab, `rd.luks` cmdline, initramfs rebuild) |
+| **LVM, RAID** | volume groups and logical volumes (`lvm2`), software RAID arrays (`mdadm`) — see [Servers](doc/config.md#beyond-clr-installers-format) |
+| **Swap** | a swap partition, or a swap file (`swapFileSize`) |
+| **Base system** | `xbps-install` from a repository, with the signing keys and a chrooted reconfigure |
+| **Bootloader** | GRUB for UEFI (`grub-install` + `grub-mkconfig`), kernel arguments from the config |
+| **Kernel settings** | command-line profiles, console log level, CPU governor and P-State mode, kdump reservation — see [Kernel settings](doc/config.md#kernel-settings) |
+| **First boot** | hostname, timezone, console keymap, locale, user accounts (with `wheel` sudo for admins and SSH keys) |
+| **Network** | `dhcpcd` (DHCP by default; static interfaces become `/etc/dhcpcd.conf` stanzas) |
+| **Hooks** | pre/post-install commands, chrooted or not, with `$chrootDir`/`$chrooted` |
 
-### Validation rules
+With no config file it runs interactively: a full-screen wizard on a real
+terminal, or a plain prompt flow over a serial console or a pipe (`--text`
+forces the latter). Both produce the same config a file would, and the
+same core installs it — see [doc/architecture.md](doc/architecture.md).
 
-Besides the obvious (one root, an ESP, known filesystems, crypt hashes
-rather than passwords), these are refused before any disk is touched,
-because each used to fail after the wipe or install a system that did not
-work:
+On a target that has slinit and its boot service, the bootloader stage
+adds `init=/usr/bin/slinit` to the kernel command line unless the config
+sets an `init=` of its own; a default install (`sunlight-base`) is such a
+target. `--packages base-system,grub-x86_64-efi,glibc-locales` installs a
+plain Void system with runit instead.
 
-- **Disk names** are kernel device names (`sda`, `nvme0n1`, `dm-0`):
-  letters, digits and `. _ : + -`, beginning with a letter, a digit or
-  `_`; to name a disk by serial or path use
-  `match:`. No two devices of the layout may end up at one path (a disk
-  `md0` beside an array `md0`).
-- **Partition names.** On a new table a disk's partitions are named 1..n,
-  in order, on their own disk (`sda1`, `sda2`, …), and the partition that
-  fills the disk is the last on it. On a Safe/`reusePartitions` install, a
-  `create` partition is named with the number parted will give it (the
-  lowest free one); the dry run says so when it is not. New partitions
-  are only added to a GPT disk. A partition is not both `create` (cut
-  now) and `preserve` (kept).
-- **Encryption.** `encrypted:` is read on `type: lvm` partitions and on
-  raid arrays only; a plain partition is encrypted with `type: crypt`. A
-  volume group's physical volumes are all encrypted or none. A keyfile
-  is only made on an encrypted root: an encrypted `/home`, swap or
-  `/boot` on a plain root asks for its passphrase at boot.
-- **LVM.** Volume group and logical volume names are ones LVM accepts
-  (letters, digits, `+ _ . -`, not starting with `-`, not a name LVM keeps
-  for itself). Logical volume sizes are checked; a number without a unit
-  is bytes, as everywhere else in the config. A group name the machine
-  already has on a disk the install does not wipe is refused.
-- **Sizes** are bytes, or a number with a unit as clr-installer reads it:
-  `K`, `M`, `G`, `T`, `P`, alone or followed by `B` or `iB`, any case, all
-  powers of 1024 (`512M`, `150MiB`, `2.6GiB`, `10GB` = 10 × 2^30).
-  `swapFileSize: 0` makes no swap file; otherwise it is at least 1 MiB.
-  An xfs filesystem is at least 300 MiB (mkfs.xfs's minimum), on the LUKS
-  mapper when it is encrypted.
-- **Mountpoints** are clean absolute paths without spaces (`/home`, not
-  `/home/`), not under `/proc`, `/sys`, `/dev` or `/run`. A swap has no
-  mountpoint, and vfat cannot be the root. `mount-options` and
-  `crypt-options` are comma-separated without spaces.
-- **Administrators.** At least one administrator has a password, unless
-  the config sees to sudo itself: a `write-files` entry under
-  `/etc/sudoers*`, or post-install or stage hooks. (Root is locked once
-  there is an administrator, and sudo asks for a password.)
-- **Other disks.** Wiping a disk (or formatting a partition, in a reuse
-  install) that is one member of a RAID array, ZFS pool or multi-device
-  btrfs with a member on another disk is refused — assembled or not — as
-  is a disk sharing an active array or volume group; `--force-destructive`
-  overrides it. The teardown checks its own listing again, so a disk
-  plugged in after the confirmation cannot slip an array in. RAID array
-  names are one path component (`md0`, `root`).
-- **Packages.** With `xbps-install` on the live system, the package set
-  is dry-run against the repositories (`-n`, into a scratch root); a
-  package xbps cannot find or resolve is refused. The Sunlight mirror
-  and `swupdMirror` must be reachable; `swupdMirror` is an `https://`
-  URL (`http://` with `allowInsecureHTTP`) or an absolute directory.
-- **Network.** `gateway` and `routes` are IPv4 (IPv6 routes come from
-  router advertisements); `dns` is IP addresses separated by spaces;
-  interface names are letters, digits and `. _ : -`.
-- **Packages and hooks.** `packages`, `kernel`, `kernel-fallback` and
-  `kernel-remove` are package names (not beginning with `-`, no space or
-  `/`); an `env:` name is not empty and holds no `=`, space or control
-  character, nor begins with `-`.
-- **Kernel arguments.** An argument holding `'`, `$`, `;`, `\`, `` ` ``
-  or a line break is refused: GRUB's own parser of `grub.cfg` breaks it.
-- **Plain http.** A `report-url`, an `image` or a `disk-image` over
-  `http://` needs `allowInsecureHTTP` (`--allow-insecure-http`), as a
-  repository and a config named by a URL do.
+## Documentation
 
-`skipValidationSize` (`--skip-validation-size`) turns off the size and
-disk-fit checks. `skipValidationAll` (`--skip-validation-all`) also turns
-off the rest of the config check, the package dry run, and the time zone,
-keymap, language and kernel arguments checked against this machine. It
-does not turn off what keeps a value from reaching a device or a boot
-script it should not: disk, RAID, volume group and logical volume names,
-interface names, bond modes, package and env names, fstab and crypttab
-fields, and control characters (a line break) in the hostname and network
-fields are still checked, and so are the other disks and a plain http
-repository.
+| Document | What it covers |
+|---|---|
+| [doc/config.md](doc/config.md) | The config: format, validation rules, slinstaller's own keys, kernel settings |
+| [doc/architecture.md](doc/architecture.md) | The config as the one document, the front-end/core boundary, the clean-room rule toward clr-installer, the packages, the safety gates |
+| [doc/packaging.md](doc/packaging.md) | Putting slinstaller on a live ISO: build line, tools, keys, local repository, offline installs |
+| [doc/port-status.md](doc/port-status.md) | Coverage of clr-installer's feature set, package by package, and what is left |
+| [demo/vm/README.md](demo/vm/README.md) | The QEMU + OVMF harness: building, installing inside the guest, booting the result |
+| [tests/README.md](tests/README.md) | The loop-device stage tests and every CI job |
+| [completions/README.md](completions/README.md) | bash and fish completions, generated from the flags |
+| [third_party/bubbletea/README.slinstaller.md](third_party/bubbletea/README.slinstaller.md) | Why bubbletea is vendored, and what was left out |
+| [CHANGELOG.md](CHANGELOG.md) | Every release, with what each one verified |
+| [STABILITY.md](STABILITY.md) | What may and may not change between releases |
+| [SECURITY.md](SECURITY.md) | Reporting a vulnerability; the security-relevant areas |
+| [CONTRIBUTING.md](CONTRIBUTING.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How to contribute |
+| [CLAUDE.md](CLAUDE.md) · [EXAMPLES.md](EXAMPLES.md) | Guidelines for LLM-assisted work, with installer examples |
 
-Config keys nothing reads are not refused, but each is named in a warning
-(`encryptd: true` would otherwise install unencrypted without a word).
+Cross-project documents in
+[sldocs](https://github.com/sunlightlinux/sldocs/tree/e87265b7c88cda95b234eb1d42c7e9faa19f2916):
+the [install pipeline
+spec](https://github.com/sunlightlinux/sldocs/blob/e87265b7c88cda95b234eb1d42c7e9faa19f2916/specs/slinstaller-install-pipeline.md);
+the requirements that an
+[installed system boots
+slinit](https://github.com/sunlightlinux/sldocs/blob/e87265b7c88cda95b234eb1d42c7e9faa19f2916/requirements/slinstaller-installed-system-boots-slinit.md)
+and [updates from the Sunlight
+mirror](https://github.com/sunlightlinux/sldocs/blob/e87265b7c88cda95b234eb1d42c7e9faa19f2916/requirements/slinstaller-target-updates-from-sunlight-mirror.md)
+(both partially met); and four findings — the
+[mirror silently
+dropped](https://github.com/sunlightlinux/sldocs/blob/e87265b7c88cda95b234eb1d42c7e9faa19f2916/findings/slinstaller-mirror-silently-dropped.md),
+[`skipValidationAll` widening
+destruction](https://github.com/sunlightlinux/sldocs/blob/e87265b7c88cda95b234eb1d42c7e9faa19f2916/findings/slinstaller-skipvalidationall-widened-destruction.md),
+the [terminal-query
+stall](https://github.com/sunlightlinux/sldocs/blob/e87265b7c88cda95b234eb1d42c7e9faa19f2916/findings/slinstaller-terminal-query-stall.md)
+and [2.3.0 built with a vulnerable
+Go](https://github.com/sunlightlinux/sldocs/blob/e87265b7c88cda95b234eb1d42c7e9faa19f2916/findings/slinstaller-built-with-vulnerable-go.md).
 
-### Beyond clr-installer's format
+## Testing
 
-These keys are slinstaller's own. All are optional, and a config that uses
-none of them is a plain clr-installer config.
-
-```yaml
-targetMedia:
-- type: disk
-  match: { serial: S5GXNX0T123456 }     # or wwn, model, path: /dev/disk/by-id/...
-  wipe: discard                          # superblock (default), zero, random, discard
-  children:
-  - { type: part, fstype: vfat, mountpoint: /boot, size: 512M }
-  - { type: part, fstype: swap, size: auto, mount-options: discard }
-  - type: part
-    fstype: btrfs
-    mountpoint: /
-    mount-options: noatime,compress=zstd
-    subvolumes:
-    - { name: "@",     mountpoint: / }
-    - { name: "@home", mountpoint: /home }
-bootloader:
-  terminal: serial        # the boot menu on the kernel's serial console too
-  removable: true         # also install at EFI/BOOT/BOOTX64.EFI
-  update-nvram: true      # false leaves the firmware's boot entries alone
-  probe-other-os: false   # true lists other systems in the menu
-httpProxy: http://proxy:3128
-noProxy: localhost,10.0.0.0/8
-power-state: poweroff     # reboot, poweroff, halt or kexec when the install ends
-write-files:
-- { path: /etc/motd, content: "Welcome.\n", permissions: "0644" }
+```bash
+go vet ./... && go test ./...
+sudo tests/loop/run.sh ./slinstaller     # partition and mount stages on loop devices
 ```
 
-- **`match`** names the disk by what does not change between boots. Exactly
-  one disk has to fit; none, or several, stops the install.
-- **`size: auto`** (a swap partition or volume, or `swapFileSize`) is sized
-  from the machine's memory, between 1 and 8 GiB.
-- **`spare: true`** on a `type: raid` partition makes it a hot spare.
-- **`wipe`** other than `superblock` goes over the whole disk and takes as
-  long as the disk is large.
-
-**Installing from an image.** `image: base.tar.zst` (or `--image`) unpacks a
-root filesystem image — a tar archive or a squashfs — instead of installing
-packages. The image is the whole base system: kernel, GRUB and whatever the
-layout needs to boot have to be in it.
-
-**Installing beside what is there.** `--discover /dev/sda` prints the disk's
-present layout as a config that keeps every partition; edit it to say where
-the new system goes. An existing ext2/3/4, ntfs or btrfs partition can give up room for it:
-
-```yaml
-reusePartitions: true
-targetMedia:
-- name: sda
-  type: disk
-  children:
-  - { name: sda1, type: part, fstype: vfat, mountpoint: /boot/efi, preserve: true }
-  - { name: sda2, type: part, fstype: ext4, preserve: true, resize: 40G }   # shrunk, data kept
-  - { name: sda3, type: part, fstype: ext4, mountpoint: /, create: true }   # in the room that leaves
-```
-
-The filesystem is shrunk first and the partition after it, and a `create`
-partition with no `start` goes in the largest free region. Shrinking a
-filesystem is not something to do without a backup.
-
-**Servers.** A root on RAID is only redundant if the machine can still boot
-with a disk gone, so a second disk can carry a spare ESP; and an array can
-hold a volume group or an encrypted volume rather than a filesystem:
-
-```yaml
-targetMedia:
-- name: sda
-  type: disk
-  children:
-  - { name: sda1, type: part, fstype: vfat, mountpoint: /boot/efi, size: 512M }
-  - { name: sda2, type: raid, raid: md0 }
-- name: sdb
-  type: disk
-  children:
-  - { name: sdb1, type: part, fstype: vfat, size: 512M, esp: true }   # spare ESP
-  - { name: sdb2, type: raid, raid: md0 }
-raid:
-- name: md0
-  level: 1
-  encrypted: true            # LUKS on the array (optional)
-  volumeGroup: vg0           # the array is the group's physical volume
-  children:
-  - { name: root, fstype: ext4, mountpoint: /, size: 40G }
-  - { name: var,  fstype: xfs,  mountpoint: /var }
-networkInterfaces:
-- name: bond0
-  bond: { members: [eth0, eth1], mode: 802.3ad }
-- name: bond0.100
-  vlan: { id: 100, link: bond0 }
-  addrs: [{ ip: 10.0.100.2, netmask: 255.255.255.0 }]
-  gateway: 10.0.100.1
-  routes: [{ to: 10.1.0.0/16, via: 10.0.100.254 }]
-report-url: https://deploy.example/events   # progress, stage by stage, as JSON
-```
-
-A spare ESP needs the main one at `/boot/efi` (at `/boot` the kernels would
-live on one disk only). Several `type: lvm` partitions may share a
-`volumeGroup`. Bonds, VLANs and bridges are created at each boot by a
-service the installer writes; a `bridge: { members: [...] }` entry works the
-same way.
-
-**A whole-disk image.** `disk-image: disk.raw.zst` with a single disk in
-`targetMedia` (no layout) writes the image over the disk and stops: the image
-already is the partitioned, configured system.
-
-More on the command line: the config may be an `https://` URL (`http://`
-needs `--allow-insecure-http`); `--resume`
-continues an install that failed installing the base system without
-partitioning again, and `--resume-from <stage>` does so from any later
-stage — also after a reboot of the live medium: the encrypted volumes,
-arrays and volume groups are brought back first, and the passphrase is
-asked once. A resume needs the mark an unfinished install leaves in its
-target (`/.slinstaller-in-progress`, made at the mount, removed when
-the install completes): without it the disk holds no install to resume,
-and nothing is done to it; `--json-yaml old.json` converts the JSON descriptor of
-clr-installer's predecessor into a config; `--unmount` takes down what a `--through` run left
-mounted and `--in-target "cmd"` runs a command inside it. A partition table
-whose partitions are named `CLR_BOOT`, `CLR_ROOT`, `CLR_SWAP`,
-`CLR_MNT_/path` (with `_F` to format; one holding no filesystem at all is
-formatted anyway, as in clr-installer) comes out of `--discover` already
-saying what goes where.
-
-**Finer points**, all optional:
-
-| key | on | what it does |
+| Layer | What it proves | Where |
 |---|---|---|
-| `crypt-options: discard` | an encrypted volume | extra crypttab options (the kernel command line, for the root) |
-| `partition-type`, `partition-uuid`, `partition-name` | a partition | its entry in the GPT |
-| `uuid` | a filesystem | its UUID (a volume id for vfat) |
-| `passno`, `freq` | a filesystem | its fstab fsck pass and dump frequency |
-| `metadata: "1.0"` | a `raid` entry | the array's superblock format |
-| `stage-hooks: { partition: [...] }` | the config | commands after a named stage |
-| `install-type: server` / `desktop` | the config | a larger smallest root (4 GB / 20 GB) |
-| `kernel-fallback: linux-lts` | the config | the kernel to try when the configured one cannot be installed |
-| `power-state-delay: 30` | the config | seconds before the machine reboots or powers off |
-| `system-upgrade: true` | the config | the installed system brought up to date before the bootloader is set up |
-| `kernel-remove: [linux6.18]` | the config | kernel packages removed once the base system is in |
-| `partitions: [...]` | a `raid` entry | a partition table on the array itself (`/dev/md0p1`, …) |
-| `message-url` | the config | where installer messages are looked for and shown |
+| Unit suite | The logic, through recorded commands and stubbed sysfs; CI runs it with `-race` and a 95% coverage floor | beside the code under `pkg/`, `cmd/` |
+| User namespace | A whole install, every stage, with real mounts and stand-in tools, for plain, encrypted, LVM, LVM-on-LUKS, RAID 1, encrypted-`/home` and reuse layouts; it checks the files the stages write, not that the result boots | `pkg/controller/e2e_ns_test.go` and the other `*_ns_test.go` |
+| Fuzzing | 15 targets that check properties, 20 s each in CI | `Fuzz*` in `pkg/`, `cmd/` |
+| Loop devices | Partitioning, `--discover`, shrinking ext4/ntfs/btrfs with data intact, btrfs subvolumes, a partitioned RAID 1 | [tests/loop](tests/loop) |
+| Dry run | Every demo config, and a `--template` config, still plans | CI `dry-run` job |
+| VM install | GRUB, a real `xbps-install`, the first boot — the only test of what follows the mount. Manual, not in CI; not run for any 2.x release | [demo/vm](demo/vm) |
 
-`power-state: kexec` loads the installed kernel and starts it directly,
-without going back through the firmware.
+[tests/README.md](tests/README.md) describes each CI job.
 
-`image` and `disk-image` may be `https://` URLs: the image is unpacked or
-written as it downloads, so it only has to fit on the target. `resize` also
-works on btrfs, and Safe Installation in the full-screen installer offers to
-shrink a partition when the disk has no unallocated space. `--log-level 2`
-keeps the terminal to the stages and the result.
+## Contributing
 
-On the command line, `--system-check config.yaml` runs every pre-install
-check and stops without changing anything. A failed install leaves a
-diagnostics archive in `/tmp` (`--diagnostics` names it): the error, the log,
-the disks, and the config without its password hashes. Only one `--apply`
-runs at a time.
-
-## Kernel settings
-
-The wizard's kernel sections all end up as ordinary config, so a saved
-config replays them:
-
-```yaml
-kernel-profile: Server            # which profile the arguments came from
-kernel-arguments:
-  add:
-  - mitigations=auto
-  - transparent_hugepage=madvise
-  - cpufreq.default_governor=schedutil
-  - console=ttyS0,115200          # mirrored from the live system
-console-log-level: 3              # 0 (emergency) to 7 (debug)
-```
-
-| Key / section | What it does |
-|---------------|--------------|
-| `kernel-arguments` | `add` goes on the GRUB command line; `remove` is left out of it |
-| `kernel-profile` | names the Kernel Command Line profile used (Server by default). The install recomputes what the profile derives from the hardware — see below |
-| `console-log-level` | sets `loglevel=N` on the command line and `kernel.printk = N 4 1 7` in `/etc/sysctl.d/10-printk.conf`; overrides a `loglevel=` among the arguments |
-| Kernel Command Line | a profile picker (Server, Desktop, Realtime, Telco/RAN, virtualization, GPU, …) or Custom arguments; Details shows what a profile adds |
-| CPU Frequency Governor | `cpufreq.default_governor=`; only the governors the chosen driver mode has are offered |
-| AMD / Intel P-State Driver | `amd_pstate=` / `intel_pstate=` for the isolation profiles; shown only on the matching CPU |
-| Crash Dump (kdump) | `crashkernel=` and `panic=`. Reserves the memory only — see the limit below |
-
-`kernel-profile` and `console-log-level` are Sunlight extensions to
-clr-installer's format; both are optional and a clr-installer config without
-them is unaffected.
-
-Three things to know:
-
-- **Arguments are adapted to the machine the wizard runs on.** IOMMU and
-  nested-KVM arguments are written for the detected CPU vendor, and the
-  Realtime and Telco/RAN profiles compute `isolcpus=`, `nohz_full=`,
-  `rcu_nocbs=`, `irqaffinity=` and the hugepages (1 GiB pages, or 2 MiB
-  ones on an x86 CPU without them) from that
-  machine's CPUs, NUMA nodes and RAM, and the saved config holds the result.
-  Those values belong to the hardware, so when `kernel-profile` names a
-  profile, `--apply` recomputes them for the machine it runs on and reports
-  what changed: the vendor arguments for any profile (`intel_iommu`↔`amd_iommu`,
-  `kvm-intel`↔`kvm-amd`, and the P-State mode where the other vendor has the
-  same one), and the CPU lists and hugepages for the isolating profiles. Every
-  other argument is installed as written, so a saved config moves between
-  machines, and between Intel and AMD. A config with `kernel-profile: Custom`
-  (or none) is never rewritten — there `--apply` only refuses, before
-  touching the disk, a CPU list naming CPUs the machine lacks or hugepages
-  that would leave it under 1 GiB.
-
-  Two things the install does not put right, left to services on the
-  installed system: `intel_idle.max_cstate`, dropped when a config goes to
-  AMD, is not restored if it later returns to Intel; and a governor chosen
-  for a P-State mode the other vendor lacks is kept as written.
-- **The profiles run on the stock kernel.** They rely on dynamic preemption
-  (`preempt=full`), `nohz_full` and RCU callback offloading, which the
-  packaged `linux` kernel has. That is low-latency tuning, not a
-  `PREEMPT_RT` kernel.
-- **kdump is not complete yet.** `crashkernel=` reserves the memory, but
-  nothing on the installed system loads a crash kernel into it or saves the
-  dump: that needs `kexec-tools`, `makedumpfile` and a boot service, which
-  the installer does not set up.
-
-## Where this fits
-
-slinstaller is one of the projects in the Sunlight Linux tree, wired up
-via [slmanifests](https://github.com/sunlightlinux/slmanifests):
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first: test destructive changes
+in a VM, never on a real disk; keep every destructive step gated; UEFI
+only. Within the Sunlight tree, slinstaller lands at `src/installer/`
+through [slmanifests](https://github.com/sunlightlinux/slmanifests):
 
 ```bash
 repo init -u https://github.com/sunlightlinux/slmanifests.git -b main
 repo sync -j4
-# slinstaller lands at src/installer/
 ```
-
-## Documentation
-
-- [doc/architecture.md](doc/architecture.md) — the config, the boundary, the port
-- [doc/port-status.md](doc/port-status.md) — what is ported from clr-installer, what is left
-- [CHANGELOG.md](CHANGELOG.md) &middot; [STABILITY.md](STABILITY.md) — what changed, what is stable
-- [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-- [CLAUDE.md](CLAUDE.md) / [EXAMPLES.md](EXAMPLES.md) — guidelines for LLM-assisted work
 
 ## License
 
