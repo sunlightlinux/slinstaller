@@ -358,16 +358,6 @@ func run(args []string) error {
 		}
 		rest = []string{configPath}
 	}
-	// A config given as a URL is fetched once, here; from then on it is a
-	// file like any other.
-	if len(rest) == 1 && isURL(rest[0]) {
-		path, err := fetchConfig(rest[0], allowInsecure)
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(filepath.Dir(path))
-		rest[0] = path
-	}
 	if resumeFrom != "" {
 		resume = true
 	} else if resume {
@@ -378,6 +368,17 @@ func run(args []string) error {
 	}
 	if systemCheck && len(rest) == 0 {
 		return fmt.Errorf("--system-check needs the config to check the machine against")
+	}
+	// A config given as a URL is fetched once, here - after the refusals
+	// the flags alone make, above -; from then on it is a
+	// file like any other.
+	if len(rest) == 1 && isURL(rest[0]) {
+		path, err := fetchConfig(rest[0], allowInsecure)
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(filepath.Dir(path))
+		rest[0] = path
 	}
 	// repoFlag preserves the original --repo so the full-screen "Back to
 	// installer" loop below can re-resolve it from a re-run wizard each time.

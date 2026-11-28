@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,5 +146,20 @@ func TestDiskImageDryRunSaysItWillRefuse(t *testing.T) {
 	_, errOut, _ = runWith(t, "", "--force-destructive", path)
 	if !strings.Contains(errOut, "Re-run with --apply") {
 		t.Errorf("--force-destructive:\n%s", errOut)
+	}
+}
+
+// A config given as a URL is not fetched for a run the flags alone refuse.
+func TestURLConfigNotFetchedForARefusedRun(t *testing.T) {
+	fetched := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetched++
+		w.Write([]byte("targetMedia: []\n"))
+	}))
+	defer srv.Close()
+	err := run([]string{"--allow-insecure-http", "--resume", srv.URL + "/c.yaml"})
+	wantRunErr(t, "--resume without --apply", err, "--resume continues a full install")
+	if fetched != 0 {
+		t.Errorf("the config was fetched %d times for a run refused by its flags", fetched)
 	}
 }
