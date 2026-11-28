@@ -142,9 +142,10 @@ change.
   region is read in bytes, so a partition starting at sector 63 does not
   make the new one overlap it; a non-GPT disk is refused before anything
   when partitions are to be created on it; `sfdisk` and `setsid` are
-  among the tools checked first; created partitions are held to the size
-  minimums. Each of these used to fail after the other system was
-  shrunk.
+  among the tools checked first; a created partition given a size is
+  held to the size minimums (one with no size, placed in the freed
+  space, is not yet). Each of these used to fail after the other system
+  was shrunk.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 - A target with no `sshd` service (no `openssh` in its packages) is
