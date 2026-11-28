@@ -1528,7 +1528,9 @@ func printRelease(plan *storage.Plan, force bool) (refuses bool) {
 	// The target checks --apply makes first: a disk that is not there, a
 	// partition, size 0, zram. The dry run invited an --apply that refused
 	// them. (A disk in use is said below, with what the teardown would
-	// release.)
+	// release.) The other disks are still gone through: in a plan of two
+	// disks, one missing hid that the other is in use.
+	refused := map[string]bool{}
 	for _, disk := range plan.DiskList() {
 		if d := blockdev.FindByPath(devs, disk); d != nil && d.InUse() != "" {
 			continue
@@ -1536,10 +1538,8 @@ func printRelease(plan *storage.Plan, force bool) (refuses bool) {
 		if err := checkTargetDisks([]string{disk}, devs); err != nil {
 			fmt.Fprintf(os.Stderr, "\n(it will refuse: %v)\n", err)
 			refuses = true
+			refused[disk] = true
 		}
-	}
-	if refuses {
-		return true
 	}
 	// A reuse install releases nothing, but a disk in use is refused all
 	// the same (checkTargetDisks): said here too, rather than "Re-run with
@@ -1558,12 +1558,12 @@ func printRelease(plan *storage.Plan, force bool) (refuses bool) {
 	var disks []blockdev.Device
 	var names []string
 	for _, disk := range plan.DiskList() {
-		if d := blockdev.FindByPath(devs, disk); d != nil {
+		if d := blockdev.FindByPath(devs, disk); d != nil && !refused[disk] {
 			disks, names = append(disks, *d), append(names, disk)
 		}
 	}
 	if len(disks) == 0 {
-		return
+		return refuses
 	}
 	// What the partition stage runs: one teardown for all the disks.
 	fmt.Fprintf(os.Stderr, "\nBefore partitioning %s, the install first runs:\n", strings.Join(names, ", "))

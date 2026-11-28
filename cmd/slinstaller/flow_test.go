@@ -183,3 +183,38 @@ func TestURLConfigNotFetchedForARefusedRun(t *testing.T) {
 		t.Errorf("the config was fetched %d times for a run refused by its flags", fetched)
 	}
 }
+
+// A two-disk plan with one disk missing: the dry run says so, and still
+// says what it says of the other disk - in use, and what the teardown would
+// release from it. (It returned at the missing disk and hid them.)
+func TestDryRunOneOfTwoDisksMissing(t *testing.T) {
+	dir := t.TempDir()
+	bin := onlyTools(t, dir)
+	cfg := &config.Config{
+		TargetMedia: []*config.Media{
+			{Name: testName, Type: "disk", Children: []*config.Media{
+				{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot", Size: "512M"},
+				{Name: testName + "p2", Type: "raid", Raid: "md0"}}},
+			{Name: "slitest1", Type: "disk", Children: []*config.Media{
+				{Name: "slitest1p1", Type: "raid", Raid: "md0"}}},
+		},
+		Raid: []*config.RaidArray{{Name: "md0", Level: "1", FsType: "ext4", Mountpoint: "/"}},
+	}
+	path := writeConfig(t, dir, cfg)
+	setListing(t, bin, `{"name":"`+testName+`","path":"`+testDisk+`","size":64000000000,"type":"disk","children":[
+		{"name":"`+testName+`p1","path":"`+testDisk+`p1","size":1000,"type":"part","mountpoint":"/mnt/data"}]}`)
+	_, errOut, err := runWith(t, "", path)
+	if err != nil {
+		t.Fatalf("dry run: %v\n%s", err, errOut)
+	}
+	for _, want := range []string{
+		"it will refuse: target disk /dev/slitest1 is not among",
+		"Before partitioning " + testDisk,
+		"(it will refuse: " + testDisk + "p1 is mounted at /mnt/data)",
+		"As it stands, --apply would refuse this",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("dry run missing %q:\n%s", want, errOut)
+		}
+	}
+}
