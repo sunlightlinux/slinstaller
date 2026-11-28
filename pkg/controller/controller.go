@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
@@ -148,6 +149,11 @@ func Install(cfg *config.Config, opts Options) error {
 	if opts.Runner == nil {
 		opts.Runner = storage.DefaultRunner
 	}
+	// What the install makes, and what its commands make (mkdir -p of
+	// /var/db/xbps/keys, the keys xbps trusts), is not group- or
+	// world-writable whatever umask it was started with: under an
+	// inherited 0, any user of the installed system could plant a key.
+	defer syscall.Umask(syscall.Umask(0o022))
 
 	if opts.ResumeFrom != "" {
 		ok := false

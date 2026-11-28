@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/sunlightlinux/slinstaller/pkg/blockdev"
@@ -704,5 +705,33 @@ func TestWriteInTargetAndInsideChecks(t *testing.T) {
 	os.Symlink(filepath.Join(outside, "gone"), filepath.Join(root, "dangling"))
 	if existingInside(root, filepath.Join(root, "dangling", "sub")) {
 		t.Error("a dangling link out judged inside")
+	}
+}
+
+// The install runs under umask 022 whatever it was started with: the
+// directories its commands make in the target (mkdir -p of
+// /var/db/xbps/keys, where xbps keeps the keys it trusts) were made
+// world-writable under an inherited umask 0, and any local user of the
+// installed system could plant a signing key there.
+func TestInstallRunsUnderUmask022(t *testing.T) {
+	old := syscall.Umask(0)
+	defer syscall.Umask(old)
+	cfg := twoPartConfig()
+	cfg.PreInstall = []*config.Hook{{Cmd: "true"}}
+	seen := -1
+	run := func(args []string) error {
+		m := syscall.Umask(0)
+		syscall.Umask(m)
+		seen = m
+		return nil
+	}
+	if err := Install(cfg, Options{Through: "pre-install", Runner: run, Devices: noDevices}); err != nil {
+		t.Fatal(err)
+	}
+	if seen != 0o022 {
+		t.Errorf("umask during the install = %#o, want 022", seen)
+	}
+	if now := syscall.Umask(0); now != 0 {
+		t.Errorf("the caller's umask was not restored: %#o", now)
 	}
 }
