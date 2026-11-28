@@ -132,7 +132,10 @@ change.
   lock are refused before the first question, not after the passphrase;
   the text flow refuses a disk shared with another when it is picked and
   a swap the disk cannot hold when it is typed. "Back to menu" no longer
-  keeps the previous pass's proxy.
+  keeps the previous pass's proxy, and the mirror check, the progress
+  reports and the installer messages go through the proxy as it is set
+  now: they kept the one the process saw at its first request (the
+  wizard's network test, say), where xbps used the config's.
 - `--system-check` fails what its plan says `--apply` refuses (it said
   "passed" after "it will refuse"); the dry runs (the install's and the
   disk-image one) say "it will refuse" for a target disk that is missing,

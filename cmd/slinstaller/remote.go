@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
+	"github.com/sunlightlinux/slinstaller/pkg/network"
 	"github.com/sunlightlinux/slinstaller/pkg/storage"
 )
 
@@ -52,7 +53,7 @@ func fetchConfig(url string, allowInsecure bool) (string, error) {
 	if strings.HasPrefix(url, "http://") && !allowInsecure {
 		return "", fmt.Errorf("config %s is plain http; use https, or pass --allow-insecure-http", url)
 	}
-	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: refuseDowngrade(allowInsecure)}
+	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: refuseDowngrade(allowInsecure), Transport: network.NewTransport()}
 	resp, err := client.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("fetching the config: %w", err)
@@ -94,7 +95,7 @@ func newReporter(url, hostname string, allowInsecure bool) *reporter {
 	if url == "" {
 		return nil
 	}
-	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: refuseDowngrade(allowInsecure)}
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: refuseDowngrade(allowInsecure), Transport: network.NewTransport()}
 	return &reporter{url: url, host: hostname, client: client}
 }
 
@@ -193,7 +194,7 @@ func installerMessage(base, name string) string {
 	if base == "" {
 		return ""
 	}
-	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	client := &http.Client{Timeout: 10 * time.Second, Transport: network.NewTransport(), CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		// Not from https down to http: what is shown sits right before the
 		// confirmation of a destructive install.
 		if req.URL.Scheme != "https" && len(via) > 0 && via[0].URL.Scheme == "https" {

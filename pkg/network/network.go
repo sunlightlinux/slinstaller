@@ -61,7 +61,7 @@ func parseProxy(proxy string) (*neturl.URL, error) {
 // refuses HEAD still answers it, and one request instead of a HEAD then a
 // GET halves the time an unreachable mirror takes to fail.
 func verify(url string, timeout time.Duration) error {
-	return verifyWith(&http.Client{Timeout: timeout}, url)
+	return verifyWith(&http.Client{Timeout: timeout, Transport: NewTransport()}, url)
 }
 
 func verifyWith(client *http.Client, url string) error {
