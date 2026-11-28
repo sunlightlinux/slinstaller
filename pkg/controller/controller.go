@@ -869,6 +869,12 @@ func (in *installer) mountMeta() error {
 func (in *installer) copyResolv(src string) error {
 	if data, err := os.ReadFile(src); err == nil {
 		dst := filepath.Join(in.opts.Root, "etc", "resolv.conf")
+		// An /etc that leads out of the target (an image's absolute link)
+		// is the live system's: its resolv.conf was renamed aside and
+		// rewritten.
+		if !existingInside(in.opts.Root, filepath.Dir(dst)) {
+			return fmt.Errorf("%s leads outside the installed system", filepath.Dir(dst))
+		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return fmt.Errorf("mkdir for resolv.conf: %w", err)
 		}

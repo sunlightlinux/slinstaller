@@ -669,3 +669,24 @@ func TestReassembleChecksWhatIsThere(t *testing.T) {
 		t.Errorf("RAID members: %v", err)
 	}
 }
+
+// A target whose /etc leads out of it (an absolute link, from here the
+// live system's /etc) gets no install-time resolv.conf through it: the
+// live file was renamed aside and rewritten.
+func TestResolvConfNotThroughALinkedEtc(t *testing.T) {
+	live := filepath.Join(t.TempDir(), "resolv.conf")
+	os.WriteFile(live, []byte("nameserver 10.0.0.1\n"), 0o644)
+	var r recorder
+	in := stagedInstaller(t, twoPartConfig(), &r)
+	liveEtc := t.TempDir()
+	os.WriteFile(filepath.Join(liveEtc, "resolv.conf"), []byte("live\n"), 0o644)
+	os.MkdirAll(in.opts.Root, 0o755)
+	os.Symlink(liveEtc, filepath.Join(in.opts.Root, "etc"))
+	if err := in.copyResolv(live); err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Errorf("copyResolv through a linked /etc: %v", err)
+	}
+	ents, _ := os.ReadDir(liveEtc)
+	if got, _ := os.ReadFile(filepath.Join(liveEtc, "resolv.conf")); string(got) != "live\n" || len(ents) != 1 {
+		t.Errorf("the live /etc was changed: %q, %v", got, ents)
+	}
+}
