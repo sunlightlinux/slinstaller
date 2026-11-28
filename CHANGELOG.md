@@ -10,6 +10,11 @@ change.
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-11-28
+
+A security release: 2.3.0 built with the Go its `go.mod` named carries
+that Go's TLS and HTTP holes. No change in what slinstaller does.
+
 ### Security
 
 - **Built and tested with a Go that has the TLS and HTTP fixes.** `go.mod`
