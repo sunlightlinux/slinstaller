@@ -14,6 +14,28 @@ import (
 // an install must not do to a disk it was not confirmed for.
 func applyAdversarial(t *testing.T, confirmed string) {
 	swappedUnderPrompt(t, confirmed)
+	reuseNamesTheDisk(t)
+}
+
+// reuseNamesTheDisk: a reuse install's confirmation says which disk it is
+// (size and model), as a wipe's does. It named only the path: with a USB
+// disk plugged in since the dry run, the names move (sda is the stick, the
+// laptop's disk sdb) and "FORMAT /dev/sda2" was confirmed by retyping a
+// path that no longer named the disk the config was written for.
+func reuseNamesTheDisk(t *testing.T) {
+	reformat := &config.Config{ReusePartitions: true, TargetMedia: []*config.Media{{Name: testName, Type: "disk", Children: []*config.Media{
+		{Name: testName + "p1", Type: "part", FsType: "vfat", Mountpoint: "/boot/efi", Preserve: true},
+		{Name: testName + "p2", Type: "part", FsType: "ext4", Mountpoint: "/"},
+	}}}}
+	e := newApplyEnv(t)
+	setListing(t, e.bin, `{"name":"slitest0","path":"`+testDisk+`","size":128000000000,"type":"disk","model":"USB Stick","children":[
+		{"name":"slitest0p1","path":"`+testDisk+`p1","size":536870912,"type":"part","fstype":"vfat"},
+		{"name":"slitest0p2","path":"`+testDisk+`p2","size":107374182400,"type":"part","fstype":"ntfs"}]}`)
+	errOut, err := e.run("no\n", reformat)
+	e.refused("reuse not confirmed", err, "aborted")
+	if !strings.Contains(errOut, testDisk+" (119.2G, USB Stick)") {
+		t.Errorf("the reuse confirmation does not say which disk it is:\n%s", errOut)
+	}
 }
 
 // swapAfter makes every listing after the first n show after instead.

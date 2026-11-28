@@ -1819,6 +1819,11 @@ func confirm(in *bufio.Reader, plan *storage.Plan) bool {
 		// Reuse install: the partition table is untouched; only the listed
 		// partitions are formatted (and the preserved ones mounted as-is).
 		fmt.Fprintln(os.Stderr, "\nReusing the existing partitions (the disk is NOT repartitioned).")
+		// Which disk, as a wipe says it: a path alone was retyped for a
+		// disk the names had moved to since the config was written.
+		for _, d := range disks {
+			fmt.Fprintf(os.Stderr, "  on %s\n", describeDisk(d))
+		}
 		devs, _ := blockdev.List() // best effort: only to say what is there now
 		for _, p := range plan.Parts {
 			if p.LV || p.Raid {
