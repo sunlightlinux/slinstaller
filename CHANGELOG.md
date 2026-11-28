@@ -192,6 +192,17 @@ what an unchanged config installs, or refuse one that installed:
   runs before any is changed; a staged `--through` run that partitions
   checks the partition stage's tools too. Each of these used to fail
   after the other system was shrunk.
+- **What the confirmation named is what is written.** A disk swapped
+  under the confirmation prompt (pulled, and another taking its name) was
+  wiped - or, for a Safe install, shrunk and cut; the partition stage now
+  refuses a target whose serial, WWN, model or size, or whose kept
+  partitions, differ from the listing the checks ran on. A reuse
+  install's confirmation names each disk with its size and model.
+- **Groups the live system cannot see are not broken.** Without `pvs` (no
+  lvm2 on the live system), a physical volume among what is destroyed was
+  taken for a lone one; it is refused unless `--force-destructive`. A
+  disk carrying firmware RAID metadata (Intel RST, DDF) beside another
+  disk with the same kind is taken as shared, as an assembled array is.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 - A target with no `sshd` service (no `openssh` in its packages) is
