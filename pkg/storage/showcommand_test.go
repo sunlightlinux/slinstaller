@@ -2,6 +2,8 @@ package storage
 
 import (
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -232,4 +234,27 @@ func TestAddSecretLengthAndOrder(t *testing.T) {
 			t.Errorf("registered %q, want each once", secrets)
 		}
 	})
+}
+
+// VerboseRunner, the runner of an install with no log file and of a
+// disk-image write, masks a registered secret in what a command prints
+// as the others do: a hook's echoed token reached the terminal whole.
+func TestVerboseRunnerMasksOutput(t *testing.T) {
+	AddSecret("v3rb0se-token")
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stderr
+	os.Stderr = w
+	rerr := VerboseRunner([]string{"echo", "v3rb0se-token"})
+	os.Stderr = saved
+	w.Close()
+	out, _ := io.ReadAll(r)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if strings.Contains(string(out), "v3rb0se") {
+		t.Errorf("secret shown: %q", out)
+	}
 }

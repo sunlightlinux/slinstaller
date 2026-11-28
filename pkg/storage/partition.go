@@ -330,11 +330,9 @@ func VerboseRunner(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("empty command")
 	}
-	fmt.Fprintf(os.Stderr, "    + %s\n", ShowCommand(args))
-	c := exec.Command(args[0], args[1:]...)
-	c.Stdout = os.Stderr
-	c.Stderr = os.Stderr
-	return c.Run()
+	// StreamRunner's, to stderr: a registered secret a command prints (a
+	// hook's token) is masked here too.
+	return StreamRunner(os.Stderr)(args)
 }
 
 // StreamRunner is VerboseRunner writing to w instead of stderr: each command
