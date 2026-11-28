@@ -39,25 +39,43 @@ func (pl *Plan) ResizeCommands() [][]string {
 		if p.Filesystem == "btrfs" {
 			// btrfs is shrunk while mounted; Resize mounts it for the
 			// purpose. Shown here by the device it is done on.
-			cmds = append(cmds, []string{"btrfs", "filesystem", "resize", fmt.Sprintf("%dM", p.ResizeMiB), "[" + p.Device + "]"})
+			cmds = append(cmds, detached([]string{"btrfs", "filesystem", "resize", fmt.Sprintf("%dM", p.ResizeMiB), "[" + p.Device + "]"}))
 		} else if p.Filesystem == "ntfs" {
 			// A trial first: it changes nothing and fails if the data does
 			// not fit. The real run asks for confirmation on its input.
 			bytes := fmt.Sprintf("%d", p.ResizeMiB<<20)
 			cmds = append(cmds,
 				[]string{"ntfsresize", "--no-action", "--no-progress-bar", "-s", bytes, p.Device},
-				[]string{"sh", "-c", fmt.Sprintf("echo y | ntfsresize --no-progress-bar -f -s %s %s", bytes, p.Device)})
+				detached([]string{"sh", "-c", fmt.Sprintf("echo y | ntfsresize --no-progress-bar -f -s %s %s", bytes, p.Device)}))
 		} else {
 			cmds = append(cmds,
 				[]string{"e2fsck", "-f", "-p", p.Device},
-				[]string{"resize2fs", p.Device, fmt.Sprintf("%dM", p.ResizeMiB)})
+				detached([]string{"resize2fs", p.Device, fmt.Sprintf("%dM", p.ResizeMiB)}))
 		}
 		cmds = append(cmds,
-			[]string{"sh", "-c", fmt.Sprintf("echo ',%dMiB' | sfdisk --no-reread -N %d %s", p.ResizeMiB, p.Number, disk)},
+			detached([]string{"sh", "-c", fmt.Sprintf("echo ',%dMiB' | sfdisk --no-reread -N %d %s", p.ResizeMiB, p.Number, disk)}),
 			[]string{"partprobe", disk},
 		)
 	}
 	return cmds
+}
+
+// detached runs a command that moves a kept filesystem's data or rewrites
+// its partition in a session of its own (setsid -w waits and passes its
+// exit status on): a Ctrl+C on the terminal goes to the terminal's
+// foreground process group, and killed resize2fs or ntfsresize part-way
+// through moving the other system's data - a filesystem left corrupt,
+// where the installer promises to wind down after the step.
+func detached(c []string) []string {
+	return append([]string{"setsid", "-w"}, c...)
+}
+
+// command is the program a ResizeCommands line runs, under setsid or not.
+func command(c []string) []string {
+	if len(c) > 2 && c[0] == "setsid" {
+		return c[2:]
+	}
+	return c
 }
 
 // WithMountedFS is the filesystem type Resize mounts with; tests substitute
@@ -75,15 +93,16 @@ func (pl *Plan) Resize(run Runner) error {
 			}
 			continue
 		}
-		if c[0] != "btrfs" {
+		b := command(c)
+		if b[0] != "btrfs" {
 			if err := RunCommands([][]string{c}, run); err != nil {
 				return err
 			}
 			continue
 		}
-		device := c[4][1 : len(c[4])-1]
+		device := b[4][1 : len(b[4])-1]
 		err := WithMounted(device, WithMountedFS("btrfs"), func(dir string) error {
-			return RunCommands([][]string{{"btrfs", "filesystem", "resize", c[3], dir}}, run)
+			return RunCommands([][]string{detached([]string{"btrfs", "filesystem", "resize", b[3], dir})}, run)
 		})
 		if err != nil {
 			return err

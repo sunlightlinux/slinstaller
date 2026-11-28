@@ -107,6 +107,10 @@ func onlyTools(t *testing.T, dir string, names ...string) string {
 			body += "[ -f \"" + bin + "/pvs.out\" ] && exec " + cat + " \"" + bin + "/pvs.out\"\nexit 0\n"
 		case "cryptsetup":
 			body += cat + " > /dev/null\n"
+		case "setsid":
+			// Runs the command it is given, as setsid -w does (in a
+			// session of its own), so that command's stand-in is seen.
+			body += "[ \"$1\" = -w ] && shift\nexec \"$@\"\n"
 		}
 		if err := os.WriteFile(filepath.Join(bin, n), []byte(body), 0o755); err != nil {
 			t.Fatal(err)

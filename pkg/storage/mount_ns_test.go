@@ -153,7 +153,7 @@ func mountChild(t *testing.T) {
 	rp := &Plan{Disk: "/dev/sdq", Parts: []Partition{{Number: 2, Device: "tmpfs", Filesystem: "btrfs", ResizeMiB: 512}}}
 	var resized []string
 	rerr := rp.Resize(func(args []string) error {
-		if args[0] == "btrfs" {
+		if args = command(args); args[0] == "btrfs" {
 			resized = append(resized, strings.Join(args[:4], " "))
 			if dev(args[4]) == dev(filepath.Dir(args[4])) {
 				t.Error("btrfs resize was not given a mounted filesystem")

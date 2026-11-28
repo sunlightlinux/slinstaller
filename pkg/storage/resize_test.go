@@ -25,8 +25,8 @@ func TestResizeShrinksTheFilesystemFirst(t *testing.T) {
 	}
 	want := []string{
 		"e2fsck -f -p /dev/sda2",
-		"resize2fs /dev/sda2 40960M",
-		"sh -c echo ',40960MiB' | sfdisk --no-reread -N 2 /dev/sda",
+		"setsid -w resize2fs /dev/sda2 40960M",
+		"setsid -w sh -c echo ',40960MiB' | sfdisk --no-reread -N 2 /dev/sda",
 		"partprobe /dev/sda",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -42,8 +42,8 @@ func TestResizeShrinksTheFilesystemFirst(t *testing.T) {
 	}
 	wantNTFS := []string{
 		"ntfsresize --no-action --no-progress-bar -s 42949672960 /dev/sda2",
-		"sh -c echo y | ntfsresize --no-progress-bar -f -s 42949672960 /dev/sda2",
-		"sh -c echo ',40960MiB' | sfdisk --no-reread -N 2 /dev/sda",
+		"setsid -w sh -c echo y | ntfsresize --no-progress-bar -f -s 42949672960 /dev/sda2",
+		"setsid -w sh -c echo ',40960MiB' | sfdisk --no-reread -N 2 /dev/sda",
 		"partprobe /dev/sda",
 	}
 	if strings.Join(ntfs, "\n") != strings.Join(wantNTFS, "\n") {
@@ -164,28 +164,28 @@ func TestResizeBtrfs(t *testing.T) {
 	for _, c := range pl.ResizeCommands() {
 		shown = append(shown, strings.Join(c, " "))
 	}
-	want := "btrfs filesystem resize 40960M [/dev/sda2]|sh -c echo ',40960MiB' | sfdisk --no-reread -N 2 /dev/sda|partprobe /dev/sda"
+	want := "setsid -w btrfs filesystem resize 40960M [/dev/sda2]|setsid -w sh -c echo ',40960MiB' | sfdisk --no-reread -N 2 /dev/sda|partprobe /dev/sda"
 	if strings.Join(shown, "|") != want {
 		t.Errorf("btrfs resize, as shown:\n%s", strings.Join(shown, "\n"))
 	}
 	// A filesystem that cannot be mounted is not shrunk, and so its
 	// partition is not cut down either.
 	var ran []string
-	err := pl.Resize(func(args []string) error { ran = append(ran, args[0]); return nil })
+	err := pl.Resize(func(args []string) error { ran = append(ran, command(args)[0]); return nil })
 	if err == nil || len(ran) != 0 {
 		t.Errorf("Resize on an unmountable btrfs: %v, ran %v", err, ran)
 	}
 	// The others are run as shown, stopping at the first failure.
 	pl.Parts[1].Filesystem = "ext4"
 	ran = nil
-	if err := pl.Resize(func(args []string) error { ran = append(ran, args[0]); return nil }); err != nil || strings.Join(ran, ",") != "e2fsck,resize2fs,sh,partprobe" {
+	if err := pl.Resize(func(args []string) error { ran = append(ran, command(args)[0]); return nil }); err != nil || strings.Join(ran, ",") != "e2fsck,resize2fs,sh,partprobe" {
 		t.Errorf("Resize ext4: %v, ran %v", err, ran)
 	}
 	ran = nil
 	boom := errors.New("resize2fs: no space")
 	err = pl.Resize(func(args []string) error {
-		ran = append(ran, args[0])
-		if args[0] == "resize2fs" {
+		ran = append(ran, command(args)[0])
+		if command(args)[0] == "resize2fs" {
 			return boom
 		}
 		return nil
@@ -204,7 +204,7 @@ func TestResizeE2fsckCorrected(t *testing.T) {
 	for code, wantOK := range map[int]bool{1: true, 2: true, 4: false, 8: false} {
 		var ran []string
 		err := pl.Resize(func(args []string) error {
-			ran = append(ran, args[0])
+			ran = append(ran, command(args)[0])
 			if args[0] == "e2fsck" {
 				return exec.Command("sh", "-c", fmt.Sprintf("exit %d", code)).Run()
 			}

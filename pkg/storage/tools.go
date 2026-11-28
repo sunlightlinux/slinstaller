@@ -41,9 +41,12 @@ func (pl *Plan) RequiredTools() []string {
 		}
 	}
 	for _, c := range extra {
-		if !seen[c[0]] {
-			seen[c[0]] = true
-			tools = append(tools, c[0])
+		// setsid and the program it runs (a resize's): both must be there.
+		for _, name := range []string{c[0], command(c)[0]} {
+			if !seen[name] {
+				seen[name] = true
+				tools = append(tools, name)
+			}
 		}
 	}
 	return tools
