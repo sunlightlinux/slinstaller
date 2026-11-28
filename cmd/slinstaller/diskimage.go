@@ -122,6 +122,26 @@ func installDiskImage(cfg *config.Config, cfgPath string, apply, forceDestructiv
 	cmds := diskImageCommands(devs, image, disk, cfg.AllowInsecureHTTP)
 	fmt.Print(storage.FormatCommands(cmds))
 	if !apply {
+		// What --apply refuses before the confirmation, said here, as the
+		// install's dry run says it: not an invitation to --apply it.
+		// (Still exit 0, as there: a fact of this machine, not the config.)
+		if listErr == nil {
+			refuses := false
+			if d := blockdev.FindByPath(devs, disk); d != nil {
+				if why := d.InUse(); why != "" {
+					fmt.Fprintf(os.Stderr, "\n(it will refuse: %s)\n", why)
+					refuses = true
+				}
+			}
+			if shared := append(blockdev.Shared(devs, disk, []string{disk}, blockdev.VolumeGroups()), blockdev.SharedMembers(devs, []string{disk})...); len(shared) > 0 && !forceDestructive {
+				fmt.Fprintf(os.Stderr, "\n(it will refuse, unless --force-destructive: writing over %s would break other disks: %s)\n", disk, strings.Join(shared, "; "))
+				refuses = true
+			}
+			if refuses {
+				fmt.Fprintln(os.Stderr, "\nDry run. As it stands, --apply would refuse this - see \"it will refuse\" above.")
+				return nil
+			}
+		}
 		fmt.Fprintf(os.Stderr, "\nDry run. Re-run with --apply to write %s over %s - this destroys its contents.\n", image, disk)
 		return nil
 	}

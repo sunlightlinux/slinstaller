@@ -114,3 +114,35 @@ func TestProxyEnvIsPerPass(t *testing.T) {
 		}
 	}
 }
+
+// The disk-image dry run invited "Re-run with --apply" over a disk --apply
+// then refuses - in use, or sharing a volume group with another disk -
+// where the install's dry run says "it will refuse".
+func TestDiskImageDryRunSaysItWillRefuse(t *testing.T) {
+	dir := t.TempDir()
+	bin := onlyTools(t, dir)
+	image := filepath.Join(dir, "disk.raw")
+	os.WriteFile(image, []byte("image"), 0o644)
+	path := writeConfig(t, dir, imageConfig(image))
+
+	setListing(t, bin, `{"name":"`+testName+`","path":"`+testDisk+`","size":64000000000,"type":"disk","children":[
+		{"name":"`+testName+`p1","path":"`+testDisk+`p1","size":1000,"type":"part","mountpoint":"/mnt/data"}]}`)
+	_, errOut, err := runWith(t, "", path)
+	if err != nil || !strings.Contains(errOut, "it will refuse: "+testDisk+"p1 is mounted at /mnt/data") || strings.Contains(errOut, "Re-run with --apply") {
+		t.Errorf("disk in use: %v\n%s", err, errOut)
+	}
+
+	setListing(t, bin, `{"name":"`+testName+`","path":"`+testDisk+`","size":64000000000,"type":"disk","children":[
+		{"name":"`+testName+`p1","path":"`+testDisk+`p1","size":1000,"type":"part","fstype":"LVM2_member"}]},
+		{"name":"sdz","path":"/dev/sdz","size":64000000000,"type":"disk","children":[
+		{"name":"sdz1","path":"/dev/sdz1","size":1000,"type":"part","fstype":"LVM2_member"}]}`)
+	os.WriteFile(filepath.Join(bin, "pvs.out"), []byte("  "+testDisk+"p1:data\n  /dev/sdz1:data\n"), 0o644)
+	_, errOut, err = runWith(t, "", path)
+	if err != nil || !strings.Contains(errOut, "it will refuse, unless --force-destructive") || strings.Contains(errOut, "Re-run with --apply") {
+		t.Errorf("disk sharing a group: %v\n%s", err, errOut)
+	}
+	_, errOut, _ = runWith(t, "", "--force-destructive", path)
+	if !strings.Contains(errOut, "Re-run with --apply") {
+		t.Errorf("--force-destructive:\n%s", errOut)
+	}
+}
