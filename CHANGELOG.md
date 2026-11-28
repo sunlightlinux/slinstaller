@@ -116,6 +116,16 @@ change.
   one is chosen; long lists (disks, accounts, partitions, interfaces,
   the disk chooser) scroll with the cursor instead of pushing the title
   and the install modes off a 24-line screen.
+- **Security (an image or a reused root that links out of itself):** the
+  repo keys, the RNG seed, the wheel sudoers rule, slinit services, SSH
+  keys, the LUKS keyfile and the dracut and xbps drop-ins are written
+  where the installed system will find them - absolute links resolved
+  inside the target - not through a link onto the live system; the
+  resume mark is read without following a link and only up to 64 KiB;
+  the install-time resolv.conf is not written through a linked `/etc`.
+  The install runs under umask 022 (an inherited 0 made `/var/db/xbps`
+  world-writable on the installed system), and command output on the
+  terminal is masked as in the log.
 - `--unmount` and `--in-target` are refused with another one-shot mode
   (`--in-target CMD --unmount` unmounted the target and never ran CMD).
 - A target with no `sshd` service (no `openssh` in its packages) is
