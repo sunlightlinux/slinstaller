@@ -139,6 +139,7 @@ func FuzzParseSize(f *testing.F) {
 func FuzzParsePartedFree(f *testing.F) {
 	f.Add("BYT;\n/dev/sda:122070MiB:scsi:512:512:gpt:Test:;\n1:1.00MiB:513MiB:512MiB:fat32:EFI:boot, esp;\n1:513MiB:122070MiB:121557MiB:free;\n")
 	f.Add("1:NaN:Inf:-Inf:free;\n2:1e300MiB:x:y:ext4::;\n")
+	f.Add("BYT;\n/dev/sda:1073741824B:scsi:512:512:gpt::;\n1:32256B:104889855B:104857600B:ntfs::;\n1:104889856B:1073741823B:968851968B:free;\n1:9B:3B:0B:free;\n")
 	f.Fuzz(func(t *testing.T, out string) {
 		parts, free := parsePartedFree(out)
 		rows := 0
