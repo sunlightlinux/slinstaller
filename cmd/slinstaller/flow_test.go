@@ -87,12 +87,16 @@ func interactiveRefusedFirst(t *testing.T) {
 		t.Errorf("interactive --through on a BIOS boot was refused:\n%s", errOut)
 	}
 
+	// On UEFI firmware, stood in for: on a BIOS host the firmware's refusal
+	// came first, and this case failed there.
+	isUEFI = func() bool { return true }
 	held, lerr := lockInstall()
 	if lerr != nil {
 		t.Fatalf("taking the lock: %v", lerr)
 	}
 	_, errOut, err = runWith(t, "1\n", "--text")
 	held.Close()
+	isUEFI = saved
 	wantRunErr(t, "interactive, another install running", err, "another slinstaller install is running")
 	if asked(errOut) {
 		t.Errorf("interactive, another install running: the questions were asked before the refusal:\n%s", errOut)

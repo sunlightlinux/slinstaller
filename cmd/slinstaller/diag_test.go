@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/sunlightlinux/slinstaller/pkg/config"
-	"github.com/sunlightlinux/slinstaller/pkg/system"
 )
 
 // readArchive returns the diagnostics archive's files by name.
@@ -156,11 +155,15 @@ func TestSystemCheckNeedsNoRoot(t *testing.T) {
 	os.MkdirAll(repo, 0o755)
 	os.WriteFile(filepath.Join(repo, "x86_64-repodata"), nil, 0o644)
 	args := []string{"--system-check", "--offline", "--local-repo", repo, writeConfig(t, dir, plainConfig())}
+	// The firmware is stood in for: on a machine not booted under UEFI the
+	// test returned here, having checked only that refusal.
+	savedUEFI := isUEFI
+	defer func() { isUEFI = savedUEFI }()
+	isUEFI = func() bool { return false }
+	_, _, err = runWith(t, "", args...)
+	wantRunErr(t, "not UEFI", err, "not booted in UEFI mode")
+	isUEFI = func() bool { return true }
 	_, errOut, err := runWith(t, "", args...)
-	if !system.IsUEFI() {
-		wantRunErr(t, "not UEFI", err, "not booted in UEFI mode")
-		return
-	}
 	if err != nil || !strings.Contains(errOut, "System check passed") {
 		t.Errorf("--system-check as a user: %v\n%s", err, errOut)
 	}
