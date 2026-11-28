@@ -267,3 +267,42 @@ func TestRequiredToolsIncludeTheResizeSfdisk(t *testing.T) {
 		t.Errorf("sfdisk asked for with nothing to resize: %s", tools)
 	}
 }
+
+// With two partitions to shrink, every ntfsresize trial runs before any
+// partition is changed: a hibernated Windows listed second was refused by
+// its trial after the first partition had been shrunk.
+func TestResizeTrialsComeFirst(t *testing.T) {
+	pl := &Plan{Disk: "/dev/sda", Parts: []Partition{
+		{Device: "/dev/sda2", Number: 2, Filesystem: "ext4", ResizeMiB: 2048},
+		{Device: "/dev/sda3", Number: 3, Filesystem: "ntfs", ResizeMiB: 4096},
+		{Device: "/dev/sda4", Number: 4, Filesystem: "ntfs", ResizeMiB: 8192},
+	}}
+	cmds := pl.ResizeCommands()
+	lastTrial, firstChange := -1, len(cmds)
+	for i, c := range cmds {
+		joined := strings.Join(c, " ")
+		switch {
+		case strings.Contains(joined, "--no-action"):
+			lastTrial = i
+		case strings.HasPrefix(joined, "setsid") && firstChange == len(cmds):
+			firstChange = i
+		}
+	}
+	if lastTrial < 0 || lastTrial > firstChange {
+		var all []string
+		for _, c := range cmds {
+			all = append(all, strings.Join(c, " "))
+		}
+		t.Errorf("a trial after a change:\n%s", strings.Join(all, "\n"))
+	}
+	// Each partition's own trial is still there, once.
+	n := 0
+	for _, c := range cmds {
+		if strings.Contains(strings.Join(c, " "), "--no-action") {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("%d trials, want 2", n)
+	}
+}

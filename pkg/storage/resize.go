@@ -28,6 +28,14 @@ func Resizable(fs string) bool {
 // stdin — hence the shell.
 func (pl *Plan) ResizeCommands() [][]string {
 	var cmds [][]string
+	// Every ntfs trial first, before any partition is changed: run in each
+	// partition's turn, a hibernated Windows listed second was refused
+	// after the first partition had been shrunk.
+	for _, p := range pl.Parts {
+		if p.ResizeMiB != 0 && p.Filesystem == "ntfs" {
+			cmds = append(cmds, []string{"ntfsresize", "--no-action", "--no-progress-bar", "-s", fmt.Sprintf("%d", p.ResizeMiB<<20), p.Device})
+		}
+	}
 	for _, p := range pl.Parts {
 		if p.ResizeMiB == 0 {
 			continue
@@ -41,11 +49,10 @@ func (pl *Plan) ResizeCommands() [][]string {
 			// purpose. Shown here by the device it is done on.
 			cmds = append(cmds, detached([]string{"btrfs", "filesystem", "resize", fmt.Sprintf("%dM", p.ResizeMiB), "[" + p.Device + "]"}))
 		} else if p.Filesystem == "ntfs" {
-			// A trial first: it changes nothing and fails if the data does
-			// not fit. The real run asks for confirmation on its input.
+			// Its trial ran above. The real run asks for confirmation on
+			// its input.
 			bytes := fmt.Sprintf("%d", p.ResizeMiB<<20)
 			cmds = append(cmds,
-				[]string{"ntfsresize", "--no-action", "--no-progress-bar", "-s", bytes, p.Device},
 				detached([]string{"sh", "-c", fmt.Sprintf("echo y | ntfsresize --no-progress-bar -f -s %s %s", bytes, p.Device)}))
 		} else {
 			cmds = append(cmds,
