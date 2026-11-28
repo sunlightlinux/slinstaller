@@ -146,7 +146,8 @@ change.
   `setsid -w`), which left the kept system's filesystem corrupt; the free
   region is read in bytes, so a partition starting at sector 63 does not
   make the new one overlap it; a non-GPT disk is refused before anything
-  when partitions are to be created on it; `sfdisk` and `setsid` are
+  when partitions are to be created on it (the wizard's Safe Installation
+  says so when it is chosen, not after every question); `sfdisk` and `setsid` are
   among the tools checked first; a created partition given a size is
   held to the size minimums (one with no size, placed in the freed
   space, is not yet); with several partitions to shrink, every ntfs trial
