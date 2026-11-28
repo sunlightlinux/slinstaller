@@ -1,6 +1,6 @@
-# Formatting, vet, build, the unit suite (with -race), a dry run of every
-# shipped config, and the storage stages for real on loop devices — on every
-# push and pull request.
+# Formatting, vet, build, the unit suite (with -race), fuzzing, a scan for
+# known vulnerabilities, a dry run of every shipped config, and the storage
+# stages for real on loop devices — on every push and pull request.
 #
 # Why this exists: until this workflow, nothing checked a change but the
 # maintainer running gofmt, go vet and go test by hand before committing. A
@@ -157,6 +157,32 @@ jobs:
           name: fuzz-failures
           path: '**/testdata/fuzz/**'
           if-no-files-found: ignore
+
+  # Known vulnerabilities in the Go that builds slinstaller and in its
+  # modules. The binary carries the standard library of whatever Go
+  # compiled it, and slinstaller fetches configs, images and the mirror over
+  # TLS: until go.mod named a toolchain, CI built with Go 1.25.0, whose
+  # crypto/x509, crypto/tls and net/http had 35 holes govulncheck found
+  # reachable from this code. Only reachable findings fail the job.
+  #
+  # This job can go red with no change to the code: the vulnerability
+  # database grows. That is the point — the fix is a newer toolchain line
+  # or module version, then a patch release.
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: govulncheck
+        # Pinned, like the actions: an unpinned scanner is a moving part
+        # that can break the job for its own reasons.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.10.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
 
   # Every config the repository ships has to keep planning. A dry run reads
   # the config, validates it and prints the commands; it touches nothing and

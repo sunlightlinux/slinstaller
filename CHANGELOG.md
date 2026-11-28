@@ -10,6 +10,12 @@ change.
 
 ## [Unreleased]
 
+### Added
+
+- A `govulncheck` CI job: a known vulnerability reachable from the code,
+  in the Go `go.mod` names or in a module, fails it. It is what would
+  have caught 2.3.0 being built with Go 1.25.0.
+
 ## [2.3.1] - 2026-11-28
 
 A security release: 2.3.0 built with the Go its `go.mod` named carries

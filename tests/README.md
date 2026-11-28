@@ -63,5 +63,9 @@ not here:
   mount; CI lifts the runner's restriction and fails if they skipped
   anyway, or if fewer than four of them ran.
 - `fuzz` — every `Fuzz*` target, found with `go test -list`, for 20 s each.
+- `govulncheck` — known vulnerabilities reachable from the code, in the
+  Go `go.mod` names (`toolchain`) and in the modules. It can fail with no
+  code change when the vulnerability database grows; the fix is a newer
+  toolchain or module, then a patch release.
 - `dry-run` — every `demo/*.yaml` and `demo/vm/config*.yaml`, and a
   `--template` config, must still plan.
