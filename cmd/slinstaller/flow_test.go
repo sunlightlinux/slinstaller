@@ -48,6 +48,18 @@ targetMedia:
 	if err == nil || strings.Contains(errOut, "System check passed") {
 		t.Errorf("--system-check passed what it said --apply refuses: %v\n%s", err, errOut)
 	}
+	// With --apply beside it too: a system check still changes nothing,
+	// and its verdict is the same.
+	_, errOut, err = runWith(t, "", "--system-check", "--apply", "--offline", "--local-repo", repo, path)
+	if err == nil || strings.Contains(errOut, "System check passed") {
+		t.Errorf("--system-check --apply passed what --apply refuses: %v\n%s", err, errOut)
+	}
+	// But not for a resume, which partitions nothing: its new partition is
+	// on the disk, numbered as the config names it.
+	_, errOut, _ = runWith(t, "", "--system-check", "--apply", "--resume", "--offline", "--local-repo", repo, path)
+	if strings.Contains(errOut, "is to be created") {
+		t.Errorf("--system-check of a resume refused its partitions as to be created:\n%s", errOut)
+	}
 }
 
 // interactiveRefusedFirst runs in the user-namespace child (as root): what

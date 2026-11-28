@@ -591,7 +591,10 @@ restart:
 		// table when it runs; the dry run says now what it would refuse,
 		// rather than show a mkfs of an existing partition and leave it at
 		// that.
-		if !plan.Wipe && !apply {
+		// (A system check with --apply beside it says it too: it still
+		// installs nothing, so no partition stage refuses it later. Not a
+		// resume's: it partitions nothing, and its new partitions exist.)
+		if !plan.Wipe && !resume && (!apply || systemCheck) {
 			if err := plan.CheckCreateNumbers(); err != nil && strings.Contains(err.Error(), "is to be created") {
 				fmt.Fprintf(os.Stderr, "\n(it will refuse: %v)\n", err)
 				refuses = true
