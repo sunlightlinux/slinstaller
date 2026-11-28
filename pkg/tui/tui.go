@@ -30,15 +30,37 @@ var rootFilesystems = []string{"ext4", "btrfs", "xfs", "f2fs"}
 // config to install, plus the LUKS passphrase when the root is encrypted
 // (empty otherwise). Prompts go to w; answers are read from in.
 func Run(in *bufio.Reader, w io.Writer) (*config.Config, string, error) {
+	return RunText(in, w, false)
+}
+
+// RunText is Run with --force-destructive: when force is false, a disk
+// whose wipe would break an array, pool or volume group that also uses
+// another disk is refused when it is picked, as the installer refuses it
+// after the questions.
+func RunText(in *bufio.Reader, w io.Writer, force bool) (*config.Config, string, error) {
 	disks, err := listDisks(w)
 	if err != nil {
 		return nil, "", err
 	}
-	n, err := promptIndex(in, w, "Install to which disk", len(disks))
-	if err != nil {
-		return nil, "", err
+	var disk blockdev.Device
+	for {
+		n, err := promptIndex(in, w, "Install to which disk", len(disks))
+		if err != nil {
+			return nil, "", err
+		}
+		disk = disks[n-1]
+		if force {
+			break
+		}
+		devs, vgs := machineVolumes()
+		shared := blockdev.Shared(devs, disk.Path, []string{disk.Path}, vgs)
+		shared = append(shared, blockdev.SharedMembers(devs, []string{disk.Path})...)
+		if len(shared) == 0 {
+			break
+		}
+		fmt.Fprintf(w, "  wiping %s would break other disks: %s - choose another disk, or start the installer with --force-destructive\n",
+			disk.Path, strings.Join(shared, "; "))
 	}
-	disk := disks[n-1]
 	fmt.Fprintf(w, "\nSelected %s (%s %s) - it will be ERASED.\n\n", disk.Path, gib(disk.Size), disk.Model)
 
 	fs := promptChoice(in, w, "Root filesystem", rootFilesystems, "ext4")

@@ -432,7 +432,7 @@ restart:
 			// --text, a pipe/file, a dumb/unset TERM, or a terminal that
 			// cannot report its size (typically a serial console): drive the
 			// plain prompt flow, which needs none of that.
-			cfg, interactivePass, err = tui.Run(stdin, os.Stderr)
+			cfg, interactivePass, err = tui.RunText(stdin, os.Stderr, forceDestructive)
 		}
 		apply = true
 	default:
